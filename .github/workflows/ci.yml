@@ -19,7 +19,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Синхронизировать зависимости
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
 
       - name: Линт
         run: uv run ruff check .

@@ -18,7 +18,7 @@ def test_data_root_падает_на_умолчание_без_переменн�
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("CARLENS_DATA_ROOT", raising=False)
-    assert paths.data_root() == paths.DEFAULT_DATA_ROOT
+    assert paths.data_root() == Path.home() / "carlens-data"
 
 
 def test_data_root_раскрывает_тильду(monkeypatch: pytest.MonkeyPatch) -> None:
