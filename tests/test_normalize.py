@@ -160,19 +160,28 @@ def test_хвостовой_год_отбрасывается(каталог: Ca
     assert итог.body_style == "sedan"
 
 
-def test_год_остаётся_если_он_единственный_токен(каталог: Catalog) -> None:
+def test_год_остаётся_если_он_единственный_токен() -> None:
     """«Peugeot 2008» — название модели, а не год выпуска.
 
     Правило снимает год только с хвоста и только если в ядре есть что-то
-    ещё. Иначе нормализатор съел бы половину модельного ряда Peugeot.
+    ещё. `model_core` всегда зовут без марки, поэтому ядро такой модели —
+    один токен, и он остаётся. Иначе нормализатор съел бы половину
+    модельного ряда Peugeot.
     """
     ядро, _ = model_core("2008")
     assert ядро == "2008"
 
 
+def test_четырёхзначный_номер_модели_за_год_не_принимается() -> None:
+    """«1500» и «850» — номера моделей: `_ГОД` знает только 19xx и 20xx."""
+    assert model_core("Silverado 1500 2012")[0] == "silverado 1500"
+    assert model_core("850")[0] == "850"
+
+
 def test_год_в_середине_не_трогается() -> None:
-    ядро, _ = model_core("Silverado 1500 2012")
-    assert ядро == "silverado 1500"
+    """Снимается только хвостовой год: в середине он часть строки, а не суффикс."""
+    ядро, _ = model_core("Ram 1500 2012 Laramie")
+    assert ядро == "ram 1500 2012 laramie"
 
 
 @pytest.mark.parametrize(
@@ -186,6 +195,8 @@ def test_год_в_середине_не_трогается() -> None:
         ("Dakota Club Cab 2012", "pickup"),
         ("Caravan Minivan 2012", "van"),
         ("Outback Wagon 2012", "wagon"),
+        ("Ranger Cab Plus 2011", "pickup"),
+        ("Hilux Double Cab 2.4", "pickup"),
     ],
 )
 def test_американские_кузова_распознаются(сырое: str, кузов: str) -> None:
@@ -198,6 +209,25 @@ def test_кузов_из_кабины_не_остаётся_в_ядре() -> Non
     ядро, кузов = model_core("Silverado 1500 Extended Cab 2012")
     assert ядро == "silverado 1500"
     assert кузов == "pickup"
+
+
+@pytest.mark.parametrize(
+    ("сырое", "ядро", "кузов"),
+    [
+        ("E-Series Wagon Van 2012", "e-series", "wagon"),
+        ("Ram Pickup 3500 Crew Cab 2010", "ram 3500", "pickup"),
+        ("C/V Cargo Van Minivan 2012", "c cargo", "van"),
+        ("Elantra Touring Hatchback 2012", "elantra", "wagon"),
+    ],
+)
+def test_второй_кузовной_токен_тоже_вычищается(сырое: str, ядро: str, кузов: str) -> None:
+    """Правило 4 §3.3: кузов — отдельное поле, а не часть имени класса.
+
+    Имена классов Stanford называют кузов дважды («E-Series Wagon Van»,
+    «C/V Cargo Van Minivan»), и оставленный второй токен завёл бы
+    отдельный `model_id` вида `ford__e_series_van`.
+    """
+    assert model_core(сырое) == (ядро, кузов)
 
 
 def test_model_core_публичен_и_повторяет_внутреннее_правило() -> None:
