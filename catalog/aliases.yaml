@@ -1,0 +1,9 @@
+# Карта «сырая строка → model_id» для случаев, где fuzzy не справляется.
+# Ключ — строка после lowercase и схлопывания пробелов, до всех остальных правил.
+# Наполняется по мере разбора unmapped.csv на M1 (§3.3).
+version: 1
+aliases:
+  c-klasse: mercedes_benz__c_class
+  e-klasse: mercedes_benz__e_class
+  3er: bmw__3_series
+  5er: bmw__5_series
