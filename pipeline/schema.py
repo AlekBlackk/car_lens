@@ -27,6 +27,7 @@ SOURCES = frozenset(
         "autoscout_de",
         "mobile_de",
         "street",
+        "stanford",
         "negatives",
     }
 )

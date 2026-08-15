@@ -77,6 +77,7 @@ def test_допустимые_источники() -> None:
         "autoscout_de",
         "mobile_de",
         "street",
+        "stanford",
         "negatives",
     } == SOURCES
 
@@ -191,3 +192,8 @@ def test_запись_невалидного_кадра_падает(tmp_path: P
         write_split(кадр(строка(source="avito")), путь)
     # Валидация идёт до mkdir и записи, поэтому обрубка файла остаться не может.
     assert not путь.exists()
+
+
+def test_источник_stanford_принимается() -> None:
+    """Скелет M-1 пишет свои строки с этим источником (Р-1)."""
+    validate_frame(кадр(строка(source="stanford")))
