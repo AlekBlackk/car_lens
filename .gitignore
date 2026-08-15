@@ -1,0 +1,53 @@
+# Данные и артефакты обучения — никогда в git
+data/
+runs/
+*.parquet
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.mlmodel
+*.mlmodelc
+*.bin
+!catalog/**/*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-export/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# Node / React Native
+node_modules/
+.expo/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Android
+app/android/.gradle/
+app/android/build/
+app/android/app/build/
+app/android/local.properties
+*.keystore
+!debug.keystore
+
+# iOS
+app/ios/Pods/
+app/ios/build/
+app/ios/*.xcworkspace/xcuserdata/
+
+# Редакторы и ОС
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Локальные каталоги: документация и служебные данные инструментов не идут в git
+.superpowers
+docs/
+.claude/
