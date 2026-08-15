@@ -19,6 +19,12 @@ from typing import SupportsInt, cast
 
 import pandas as pd
 
+from pipeline.hashing import close_pairs, hamming
+
+# `hamming` переехал в `pipeline.hashing`, но остаётся импортируемым отсюда:
+# он часть публичного интерфейса `split`, объявленного планом M-1a.
+__all__ = ["InvariantError", "SplitRatios", "check_invariants", "hamming", "split_by_listing"]
+
 DEFAULT_MIN_LISTINGS_PER_CLASS = 300
 DEFAULT_PHASH_HAMMING = 6
 
@@ -41,12 +47,6 @@ class SplitRatios:
         сумма = self.train + self.val + self.test
         if abs(сумма - 1.0) > 1e-9:
             raise ValueError(f"сумма долей должна быть 1.0, получено {сумма}")
-
-
-def hamming(a: int, b: int) -> int:
-    """Расстояние Хэмминга между младшими 64 битами двух целых."""
-    маска = (1 << 64) - 1
-    return int(((a ^ b) & маска).bit_count())
 
 
 def _корзина(listing_id: str, seed: int) -> float:
@@ -180,21 +180,26 @@ def _инвариант_4_согласованность_классов(splits: 
 
 
 def _инвариант_5_нет_близких_phash(splits: Mapping[str, pd.DataFrame], предел: int) -> None:
-    собранные: list[tuple[str, int]] = [
-        (имя, int(v)) for имя, d in sorted(splits.items()) for v in d["phash"]
-    ]
-    по_значению: dict[int, str] = {}
-    for имя, значение in собранные:
-        прежний = по_значению.get(значение)
-        if прежний is not None and прежний != имя:
-            raise InvariantError(f"одинаковый phash {значение} в сплитах {прежний} и {имя}")
-        по_значению.setdefault(значение, имя)
+    """Ни один pHash не встречается в двух сплитах с расстоянием ≤ предела.
 
-    значения = sorted(по_значению)
-    for i, a in enumerate(значения):
-        for b in значения[i + 1 :]:
-            if hamming(a, b) <= предел and по_значению[a] != по_значению[b]:
-                raise InvariantError(
-                    f"близкие phash {a} и {b} в разных сплитах "
-                    f"({по_значению[a]} и {по_значению[b]})"
-                )
+    Сравниваются только пары, попавшие в общую корзину `close_pairs`, —
+    полный перебор на шестнадцати тысячах фотографий стоит минуты.
+    """
+    имена: list[str] = []
+    значения: list[int] = []
+    for имя, d in sorted(splits.items()):
+        for v in d["phash"]:
+            имена.append(имя)
+            значения.append(int(v))
+
+    for первый, второй in close_pairs(значения, предел):
+        if имена[первый] == имена[второй]:
+            continue
+        a, b = значения[первый], значения[второй]
+        if a == b:
+            raise InvariantError(
+                f"одинаковый phash {a} в сплитах {имена[первый]} и {имена[второй]}"
+            )
+        raise InvariantError(
+            f"близкие phash {a} и {b} в разных сплитах ({имена[первый]} и {имена[второй]})"
+        )
