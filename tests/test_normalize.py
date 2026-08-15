@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.catalog import Catalog, load_catalog
-from pipeline.normalize import BODY_STYLES, normalize
+from pipeline.normalize import BODY_STYLES, model_core, normalize
 
 YAML = """
 version: 1
@@ -151,3 +151,59 @@ def test_кандидат_ограничен_моделями_своей_мар�
     """A4 не должен утечь в Volkswagen, даже если строка похожа."""
     итог = normalize("A4", "Volkswagen", каталог, {})
     assert итог.model_id is None
+
+
+def test_хвостовой_год_отбрасывается(каталог: Catalog) -> None:
+    """Имя класса Stanford — «Audi A5 Coupe 2012», год к классу отношения не имеет."""
+    итог = normalize("A4 Sedan 2012", "Audi", каталог, {})
+    assert итог.model_id == "audi__a4"
+    assert итог.body_style == "sedan"
+
+
+def test_год_остаётся_если_он_единственный_токен(каталог: Catalog) -> None:
+    """«Peugeot 2008» — название модели, а не год выпуска.
+
+    Правило снимает год только с хвоста и только если в ядре есть что-то
+    ещё. Иначе нормализатор съел бы половину модельного ряда Peugeot.
+    """
+    ядро, _ = model_core("2008")
+    assert ядро == "2008"
+
+
+def test_год_в_середине_не_трогается() -> None:
+    ядро, _ = model_core("Silverado 1500 2012")
+    assert ядро == "silverado 1500"
+
+
+@pytest.mark.parametrize(
+    ("сырое", "кузов"),
+    [
+        ("Silverado 1500 Extended Cab 2012", "pickup"),
+        ("Silverado 1500 Regular Cab 2012", "pickup"),
+        ("F-150 SuperCab 2012", "pickup"),
+        ("Ram 1500 Crew Cab 2012", "pickup"),
+        ("Frontier King Cab 2012", "pickup"),
+        ("Dakota Club Cab 2012", "pickup"),
+        ("Caravan Minivan 2012", "van"),
+        ("Outback Wagon 2012", "wagon"),
+    ],
+)
+def test_американские_кузова_распознаются(сырое: str, кузов: str) -> None:
+    _, найденный = model_core(сырое)
+    assert найденный == кузов
+
+
+def test_кузов_из_кабины_не_остаётся_в_ядре() -> None:
+    """Иначе «extended» уедет в fuzzy и утащит сопоставление в сторону."""
+    ядро, кузов = model_core("Silverado 1500 Extended Cab 2012")
+    assert ядро == "silverado 1500"
+    assert кузов == "pickup"
+
+
+def test_model_core_публичен_и_повторяет_внутреннее_правило() -> None:
+    """Генератор каталога скелета обязан использовать ровно эти правила.
+
+    Если он начнёт разбирать имена своей регуляркой, каталог и
+    нормализатор разойдутся, и часть классов перестанет находиться.
+    """
+    assert model_core("Golf Variant 1.6 TDI") == ("golf", "wagon")
