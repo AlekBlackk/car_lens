@@ -1,0 +1,194 @@
+# Канонический каталог марок и моделей.
+# model_id собирается как <слаг марки>__<слаг модели>, отдельным полем не хранится.
+# Полный набор моделей набирается на M0 по частотности в объявлениях (§3.3).
+version: 1
+brands:
+  Volkswagen:
+    models:
+      golf: {display: Volkswagen Golf}
+      passat: {display: Volkswagen Passat}
+      polo: {display: Volkswagen Polo}
+      tiguan: {display: Volkswagen Tiguan}
+      touran: {display: Volkswagen Touran}
+  Toyota:
+    models:
+      corolla: {display: Toyota Corolla}
+      yaris: {display: Toyota Yaris}
+      rav4: {display: Toyota RAV4}
+      avensis: {display: Toyota Avensis}
+      auris: {display: Toyota Auris}
+      aygo: {display: Toyota Aygo, platform_group: kei_trio}
+  Peugeot:
+    models:
+      "208": {display: Peugeot 208}
+      "308": {display: Peugeot 308}
+      "3008": {display: Peugeot 3008}
+      "108": {display: Peugeot 108, platform_group: kei_trio}
+  Citroen:
+    models:
+      c3: {display: Citroën C3}
+      c4: {display: Citroën C4}
+      berlingo: {display: Citroën Berlingo}
+      c1: {display: Citroën C1, platform_group: kei_trio}
+  Skoda:
+    models:
+      octavia: {display: Škoda Octavia}
+      fabia: {display: Škoda Fabia}
+      superb: {display: Škoda Superb}
+      kodiaq: {display: Škoda Kodiaq}
+  Audi:
+    models:
+      a3: {display: Audi A3}
+      a4: {display: Audi A4}
+      a6: {display: Audi A6}
+      q5: {display: Audi Q5}
+  BMW:
+    models:
+      "3_series": {display: BMW 3 Series}
+      "5_series": {display: BMW 5 Series}
+      x3: {display: BMW X3}
+      x5: {display: BMW X5}
+  Mercedes-Benz:
+    models:
+      c_class: {display: Mercedes-Benz C-Class}
+      e_class: {display: Mercedes-Benz E-Class}
+      a_class: {display: Mercedes-Benz A-Class}
+      glc: {display: Mercedes-Benz GLC}
+  Ford:
+    models:
+      focus: {display: Ford Focus}
+      fiesta: {display: Ford Fiesta}
+      mondeo: {display: Ford Mondeo}
+      kuga: {display: Ford Kuga}
+  Opel:
+    models:
+      astra: {display: Opel Astra}
+      corsa: {display: Opel Corsa}
+      insignia: {display: Opel Insignia}
+  Renault:
+    models:
+      clio: {display: Renault Clio}
+      megane: {display: Renault Mégane}
+      captur: {display: Renault Captur}
+  Nissan:
+    models:
+      qashqai: {display: Nissan Qashqai}
+      juke: {display: Nissan Juke}
+      leaf: {display: Nissan Leaf}
+  Volvo:
+    models:
+      v70: {display: Volvo V70}
+      xc60: {display: Volvo XC60}
+      xc90: {display: Volvo XC90}
+      v60: {display: Volvo V60}
+  Kia:
+    models:
+      ceed: {display: Kia Ceed}
+      sportage: {display: Kia Sportage}
+      niro: {display: Kia Niro}
+  Hyundai:
+    models:
+      i30: {display: Hyundai i30}
+      tucson: {display: Hyundai Tucson}
+      kona: {display: Hyundai Kona}
+  Mazda:
+    models:
+      "3": {display: Mazda 3}
+      "6": {display: Mazda 6}
+      cx5: {display: Mazda CX-5}
+  Honda:
+    models:
+      civic: {display: Honda Civic}
+      crv: {display: Honda CR-V}
+  Mitsubishi:
+    models:
+      outlander: {display: Mitsubishi Outlander}
+      asx: {display: Mitsubishi ASX}
+  Subaru:
+    models:
+      forester: {display: Subaru Forester}
+      outback: {display: Subaru Outback}
+  Seat:
+    models:
+      leon: {display: SEAT Leon}
+      ibiza: {display: SEAT Ibiza}
+  Fiat:
+    models:
+      "500": {display: Fiat 500}
+      punto: {display: Fiat Punto}
+  Dacia:
+    models:
+      duster: {display: Dacia Duster}
+      sandero: {display: Dacia Sandero}
+  Suzuki:
+    models:
+      swift: {display: Suzuki Swift}
+      vitara: {display: Suzuki Vitara}
+  Tesla:
+    models:
+      model_3: {display: Tesla Model 3}
+      model_y: {display: Tesla Model Y}
+  Lexus:
+    models:
+      nx: {display: Lexus NX}
+      rx: {display: Lexus RX}
+  Land Rover:
+    models:
+      discovery: {display: Land Rover Discovery}
+      range_rover_evoque: {display: Land Rover Range Rover Evoque}
+  Jaguar:
+    models:
+      xf: {display: Jaguar XF}
+      f_pace: {display: Jaguar F-Pace}
+  Porsche:
+    models:
+      cayenne: {display: Porsche Cayenne}
+      macan: {display: Porsche Macan}
+  MINI:
+    models:
+      cooper: {display: MINI Cooper}
+      countryman: {display: MINI Countryman}
+  Alfa Romeo:
+    models:
+      giulia: {display: Alfa Romeo Giulia}
+      stelvio: {display: Alfa Romeo Stelvio}
+  Chevrolet:
+    models:
+      cruze: {display: Chevrolet Cruze}
+      captiva: {display: Chevrolet Captiva}
+  Jeep:
+    models:
+      renegade: {display: Jeep Renegade}
+      compass: {display: Jeep Compass}
+  Saab:
+    models:
+      "9_3": {display: Saab 9-3}
+      "9_5": {display: Saab 9-5}
+  Chrysler:
+    models:
+      voyager: {display: Chrysler Voyager}
+      "300c": {display: Chrysler 300C}
+  Smart:
+    models:
+      fortwo: {display: Smart Fortwo}
+      forfour: {display: Smart Forfour}
+  Ssangyong:
+    models:
+      korando: {display: SsangYong Korando}
+      rexton: {display: SsangYong Rexton}
+  Iveco:
+    models:
+      daily: {display: Iveco Daily}
+      eurocargo: {display: Iveco EuroCargo}
+  Cupra:
+    models:
+      formentor: {display: CUPRA Formentor}
+      born: {display: CUPRA Born}
+  Polestar:
+    models:
+      "2": {display: Polestar 2}
+      "3": {display: Polestar 3}
+  BYD:
+    models:
+      atto_3: {display: BYD Atto 3}
+      seal: {display: BYD Seal}
