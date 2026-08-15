@@ -32,3 +32,19 @@ jobs:
 
       - name: Тесты
         run: uv run pytest
+
+  invariants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - run: uv python install 3.11
+
+      - run: uv sync --locked --group dev
+
+      - name: Инварианты схемы и теста на утечку
+        run: uv run pytest tests/test_split.py tests/test_schema.py -v
