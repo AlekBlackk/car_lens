@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from pipeline.schema import (
+    BODY_STYLES,
     COLUMNS,
     SOURCES,
     SchemaError,
@@ -80,6 +81,14 @@ def test_допустимые_источники() -> None:
     } == SOURCES
 
 
+def test_допустимые_кузова() -> None:
+    # Те же семь значений намеренно продублированы в `pipeline/normalize.py`
+    # (§3.3 и §13.1 — разные разделы спеки). Расхождение копий ловит этот тест
+    # вместе с парным ему в `tests/test_normalize.py`, поэтому список здесь
+    # выписан дословно, а не импортирован.
+    assert {"hatchback", "sedan", "wagon", "suv", "coupe", "van", "pickup"} == BODY_STYLES
+
+
 def test_валидный_кадр_проходит() -> None:
     validate_frame(кадр(строка()))
 
@@ -145,6 +154,9 @@ def test_инвариант_2_модель_без_марки_отвергает�
 def test_bbox_не_из_четырёх_чисел_отвергается() -> None:
     with pytest.raises(SchemaError, match="bbox"):
         validate_frame(кадр(строка(bbox=[1.0, 2.0, 3.0])))
+    # Пропущенное поле приходит скалярным NaN: тоже SchemaError, а не TypeError.
+    with pytest.raises(SchemaError, match="bbox"):
+        validate_frame(кадр(строка(bbox=float("nan"))))
 
 
 def test_недопустимый_кузов_отвергается() -> None:
@@ -162,6 +174,20 @@ def test_запись_и_чтение_сохраняют_данные(tmp_path: 
     assert [int(v) for v in прочитанный["phash"]] == [1234567890123456789, 42]
 
 
+def test_запись_и_чтение_пустого_сплита(tmp_path: Path) -> None:
+    # Пустой сплит реалистичен (`negatives` без строк), а колонки `empty_frame`
+    # имеют dtype object: проверяем, что pyarrow приводит их к int32, float32,
+    # bool и list<float32>[4] по схеме, а не падает.
+    путь = tmp_path / "negatives.parquet"
+    write_split(empty_frame(), путь)
+    прочитанный = read_split(путь)
+    assert list(прочитанный.columns) == list(COLUMNS)
+    assert прочитанный.empty
+
+
 def test_запись_невалидного_кадра_падает(tmp_path: Path) -> None:
+    путь = tmp_path / "bad.parquet"
     with pytest.raises(SchemaError):
-        write_split(кадр(строка(source="avito")), tmp_path / "bad.parquet")
+        write_split(кадр(строка(source="avito")), путь)
+    # Валидация идёт до mkdir и записи, поэтому обрубка файла остаться не может.
+    assert not путь.exists()

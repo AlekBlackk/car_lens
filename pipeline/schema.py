@@ -110,12 +110,14 @@ def _проверить_инвариант_2(df: pd.DataFrame) -> None:
     есть_модель = df["model_id"].notna()
     есть_марка = df["brand"].notna()
 
-    if not есть_класс.equals(есть_модель):
-        плохие = df.loc[есть_класс != есть_модель, "photo_id"].tolist()
+    рассогласование_класса = есть_класс != есть_модель
+    if bool(рассогласование_класса.any()):
+        плохие = df.loc[рассогласование_класса, "photo_id"].tolist()
         raise SchemaError(f"class_idx и model_id рассогласованы: {плохие[:5]}")
 
-    if not есть_модель.equals(есть_марка):
-        плохие = df.loc[есть_модель != есть_марка, "photo_id"].tolist()
+    рассогласование_марки = есть_модель != есть_марка
+    if bool(рассогласование_марки.any()):
+        плохие = df.loc[рассогласование_марки, "photo_id"].tolist()
         raise SchemaError(f"model_id и brand рассогласованы: {плохие[:5]}")
 
     негативы = df["source"] == "negatives"
@@ -124,11 +126,21 @@ def _проверить_инвариант_2(df: pd.DataFrame) -> None:
 
 
 def _проверить_bbox(df: pd.DataFrame) -> None:
-    плохие = [
-        pid
-        for pid, box in zip(df["photo_id"], df["bbox"], strict=True)
-        if box is None or len(list(box)) != 4
-    ]
+    """Длина `bbox` равна четырём.
+
+    Неитерируемое значение — тоже нарушение схемы, а не `TypeError` наружу:
+    `pd.DataFrame` из записей без поля `bbox` подставляет скалярный `NaN`,
+    и валидатор обязан ответить на него `SchemaError`, как обещает
+    докстринг `validate_frame`.
+    """
+    плохие: list[object] = []
+    for pid, box in zip(df["photo_id"], df["bbox"], strict=True):
+        try:
+            подходит = len(list(box)) == 4
+        except TypeError:
+            подходит = False
+        if not подходит:
+            плохие.append(pid)
     if плохие:
         raise SchemaError(f"bbox должен быть из четырёх чисел: {плохие[:5]}")
 
