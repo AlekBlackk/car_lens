@@ -70,6 +70,7 @@ module = [
     "ultralytics.*",
     "datasets.*",
     "rapidfuzz.*",
+    "pyarrow.*",
 ]
 ignore_missing_imports = true
 
