@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import SupportsInt, cast
@@ -23,7 +24,16 @@ from pipeline.hashing import close_pairs, hamming
 
 # `hamming` переехал в `pipeline.hashing`, но остаётся импортируемым отсюда:
 # он часть публичного интерфейса `split`, объявленного планом M-1a.
-__all__ = ["InvariantError", "SplitRatios", "check_invariants", "hamming", "split_by_listing"]
+__all__ = [
+    "DEFAULT_MIN_LISTINGS_PER_CLASS",
+    "DEFAULT_PHASH_HAMMING",
+    "SPLIT_NAMES",
+    "InvariantError",
+    "SplitRatios",
+    "check_invariants",
+    "hamming",
+    "split_by_listing",
+]
 
 DEFAULT_MIN_LISTINGS_PER_CLASS = 300
 DEFAULT_PHASH_HAMMING = 6
@@ -184,22 +194,36 @@ def _инвариант_5_нет_близких_phash(splits: Mapping[str, pd.Da
 
     Сравниваются только пары, попавшие в общую корзину `close_pairs`, —
     полный перебор на шестнадцати тысячах фотографий стоит минуты.
+
+    Значения сначала дедуплицируются, и это не украшательство. Один и тот
+    же `phash` у нескольких кадров — обычное дело: в объявлении десяток
+    почти одинаковых фотографий. Обход по строкам превращает k повторов в
+    C(k, 2) пар внутри одного сплита, и все они до единой будут отброшены
+    проверкой имён — работа впустую, квадратичная по числу повторов. На
+    вырожденной колонке (скажем, `phash` посчитался с ошибкой и стал нулём
+    везде) это десятки миллионов пар вместо мгновенной внятной ошибки. По
+    уникальным значениям такой работы нет вовсе.
+
+    Повтор одного значения внутри одного сплита разрешён: одинаковые
+    кадры в train утечкой не являются, утечка — это одно и то же фото в
+    двух разных сплитах.
     """
-    имена: list[str] = []
-    значения: list[int] = []
+    сплиты_значения: dict[int, set[str]] = defaultdict(set)
     for имя, d in sorted(splits.items()):
         for v in d["phash"]:
-            имена.append(имя)
-            значения.append(int(v))
+            сплиты_значения[int(v)].add(имя)
 
-    for первый, второй in close_pairs(значения, предел):
-        if имена[первый] == имена[второй]:
-            continue
-        a, b = значения[первый], значения[второй]
-        if a == b:
-            raise InvariantError(
-                f"одинаковый phash {a} в сплитах {имена[первый]} и {имена[второй]}"
-            )
-        raise InvariantError(
-            f"близкие phash {a} и {b} в разных сплитах ({имена[первый]} и {имена[второй]})"
-        )
+    значения = sorted(сплиты_значения)
+    for a in значения:
+        где = сплиты_значения[a]
+        if len(где) > 1:
+            первый, второй = sorted(где)[:2]
+            raise InvariantError(f"одинаковый phash {a} в сплитах {первый} и {второй}")
+
+    for i, j in close_pairs(значения, предел):
+        a, b = значения[i], значения[j]
+        # После проверки выше у каждого значения ровно один сплит.
+        (имя_a,) = сплиты_значения[a]
+        (имя_b,) = сплиты_значения[b]
+        if имя_a != имя_b:
+            raise InvariantError(f"близкие phash {a} и {b} в разных сплитах ({имя_a} и {имя_b})")
