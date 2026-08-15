@@ -61,7 +61,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["pipeline", "tests"]
+files = ["pipeline", "scripts", "tests"]
 
 [[tool.mypy.overrides]]
 module = [
