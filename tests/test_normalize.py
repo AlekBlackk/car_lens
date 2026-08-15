@@ -47,12 +47,15 @@ def test_кузовной_суффикс_сохраняется_отдельны
     итог = normalize("Golf Variant", "Volkswagen", каталог, {})
     assert итог.model_id == "volkswagen__golf"
     assert итог.body_style == "wagon"
+    assert итог.reason == "fuzzy"
+    assert итог.score >= 88
 
 
 def test_кузовной_суффикс_не_создаёт_отдельный_класс(каталог: Catalog) -> None:
     обычный = normalize("Golf", "Volkswagen", каталог, {})
     универсал = normalize("Golf Kombi", "Volkswagen", каталог, {})
-    assert обычный.model_id == универсал.model_id
+    assert обычный.model_id == "volkswagen__golf"
+    assert универсал.model_id == "volkswagen__golf"
 
 
 def test_все_кузова_из_словаря_допустимы_по_схеме() -> None:
@@ -80,7 +83,7 @@ def test_отсекает_объём_топливо_привод_и_трим(к�
 
 
 def test_диакритика_снимается(каталог: Catalog) -> None:
-    assert normalize("C3", "Citroën", каталог, {}).model_id == "citroen__c3"
+    assert normalize("C3 Élégance", "Citroën", каталог, {}).model_id == "citroen__c3"
 
 
 def test_немецкое_написание_класса_ловится_алиасом(каталог: Catalog) -> None:
@@ -101,6 +104,19 @@ def test_алиас_имеет_приоритет_над_fuzzy(каталог: C
     итог = normalize("Kolmonen", "Volkswagen", каталог, {"kolmonen": "volkswagen__passat"})
     assert итог.model_id == "volkswagen__passat"
     assert итог.reason == "alias"
+
+
+def test_алиас_чужой_марки_не_применяется(каталог: Catalog) -> None:
+    """Карта алиасов общая на весь каталог, а марка в объявлении задана.
+
+    `3er` в объявлении Volkswagen не должен превратиться в `bmw__3_series`:
+    это та же межмарочная утечка, от которой fuzzy защищён фильтром
+    кандидатов по марке. Чужой алиас отбрасывается, строка идёт в fuzzy
+    и там не набирает порога.
+    """
+    итог = normalize("3er", "Volkswagen", каталог, {"3er": "bmw__3_series"})
+    assert итог.model_id is None
+    assert итог.reason == "below_threshold"
 
 
 def test_ниже_порога_не_сопоставляется(каталог: Catalog) -> None:
