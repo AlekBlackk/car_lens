@@ -36,3 +36,17 @@ def test_отчёт_перечисляет_сплиты() -> None:
     текст = render_report(BuildStats(seen=2), {"train": пустой(), "val": пустой()}, classes=1)
     assert "train" in текст
     assert "val" in текст
+
+
+def test_отчёт_называет_многомашинные_кадры_и_порог() -> None:
+    """Ревью Task 9: без этих чисел баланс отчёта не сходится (находки 1 и 2)."""
+    текст = render_report(
+        BuildStats(seen=16185, deduped=298),
+        {"train": пустой()},
+        classes=171,
+        multi_car_excluded=485,
+        min_listings_per_class=30,
+    )
+    assert "485" in текст
+    assert "многомашин" in текст
+    assert "30" in текст

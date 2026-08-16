@@ -38,8 +38,25 @@ from pipeline.split import check_invariants, split_by_listing
 MIN_LISTINGS_ДЛЯ_СКЕЛЕТА = 30
 
 
-def render_report(stats: BuildStats, splits: Mapping[str, pd.DataFrame], classes: int) -> str:
-    """Собрать текст отчёта о прогоне."""
+def render_report(
+    stats: BuildStats,
+    splits: Mapping[str, pd.DataFrame],
+    classes: int,
+    multi_car_excluded: int = 0,
+    min_listings_per_class: int = MIN_LISTINGS_ДЛЯ_СКЕЛЕТА,
+) -> str:
+    """Собрать текст отчёта о прогоне.
+
+    `multi_car_excluded` — сколько многомашинных кадров правило §3.5
+    исключило из train (кадр при этом остаётся в val/test, где
+    неоднозначность разметки не мешает оценке). Это не отбраковка и не
+    дедуп, поэтому число не входит в `stats.rejected`/`stats.deduped`, а
+    передаётся отдельно — иначе баланс «вход = сумма по сплитам +
+    отбраковка + дедуп» не сходится и отчёт нельзя проверить глазами.
+    `min_listings_per_class` — применённый порог инварианта 3: на скелете
+    он ниже продакшн-умолчания §3.3 (300), и это самое неочевидное место
+    прогона, чтобы его не искать в `manifest.json`.
+    """
     строки = [
         "# Отчёт ingest Stanford Cars (M-1b)",
         "",
@@ -47,8 +64,13 @@ def render_report(stats: BuildStats, splits: Mapping[str, pd.DataFrame], classes
         "",
         f"- Фотографий на входе: {stats.seen}",
         f"- Классов в каталоге скелета: {classes}",
+        f"- Применённый порог инварианта 3 (объявлений на класс в train): {min_listings_per_class}",
         f"- Несопоставленных имён: {stats.unmapped}",
         f"- Убрано дедупом: {stats.deduped}",
+        (
+            "- Исключено из train как многомашинные (§3.5, неоднозначная "
+            f"разметка — кадр остаётся в val/test): {multi_car_excluded}"
+        ),
         "",
         "## Отбраковка по причинам",
         "",
@@ -103,13 +125,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     сплиты = split_by_listing(итог.frame, seed=аргументы.seed)
     check_invariants(сплиты, min_listings_per_class=аргументы.min_listings)
 
+    # Многомашинные кадры §3.5 остаются в val/test, но их нет в train —
+    # без этого числа баланс «вход = сумма по сплитам + отбраковка + дедуп»
+    # не сходится (находка ревью Task 9).
+    многомашинные_исключены = len(итог.frame) - sum(len(d) for d in сплиты.values())
+
     for имя, кадр in сплиты.items():
         write_split(кадр, splits_dir() / f"{имя}.parquet")
 
     прогон = runs_dir() / f"m1b_ingest_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
     прогон.mkdir(parents=True, exist_ok=True)
     (прогон / "report.md").write_text(
-        render_report(итог.stats, сплиты, len(каталог)), encoding="utf-8"
+        render_report(
+            итог.stats,
+            сплиты,
+            len(каталог),
+            multi_car_excluded=многомашинные_исключены,
+            min_listings_per_class=аргументы.min_listings,
+        ),
+        encoding="utf-8",
     )
     # Механизм из решения Р-4: без списка датасетов через полгода нельзя
     # ответить, какие веса «чистые», и придётся переобучать всё на всякий случай.
@@ -118,7 +152,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             {
                 "datasets": ["stanford_cars"],
                 "licence": "research-only",
-                "catalog": str(STANFORD_CATALOG_PATH.name),
+                "catalog": STANFORD_CATALOG_PATH.name,
                 "seed": аргументы.seed,
                 "min_listings_per_class": аргументы.min_listings,
             },
