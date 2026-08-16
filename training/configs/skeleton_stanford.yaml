@@ -1,0 +1,27 @@
+# Конфиг прогона M-1.2 на скелете Stanford Cars (171 класс).
+# Значения — из §4.2 спецификации. Два ключа переименованы против §4.2:
+# блок `arcface` собрал вместе `s` и расписание маржи, а
+# `backbone_lr_mult_epochs` вынес в число комментарий «первые 5 эпох» —
+# по комментарию код работать не может.
+backbone: mobilenetv4_conv_medium.e500_r256_in1k
+embedding_dim: 256
+img_size: 320
+batch_size: 128
+epochs: 60
+optimizer: AdamW
+lr: 3.0e-4
+weight_decay: 0.05
+scheduler: cosine
+warmup_epochs: 3
+arcface:
+  s: 32.0
+  margin_start: 0.2
+  margin_end: 0.5
+  margin_warmup_epochs: 10
+amp: bf16
+ema_decay: 0.9998
+grad_clip: 1.0
+backbone_lr_mult: 0.1
+backbone_lr_mult_epochs: 5
+num_workers: 8
+seed: 1337
