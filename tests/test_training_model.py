@@ -1,9 +1,12 @@
 """Тесты модели и головы ArcFace (M-1.2, §4.2 дизайна). Требуют torch."""
 
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("torch")
 
+import numpy as np
 import torch
 
 from training.model import ArcFaceHead, create_model
@@ -64,3 +67,27 @@ def test_target_none_не_зависит_от_маржи() -> None:
     голова.set_margin(0.5)
     стало = голова(эмбеддинг)
     assert torch.allclose(было, стало, atol=1e-6)
+
+
+def test_оценка_на_синтетическом_загрузчике(tmp_path: Path) -> None:
+    from torch.utils.data import DataLoader, TensorDataset
+
+    from training.evaluate import evaluate
+
+    модель, голова = create_model(
+        "mobilenetv4_conv_medium.e500_r256_in1k", num_classes=3, pretrained=False
+    )
+    картинки = torch.randn(4, 3, 64, 64)
+    метки = torch.tensor([0, 1, 2, 0])
+    загрузчик = DataLoader(TensorDataset(картинки, метки), batch_size=2)
+    метрики = evaluate(
+        модель,
+        голова,
+        загрузчик,
+        idx_to_model_id={0: "acura__rl", 1: "acura__tl", 2: "bmw__x5"},
+        device=torch.device("cpu"),
+    )
+    assert 0.0 <= метрики.top1_model <= 1.0
+    assert метрики.top5_model >= метрики.top1_model
+    assert set(метрики.per_class_recall) <= {"acura__rl", "acura__tl", "bmw__x5"}
+    assert np.isfinite(метрики.top1_brand)
