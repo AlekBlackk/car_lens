@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from pipeline.catalog import Catalog, load_catalog
+from pipeline.clean import phash_of
 from pipeline.crop import Detection
 from pipeline.ingest.build import build_frame, iou
 from pipeline.ingest.stanford import StanfordPhoto
@@ -42,25 +43,30 @@ def каталог(tmp_path: Path) -> Catalog:
 
 
 def сделать_фото(tmp_path: Path, имя: str, класс: str, оттенок: int = 0) -> StanfordPhoto:
-    """Синтетическое фото: серый фон с квадратом обратного тона в центре.
+    """Синтетическое фото: серый фон с квадратом обратного тона.
 
-    Различие только по `оттенок` кажется хрупким для дедупа: перцептивный
-    хеш строится на DCT и к чисто линейному масштабированию амплитуды не
-    чувствителен — на несжатом массиве фон=0/квадрат=255 и фон=90/квадрат=165
-    дают побитово одинаковый phash (проверено вручную вне пайплайна). Здесь
-    это не ломает `test_счётчик_увиденного`, потому что `cv2.imwrite` пишет
-    JPEG: квантование DCT-блоков нелинейно по амплитуде сигнала, и после
-    записи на диск и повторного чтения (как это и делает `build_frame`)
-    хеши двух оттенков расходятся на расстояние 16 — далеко за порогом
-    `DEFAULT_PHASH_HAMMING = 6`. Если тон когда-нибудь заменят числом,
-    равным 128 (фон = квадрат), JPEG-квантование это не спасёт: тогда
-    квадрат придётся снова различать геометрией, а не только тоном.
+    Различать снимки только параметром `оттенок`, не трогая геометрию,
+    недостаточно: перцептивный хеш строится на DCT и к чисто линейному
+    масштабированию амплитуды не чувствителен — на несжатом массиве
+    фон=0/квадрат=255 и фон=90/квадрат=165 дают побитово одинаковый
+    phash (проверено вручную вне пайплайна). Раньше это маскировалось
+    тем, что `cv2.imwrite` пишет JPEG, и нелинейное квантование
+    DCT-блоков всё же разводило хеши после записи/чтения с диска — но
+    это побочный эффект конкретного кодека, а не осознанный дизайн
+    фикстуры, и он был бы хрупким к смене библиотеки JPEG. Поэтому при
+    ненулевом `оттенок` квадрат ещё и сдвигается — различие теперь
+    геометрическое и не зависит от кодека. Порог
+    `DEFAULT_PHASH_HAMMING` в `pipeline/clean.py` этой правкой не
+    трогается.
     """
     каталог_картинок = tmp_path / "images"
     каталог_картинок.mkdir(parents=True, exist_ok=True)
     путь = каталог_картинок / имя
     поле = np.full((100, 100, 3), оттенок, dtype=np.uint8)
-    поле[20:80, 20:80] = 255 - оттенок
+    if оттенок == 0:
+        поле[20:80, 20:80] = 255 - оттенок
+    else:
+        поле[10:60, 30:90] = 255 - оттенок
     cv2.imwrite(str(путь), поле)
     return StanfordPhoto(
         path=путь, class_name=класс, manual_box=(20, 20, 80, 80), official_split="train"
@@ -80,7 +86,8 @@ def test_кадр_проходит_валидацию_схемы(tmp_path: Path,
 
 def test_колонки_заполнены_ожидаемым(tmp_path: Path, каталог: Catalog) -> None:
     фото = [сделать_фото(tmp_path, "00001.jpg", "Audi A5 Coupe 2012")]
-    итог = build_frame(фото, ФейковыйДетектор(ХОРОШИЙ_БОКС), каталог, {}, tmp_path / "crops")
+    кропы = tmp_path / "crops"
+    итог = build_frame(фото, ФейковыйДетектор(ХОРОШИЙ_БОКС), каталог, {}, кропы)
     строка = итог.frame.iloc[0]
     assert строка["source"] == "stanford"
     assert строка["model_id"] == "audi__a5"
@@ -90,6 +97,12 @@ def test_колонки_заполнены_ожидаемым(tmp_path: Path, к
     assert строка["raw_model_string"] == "Audi A5 Coupe 2012"
     assert строка["class_idx"] == 0
     assert bool(строка["is_multi_car"]) is False
+    # Закрепляет Р-11: хеш считается по записанному на диск кропу, а не по
+    # исходному кадру. Заглушка `phash = 0` в build_frame ничем, кроме этой
+    # проверки, не поймана — validate_frame значение phash не проверяет.
+    записанный_кроп = cv2.imread(str(кропы / строка["crop_path"]))
+    assert записанный_кроп is not None
+    assert строка["phash"] == phash_of(записанный_кроп)
 
 
 def test_listing_id_равен_photo_id(tmp_path: Path, каталог: Catalog) -> None:
@@ -149,6 +162,22 @@ def test_дубли_убраны(tmp_path: Path, каталог: Catalog) -> Non
     assert итог.stats.deduped == 1
 
 
+def test_кропы_дублей_удаляются_с_диска(tmp_path: Path, каталог: Catalog) -> None:
+    """Кроп дубля пишется на диск раньше, чем известен его хеш (Minor 4).
+
+    Без явного удаления в `crops_root` копится сирота, на которую не
+    ссылается ни одна строка кадра — на полном Stanford это тысячи
+    лишних файлов.
+    """
+    фото = [
+        сделать_фото(tmp_path, "00001.jpg", "Audi A5 Coupe 2012"),
+        сделать_фото(tmp_path, "00002.jpg", "Audi A5 Coupe 2012"),
+    ]
+    кропы = tmp_path / "crops"
+    build_frame(фото, ФейковыйДетектор(ХОРОШИЙ_БОКС), каталог, {}, кропы)
+    assert len(list(кропы.iterdir())) == 1
+
+
 def test_счётчик_увиденного(tmp_path: Path, каталог: Catalog) -> None:
     фото = [
         сделать_фото(tmp_path, "00001.jpg", "Audi A5 Coupe 2012"),
@@ -169,6 +198,21 @@ def test_пустой_вход_даёт_пустой_кадр(tmp_path: Path, к
     итог = build_frame([], ФейковыйДетектор(ХОРОШИЙ_БОКС), каталог, {}, tmp_path / "crops")
     validate_frame(итог.frame)
     assert итог.frame.empty
+
+
+def test_битый_файл_отбракован_как_unreadable(tmp_path: Path, каталог: Catalog) -> None:
+    каталог_картинок = tmp_path / "images"
+    каталог_картинок.mkdir(parents=True, exist_ok=True)
+    путь = каталог_картинок / "битый.jpg"
+    путь.write_bytes(b"not an image")
+    фото = [
+        StanfordPhoto(
+            path=путь, class_name="Audi A5 Coupe 2012", manual_box=None, official_split="train"
+        )
+    ]
+    итог = build_frame(фото, ФейковыйДетектор(ХОРОШИЙ_БОКС), каталог, {}, tmp_path / "crops")
+    assert итог.frame.empty
+    assert итог.stats.rejected["unreadable"] == 1
 
 
 @pytest.mark.parametrize(
