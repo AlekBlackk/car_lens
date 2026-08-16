@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 
 DEFAULT_CATALOG_PATH = Path(__file__).resolve().parent.parent / "catalog" / "canonical.yaml"
+STANFORD_CATALOG_PATH = Path(__file__).resolve().parent.parent / "catalog" / "stanford.yaml"
 
 SUPPORTED_VERSION = 1
 
@@ -150,3 +151,15 @@ def _проверить_группы_платформ(path: Path, модели: 
         raise CatalogError(
             f"{path}: platform_group из одного участника бессмысленна: {', '.join(одиночки)}"
         )
+
+
+def class_index(catalog: Catalog) -> dict[str, int]:
+    """`model_id` → `class_idx` по порядку сортировки идентификаторов.
+
+    Индекс вычисляется, а не хранится, — по той же причине, по которой не
+    хранится `model_id`: поле рядом со значением рассинхронизируется.
+    `load_catalog` уже возвращает модели отсортированными, поэтому
+    результат не зависит от порядка записей в YAML, и правка файла не
+    перенумерует классы молча.
+    """
+    return {m.model_id: i for i, m in enumerate(catalog.models)}

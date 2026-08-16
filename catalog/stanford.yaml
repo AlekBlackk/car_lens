@@ -1,0 +1,445 @@
+# Расходный каталог скелета M-1, сгенерирован scripts/gen_stanford_catalog.py.
+# Руками не править: правка потеряется при следующем прогоне генератора.
+# Продакшн-каталог — canonical.yaml, этот файл к нему отношения не имеет (Р-7).
+brands:
+  AM General:
+    models:
+      hummer:
+        display: AM General Hummer
+  Acura:
+    models:
+      integra_type_r:
+        display: Acura Integra Type R
+      rl:
+        display: Acura RL
+      tl:
+        display: Acura TL
+      tl_type_s:
+        display: Acura TL Type-S
+      tsx:
+        display: Acura TSX
+      zdx:
+        display: Acura ZDX
+  Aston Martin:
+    models:
+      v8_vantage:
+        display: Aston Martin V8 Vantage
+      virage:
+        display: Aston Martin Virage
+  Audi:
+    models:
+      '100':
+        display: Audi 100
+      a5:
+        display: Audi A5
+      r8:
+        display: Audi R8
+      rs_4:
+        display: Audi RS 4
+      s4:
+        display: Audi S4
+      s5:
+        display: Audi S5
+      s6:
+        display: Audi S6
+      tt:
+        display: Audi TT
+      tt_rs:
+        display: Audi TT RS
+      tts:
+        display: Audi TTS
+      v8:
+        display: Audi V8
+  BMW:
+    models:
+      1_series:
+        display: BMW 1 Series
+      3_series:
+        display: BMW 3 Series
+      6_series:
+        display: BMW 6 Series
+      activehybrid_5:
+        display: BMW ActiveHybrid 5
+      m3:
+        display: BMW M3
+      m5:
+        display: BMW M5
+      m6:
+        display: BMW M6
+      x3:
+        display: BMW X3
+      x5:
+        display: BMW X5
+      x6:
+        display: BMW X6
+      z4:
+        display: BMW Z4
+  Bentley:
+    models:
+      arnage:
+        display: Bentley Arnage
+      continental_flying_spur:
+        display: Bentley Continental Flying Spur
+      continental_gt:
+        display: Bentley Continental GT
+      continental_supersports_conv:
+        display: Bentley Continental Supersports Conv.
+      mulsanne:
+        display: Bentley Mulsanne
+  Bugatti:
+    models:
+      veyron_16_4:
+        display: Bugatti Veyron 16.4
+  Buick:
+    models:
+      enclave:
+        display: Buick Enclave
+      rainier:
+        display: Buick Rainier
+      regal_gs:
+        display: Buick Regal GS
+      verano:
+        display: Buick Verano
+  Cadillac:
+    models:
+      cts_v:
+        display: Cadillac CTS-V
+      escalade_ext:
+        display: Cadillac Escalade EXT
+      srx:
+        display: Cadillac SRX
+  Chevrolet:
+    models:
+      avalanche:
+        display: Chevrolet Avalanche
+      camaro:
+        display: Chevrolet Camaro
+      cobalt_ss:
+        display: Chevrolet Cobalt SS
+      corvette:
+        display: Chevrolet Corvette
+      corvette_ron_fellows_z06:
+        display: Chevrolet Corvette Ron Fellows Edition Z06
+      corvette_zr1:
+        display: Chevrolet Corvette ZR1
+      express:
+        display: Chevrolet Express
+      express_cargo:
+        display: Chevrolet Express Cargo
+      hhr_ss:
+        display: Chevrolet HHR SS
+      impala:
+        display: Chevrolet Impala
+      malibu:
+        display: Chevrolet Malibu
+      monte_carlo:
+        display: Chevrolet Monte Carlo
+      silverado_1500:
+        display: Chevrolet Silverado 1500
+      silverado_1500_classic:
+        display: Chevrolet Silverado 1500 Classic
+      silverado_2500hd:
+        display: Chevrolet Silverado 2500HD
+      sonic:
+        display: Chevrolet Sonic
+      tahoe:
+        display: Chevrolet Tahoe Hybrid
+      trailblazer_ss:
+        display: Chevrolet TrailBlazer SS
+      traverse:
+        display: Chevrolet Traverse
+  Chrysler:
+    models:
+      300_srt_8:
+        display: Chrysler 300 SRT-8
+      aspen:
+        display: Chrysler Aspen
+      crossfire:
+        display: Chrysler Crossfire
+      pt_cruiser:
+        display: Chrysler PT Cruiser
+      sebring:
+        display: Chrysler Sebring
+      town_and_country:
+        display: Chrysler Town and Country
+  Daewoo:
+    models:
+      nubira:
+        display: Daewoo Nubira
+  Dodge:
+    models:
+      caliber:
+        display: Dodge Caliber
+      caravan:
+        display: Dodge Caravan
+      challenger_srt8:
+        display: Dodge Challenger SRT8
+      charger:
+        display: Dodge Charger
+      charger_srt_8:
+        display: Dodge Charger SRT-8
+      dakota:
+        display: Dodge Dakota
+      durango:
+        display: Dodge Durango
+      journey:
+        display: Dodge Journey
+      magnum:
+        display: Dodge Magnum
+      ram_3500:
+        display: Dodge Ram Pickup 3500
+      sprinter_cargo:
+        display: Dodge Sprinter Cargo
+  Eagle:
+    models:
+      talon:
+        display: Eagle Talon
+  FIAT:
+    models:
+      '500':
+        display: FIAT 500
+      500_abarth:
+        display: FIAT 500 Abarth
+  Ferrari:
+    models:
+      458_italia:
+        display: Ferrari 458 Italia
+      california:
+        display: Ferrari California
+      ff:
+        display: Ferrari FF
+  Fisker:
+    models:
+      karma:
+        display: Fisker Karma
+  Ford:
+    models:
+      e_series:
+        display: Ford E-Series
+      edge:
+        display: Ford Edge
+      expedition_el:
+        display: Ford Expedition EL
+      f_150:
+        display: Ford F-150
+      f_450_super_duty:
+        display: Ford F-450 Super Duty
+      fiesta:
+        display: Ford Fiesta
+      focus:
+        display: Ford Focus
+      freestar:
+        display: Ford Freestar
+      gt:
+        display: Ford GT
+      mustang:
+        display: Ford Mustang
+      ranger:
+        display: Ford Ranger SuperCab
+  GMC:
+    models:
+      acadia:
+        display: GMC Acadia
+      canyon:
+        display: GMC Canyon
+      savana:
+        display: GMC Savana
+      terrain:
+        display: GMC Terrain
+      yukon:
+        display: GMC Yukon Hybrid
+  Geo:
+    models:
+      metro:
+        display: Geo Metro
+  HUMMER:
+    models:
+      h2_sut:
+        display: HUMMER H2 SUT
+      h3t:
+        display: HUMMER H3T
+  Honda:
+    models:
+      accord:
+        display: Honda Accord
+      odyssey:
+        display: Honda Odyssey
+  Hyundai:
+    models:
+      accent:
+        display: Hyundai Accent
+      azera:
+        display: Hyundai Azera
+      elantra:
+        display: Hyundai Elantra
+      genesis:
+        display: Hyundai Genesis
+      santa_fe:
+        display: Hyundai Santa Fe
+      sonata:
+        display: Hyundai Sonata
+      tucson:
+        display: Hyundai Tucson
+      veloster:
+        display: Hyundai Veloster
+      veracruz:
+        display: Hyundai Veracruz
+  Infiniti:
+    models:
+      g_ipl:
+        display: Infiniti G Coupe IPL
+      qx56:
+        display: Infiniti QX56
+  Isuzu:
+    models:
+      ascender:
+        display: Isuzu Ascender
+  Jaguar:
+    models:
+      xk_xkr:
+        display: Jaguar XK XKR
+  Jeep:
+    models:
+      compass:
+        display: Jeep Compass
+      grand_cherokee:
+        display: Jeep Grand Cherokee
+      liberty:
+        display: Jeep Liberty
+      patriot:
+        display: Jeep Patriot
+      wrangler:
+        display: Jeep Wrangler
+  Lamborghini:
+    models:
+      aventador:
+        display: Lamborghini Aventador
+      diablo:
+        display: Lamborghini Diablo
+      gallardo_lp_570_4_superleggera:
+        display: Lamborghini Gallardo LP 570-4 Superleggera
+      reventon:
+        display: Lamborghini Reventon
+  Land Rover:
+    models:
+      lr2:
+        display: Land Rover LR2
+      range_rover:
+        display: Land Rover Range Rover
+  Lincoln:
+    models:
+      town_car:
+        display: Lincoln Town Car
+  MINI:
+    models:
+      cooper:
+        display: MINI Cooper Roadster
+  Maybach:
+    models:
+      landaulet:
+        display: Maybach Landaulet
+  Mazda:
+    models:
+      tribute:
+        display: Mazda Tribute
+  McLaren:
+    models:
+      mp4_12c:
+        display: McLaren MP4-12C
+  Mercedes-Benz:
+    models:
+      300_class:
+        display: Mercedes-Benz 300-Class
+      c_class:
+        display: Mercedes-Benz C-Class
+      e_class:
+        display: Mercedes-Benz E-Class
+      s_class:
+        display: Mercedes-Benz S-Class
+      sl_class:
+        display: Mercedes-Benz SL-Class
+      sprinter:
+        display: Mercedes-Benz Sprinter
+  Mitsubishi:
+    models:
+      lancer:
+        display: Mitsubishi Lancer
+  Nissan:
+    models:
+      240sx:
+        display: Nissan 240SX
+      juke:
+        display: Nissan Juke
+      leaf:
+        display: Nissan Leaf
+      nv_passenger:
+        display: Nissan NV Passenger
+  Plymouth:
+    models:
+      neon:
+        display: Plymouth Neon
+  Porsche:
+    models:
+      panamera:
+        display: Porsche Panamera
+  Ram:
+    models:
+      c_cargo:
+        display: Ram C/V Cargo
+  Rolls-Royce:
+    models:
+      ghost:
+        display: Rolls-Royce Ghost
+      phantom:
+        display: Rolls-Royce Phantom
+      phantom_drophead:
+        display: Rolls-Royce Phantom Drophead
+  Scion:
+    models:
+      xd:
+        display: Scion xD
+  Spyker:
+    models:
+      c8:
+        display: Spyker C8
+  Suzuki:
+    models:
+      aerio:
+        display: Suzuki Aerio
+      kizashi:
+        display: Suzuki Kizashi
+      sx4:
+        display: Suzuki SX4
+  Tesla:
+    models:
+      model_s:
+        display: Tesla Model S
+  Toyota:
+    models:
+      4runner:
+        display: Toyota 4Runner
+      camry:
+        display: Toyota Camry
+      corolla:
+        display: Toyota Corolla
+      sequoia:
+        display: Toyota Sequoia
+  Volkswagen:
+    models:
+      beetle:
+        display: Volkswagen Beetle
+      golf:
+        display: Volkswagen Golf
+  Volvo:
+    models:
+      '240':
+        display: Volvo 240
+      c30:
+        display: Volvo C30
+      xc90:
+        display: Volvo XC90
+  smart:
+    models:
+      fortwo:
+        display: smart fortwo
+version: 1

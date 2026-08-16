@@ -29,6 +29,7 @@ brands:
 
 
 def _записать(tmp_path: Path, текст: str) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     путь = tmp_path / "canonical.yaml"
     путь.write_text(текст, encoding="utf-8")
     return путь
@@ -127,3 +128,42 @@ def test_реальный_каталог_проекта_валиден() -> None
 
     каталог = load_catalog(DEFAULT_CATALOG_PATH)
     assert len(каталог.brands()) >= 40
+
+
+def test_индекс_классов_идёт_по_порядку_model_id(tmp_path: Path) -> None:
+    from pipeline.catalog import class_index
+
+    индекс = class_index(load_catalog(_записать(tmp_path, ВАЛИДНЫЙ_YAML)))
+    assert индекс == {
+        "peugeot__108": 0,
+        "toyota__aygo": 1,
+        "volkswagen__golf": 2,
+        "volkswagen__passat": 3,
+    }
+
+
+def test_индекс_не_зависит_от_порядка_в_yaml(tmp_path: Path) -> None:
+    """Перестановка марок в файле не должна менять ни одного class_idx.
+
+    Иначе правка YAML тихо перенумеровала бы классы, а обученные веса и
+    `catalog_index.bin` §13.2 стали бы указывать не туда.
+    """
+    from pipeline.catalog import class_index
+
+    перевёрнутый = """
+version: 1
+brands:
+  Peugeot:
+    models:
+      "108": {display: Peugeot 108, platform_group: kei_trio}
+  Toyota:
+    models:
+      aygo: {display: Toyota Aygo, platform_group: kei_trio}
+  Volkswagen:
+    models:
+      passat: {display: Volkswagen Passat}
+      golf: {display: Volkswagen Golf}
+"""
+    прямой = class_index(load_catalog(_записать(tmp_path, ВАЛИДНЫЙ_YAML)))
+    обратный = class_index(load_catalog(_записать(tmp_path / "два", перевёрнутый)))
+    assert прямой == обратный
