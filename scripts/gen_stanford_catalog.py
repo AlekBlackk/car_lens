@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,11 @@ from typing import Any
 import yaml
 
 from pipeline.catalog import STANFORD_CATALOG_PATH, brand_slug
+
+# Приватный `_ГОД` берётся из normalize намеренно, а не дублируется своей
+# регуляркой: расхождение двух определений года — тот же класс дефекта, что
+# расхождение каталога с нормализатором, только внутри одного файла.
+from pipeline.normalize import _ГОД as _РЕГЕКС_ГОДА
 from pipeline.normalize import model_core
 from scripts.fetch_stanford import dataset_dir
 
@@ -41,6 +47,12 @@ from scripts.fetch_stanford import dataset_dir
 ОПРЕДЕЛЕНИЯ_КАБИНЫ = frozenset(
     {"extended", "regular", "crew", "quad", "king", "club", "super", "double"}
 )
+
+# «SuperCab» (Ford) пишется слитно — так же, как в `_КАБИНА` из
+# pipeline/normalize.py: определение и «cab» одним токеном, без пробела.
+# `display_of` режет строку по пробелам и раздельный вид ловит через
+# КУЗОВНЫЕ_СЛОВА + ОПРЕДЕЛЕНИЯ_КАБИНЫ, а слитный — только этим регексом.
+_СЛИТНАЯ_КАБИНА = re.compile(r"^(?:" + "|".join(ОПРЕДЕЛЕНИЯ_КАБИНЫ) + r")cab$", re.IGNORECASE)
 
 
 def split_brand(class_name: str) -> tuple[str, str]:
@@ -65,8 +77,11 @@ def display_of(class_name: str) -> str:
         слова = слова[:-1]
     while слова and слова[-1].lower() in КУЗОВНЫЕ_СЛОВА:
         слова = слова[:-1]
-    # «Extended Cab» → после снятия «Cab» остаётся определение, оно тоже лишнее.
-    if len(слова) > 1 and слова[-1].lower() in ОПРЕДЕЛЕНИЯ_КАБИНЫ:
+    if слова and _СЛИТНАЯ_КАБИНА.fullmatch(слова[-1]):
+        # «SuperCab» слитно — токен целиком лишний, определение внутри него же.
+        слова = слова[:-1]
+    elif len(слова) > 1 and слова[-1].lower() in ОПРЕДЕЛЕНИЯ_КАБИНЫ:
+        # «Extended Cab» раздельно → после снятия «Cab» осталось определение.
         слова = слова[:-1]
     return " ".join(слова)
 
@@ -79,19 +94,25 @@ def build_catalog(class_names: Iterable[str]) -> dict[str, Any]:
     результат не влияет — при столкновении `display` побеждает лексически
     меньший, чтобы генератор был детерминирован.
 
-    Ядро отвергается не только пустым, но и состоящим ровно из одного
-    четырёхзначного модельного года: «Audi 2012» после отсечения марки
-    даёт остаток «2012», а `model_core("2012")` возвращает непустое ядро
-    `("2012", None)` — правило Task 4 снимает хвостовой год лишь когда в
-    ядре есть что-то ещё, иначе оно съело бы «Peugeot 2008». Здесь марка
-    уже отрезана `split_brand`, поэтому единственный оставшийся токен —
-    сам год, и сопоставлять его не с чем.
+    Ядро отвергается не только пустым, но и когда после отсечения марки
+    не осталось ничего, кроме модельного года: «Audi 2012» после
+    `split_brand` даёт остаток «2012», а `model_core("2012")` возвращает
+    непустое ядро `("2012", None)` — правило Task 4 снимает хвостовой год
+    лишь когда в ядре есть что-то ещё, иначе оно съело бы «Peugeot 2008».
+
+    Проверка сделана по остатку `split_brand`, а не по форме ядра: ядро
+    «2002» у «BMW 2002 Coupe 2012» тоже четырёхзначное число, но это
+    настоящая модель, а не осиротевший год, — отличить одно от другого
+    по одной лишь форме ядра нельзя, факт даёт только число токенов в
+    остатке до отсечения кузова и года моделью `model_core`.
     """
     марки: dict[str, dict[str, str]] = {}
     for имя in sorted(set(class_names)):
         марка, остаток = split_brand(имя)
         ядро, _ = model_core(остаток)
-        if not ядро or (ядро.isdigit() and len(ядро) == 4):
+        токены_остатка = остаток.split()
+        одинокий_год = len(токены_остатка) == 1 and bool(_РЕГЕКС_ГОДА.fullmatch(токены_остатка[0]))
+        if not ядро or одинокий_год:
             raise ValueError(f"пустое ядро модели у класса {имя!r}")
         ключ = brand_slug(ядро)
         показ = display_of(имя)
