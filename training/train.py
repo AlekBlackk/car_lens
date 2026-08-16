@@ -9,13 +9,16 @@ EMA берётся готовая (`AveragedModel` + `get_ema_multi_avg_fn`, Р-
 перестанут обновляться.
 
 bf16 включается через `torch.autocast` без `GradScaler`: масштабирование
-градиентов нужно только fp16, у bf16 диапазон экспоненты как у fp32.
+градиентов нужно только fp16, у bf16 диапазон экспоненты как у fp32. Под
+autocast идёт только бэкбон — голова ArcFace считается в fp32, см. комментарий
+в `train_one_epoch`.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import random
 import subprocess
 import time
 from collections.abc import Sequence
@@ -24,6 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.optim import AdamW
@@ -111,7 +115,12 @@ def train_one_epoch(
         with torch.autocast(
             device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"
         ):
-            логиты = head(model(картинки), метки)
+            эмбеддинг = model(картинки)
+        # Голова считается в fp32, вне autocast: `ArcFaceHead` берёт `acos(cos)`
+        # рядом с ±1, а у bf16 всего 8 бит мантиссы — там `acos` теряет точность
+        # настолько, что градиент по угловому марджину превращается в шум.
+        with torch.autocast(device_type=device.type, enabled=False):
+            логиты = head(эмбеддинг.float(), метки)
             значение = потери(логиты, метки)
         значение.backward()
         nn.utils.clip_grad_norm_(
@@ -133,6 +142,10 @@ def render_report(
     val: Metrics,
     test: Metrics,
     *,
+    val_ema: Metrics,
+    test_ema: Metrics,
+    best_epoch: int,
+    best_val_top1: float,
     device: str,
     seconds: float,
     peak_vram_mb: float,
@@ -156,6 +169,17 @@ def render_report(
         "|---|---|---|---|",
         f"| val | {val.top1_model:.4f} | {val.top5_model:.4f} | {val.top1_brand:.4f} |",
         f"| test | {test.top1_model:.4f} | {test.top5_model:.4f} | {test.top1_brand:.4f} |",
+        f"| val (EMA) | {val_ema.top1_model:.4f} | {val_ema.top5_model:.4f} | "
+        f"{val_ema.top1_brand:.4f} |",
+        f"| test (EMA) | {test_ema.top1_model:.4f} | {test_ema.top5_model:.4f} | "
+        f"{test_ema.top1_brand:.4f} |",
+        "",
+        f"Лучшая эпоха: {best_epoch}, val top1_model = {best_val_top1:.4f}. Именно её веса",
+        "лежат в `best.pt`, и в M-1.3 поедут они, а не финальные из таблицы выше —",
+        "порог ниже сверяйте с этим числом.",
+        "",
+        "Строки `(EMA)` считаются один раз в конце прогона и отвечают на вопрос, какие",
+        "веса брать в M-1.3: сырые или усреднённые. Отбор `best.pt` идёт по сырым.",
         "",
         "Пороги §5.2 к этому прогону не применяются (Р-13): они про 150 классов на",
         "уличных данных. Единственный порог здесь — `val top1_model >= 0.50`, пол",
@@ -215,6 +239,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         # разворачивает вложенный `ArcFaceConfig` в словарь, и конструктор
         # получил бы `dict` вместо датакласса.
         конфиг = replace(конфиг, epochs=аргументы.epochs)
+    # Засеваются все три генератора: `albumentations` дёргает и `random`, и
+    # `numpy.random`, поэтому без них аугментации прогона невоспроизводимы, хотя
+    # `seed` лежит в конфиге и уезжает в манифест.
+    random.seed(конфиг.seed)
+    np.random.seed(конфиг.seed)
     torch.manual_seed(конфиг.seed)
     torch.backends.cudnn.benchmark = True  # Р-20: скорость важнее побитовой воспроизводимости
 
@@ -262,6 +291,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     оптимизатор = make_optimizer(модель, голова, lr=конфиг.lr, weight_decay=конфиг.weight_decay)
     ema = AveragedModel(модель, multi_avg_fn=get_ema_multi_avg_fn(конфиг.ema_decay))
     шагов_в_эпохе = max(1, len(обучение))
+    if аргументы.limit_batches is not None:
+        # Знаменатель расписания обязан ехать вместе с лимитом шагов: иначе
+        # отладочный прогон целиком остаётся в разогреве и проверяет не тот
+        # режим, в котором пойдёт боевой.
+        шагов_в_эпохе = max(1, min(шагов_в_эпохе, аргументы.limit_batches))
+    # SHA за прогон не меняется, а `git rev-parse` на 60 эпохах — 61 запуск.
+    хеш_коммита = _git_sha()
 
     прогон = runs_dir() / f"m1_2_train_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
     прогон.mkdir(parents=True, exist_ok=True)
@@ -270,7 +306,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     журнал: list[dict[str, Any]] = []
+
+    def записать_метрики(**итоги: Any) -> None:
+        """Перезаписать `metrics.json` текущим журналом плюс переданные итоги.
+
+        Вызывается в конце каждой эпохи, а не только после цикла: падение на
+        55-й эпохе из 60 иначе теряет весь журнал, хотя чекпоинты уже на диске.
+        Единственное место сборки файла — чтобы формат не разъехался.
+        """
+        (прогон / "metrics.json").write_text(
+            json.dumps({"epochs": журнал, **итоги}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
     лучший = -1.0
+    лучшая_эпоха = -1
     начало = time.monotonic()
     for эпоха in range(конфиг.epochs):
         отсечка = time.monotonic()
@@ -312,12 +362,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "config": asdict(конфиг),
             "epoch": эпоха,
             "metrics": asdict(метрики_val),
-            "git_sha": _git_sha(),
+            "git_sha": хеш_коммита,
         }
         torch.save(чекпоинт, прогон / "last.pt")
         if метрики_val.top1_model > лучший:
             лучший = метрики_val.top1_model
+            лучшая_эпоха = эпоха
             torch.save(чекпоинт, прогон / "best.pt")
+        записать_метрики()
         print(f"эпоха {эпоха}: loss {loss:.4f}, lr {lr:.2e}, val top1 {метрики_val.top1_model:.4f}")
 
     метрики_val = evaluate(
@@ -326,16 +378,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     метрики_test = evaluate(
         модель, голова, проверочные["test"], idx_to_model_id=обратный, device=устройство
     )
+    # EMA оценивается один раз в конце прогона: на 171 классе поэпохальная оценка
+    # удваивает время валидации, а для решения «какие веса брать в M-1.3 — сырые
+    # или EMA» хватает финального числа. `ema.module` — тот же `CarClassifier`,
+    # голова у EMA общая с сырой моделью: в `AveragedModel` она не заворачивалась.
+    метрики_val_ema = evaluate(
+        ema.module, голова, проверочные["val"], idx_to_model_id=обратный, device=устройство
+    )
+    метрики_test_ema = evaluate(
+        ema.module, голова, проверочные["test"], idx_to_model_id=обратный, device=устройство
+    )
     вram = torch.cuda.max_memory_allocated() / 1024 / 1024 if устройство.type == "cuda" else 0.0
     прошло = time.monotonic() - начало
 
-    (прогон / "metrics.json").write_text(
-        json.dumps(
-            {"epochs": журнал, "val": asdict(метрики_val), "test": asdict(метрики_test)},
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    записать_метрики(
+        val=asdict(метрики_val),
+        test=asdict(метрики_test),
+        val_ema=asdict(метрики_val_ema),
+        test_ema=asdict(метрики_test_ema),
     )
     (прогон / "manifest.json").write_text(
         json.dumps(
@@ -345,7 +405,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "catalog": аргументы.catalog.name,
                 "seed": конфиг.seed,
                 "device": str(устройство),
-                "git_sha": _git_sha(),
+                "git_sha": хеш_коммита,
                 "packages": {
                     "torch": torch.__version__,
                     "config": str(аргументы.config),
@@ -362,6 +422,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             журнал,
             метрики_val,
             метрики_test,
+            val_ema=метрики_val_ema,
+            test_ema=метрики_test_ema,
+            best_epoch=лучшая_эпоха,
+            best_val_top1=лучший,
             device=str(устройство),
             seconds=прошло,
             peak_vram_mb=вram,
