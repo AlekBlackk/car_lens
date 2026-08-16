@@ -91,3 +91,97 @@ def test_оценка_на_синтетическом_загрузчике(tmp_p
     assert метрики.top5_model >= метрики.top1_model
     assert set(метрики.per_class_recall) <= {"acura__rl", "acura__tl", "bmw__x5"}
     assert np.isfinite(метрики.top1_brand)
+
+
+def test_top1_model_совпадает_с_ручным_подсчётом() -> None:
+    """Численная проверка: `top1_model` — не тавтология `<= 1.0`, а argmax-доля.
+
+    `num_classes=8 > TOP_K` — иначе `top5` покрывал бы все классы и
+    `top5_model` был бы равен 1.0 по построению, независимо от поведения кода.
+    """
+    from torch.utils.data import DataLoader, TensorDataset
+
+    from training.evaluate import evaluate
+
+    модель, голова = create_model(
+        "mobilenetv4_conv_medium.e500_r256_in1k", num_classes=8, pretrained=False
+    )
+    модель.eval()
+    картинки = torch.randn(9, 3, 64, 64)
+    метки = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 0])
+    загрузчик = DataLoader(TensorDataset(картинки, метки), batch_size=4)
+    idx_to_model_id = {индекс: f"марка{индекс}__модель{индекс}" for индекс in range(8)}
+
+    метрики = evaluate(
+        модель, голова, загрузчик, idx_to_model_id=idx_to_model_id, device=torch.device("cpu")
+    )
+
+    with torch.no_grad():
+        эталонные_логиты = голова(модель(картинки))
+    эталонные_предсказания = эталонные_логиты.argmax(dim=1)
+    эталонный_top1 = (эталонные_предсказания == метки).float().mean().item()
+
+    assert метрики.top1_model == pytest.approx(эталонный_top1)
+    assert метрики.top5_model < 1.0
+
+
+def test_режимы_модели_и_головы_восстанавливаются_по_отдельности() -> None:
+    """Порча состояния через общий флаг — регрессия из ревью Task 7."""
+    from torch.utils.data import DataLoader, TensorDataset
+
+    from training.evaluate import evaluate
+
+    модель, голова = create_model(
+        "mobilenetv4_conv_medium.e500_r256_in1k", num_classes=3, pretrained=False
+    )
+    модель.train()
+    голова.eval()
+    картинки = torch.randn(4, 3, 64, 64)
+    метки = torch.tensor([0, 1, 2, 0])
+    загрузчик = DataLoader(TensorDataset(картинки, метки), batch_size=2)
+
+    evaluate(
+        модель,
+        голова,
+        загрузчик,
+        idx_to_model_id={0: "acura__rl", 1: "acura__tl", 2: "bmw__x5"},
+        device=torch.device("cpu"),
+    )
+
+    assert модель.training is True
+    assert голова.training is False
+
+
+def test_режимы_восстанавливаются_при_исключении_внутри_цикла() -> None:
+    from torch import Tensor
+    from torch.utils.data import DataLoader, Dataset
+
+    from training.evaluate import evaluate
+
+    class ПадающийDataset(Dataset[tuple[Tensor, int]]):  # type: ignore[misc]
+        """Датасет, ломающийся на чтении батча — для проверки `finally`."""
+
+        def __len__(self) -> int:
+            return 2
+
+        def __getitem__(self, index: int) -> tuple[Tensor, int]:
+            raise RuntimeError("тест: ошибка чтения батча")
+
+    модель, голова = create_model(
+        "mobilenetv4_conv_medium.e500_r256_in1k", num_classes=3, pretrained=False
+    )
+    модель.train()
+    голова.eval()
+    загрузчик = DataLoader(ПадающийDataset(), batch_size=2)
+
+    with pytest.raises(RuntimeError):
+        evaluate(
+            модель,
+            голова,
+            загрузчик,
+            idx_to_model_id={0: "acura__rl", 1: "acura__tl", 2: "bmw__x5"},
+            device=torch.device("cpu"),
+        )
+
+    assert модель.training is True
+    assert голова.training is False

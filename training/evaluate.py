@@ -28,7 +28,7 @@ def evaluate(
     device: torch.device,
 ) -> Metrics:
     """Метрики закрытого множества. Модель и голова переводятся в `eval`."""
-    было_обучение = model.training
+    режим_модели, режим_головы = model.training, head.training
     model.eval()
     head.eval()
     предсказания: list[list[int]] = []
@@ -41,6 +41,6 @@ def evaluate(
             предсказания.extend(лучшие.cpu().tolist())
             цели.extend(int(метка) for метка in метки)
     finally:
-        model.train(было_обучение)
-        head.train(было_обучение)
+        model.train(режим_модели)
+        head.train(режим_головы)
     return aggregate(предсказания, цели, idx_to_model_id=idx_to_model_id)
