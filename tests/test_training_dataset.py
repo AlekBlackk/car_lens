@@ -8,6 +8,7 @@ import pytest
 pytest.importorskip("torch")
 
 import cv2
+from torch import Tensor
 
 from training.dataset import CropDataset, build_transforms, make_loader
 from training.samples import Sample
@@ -47,6 +48,53 @@ def test_train_трансформы_меняют_картинку(tmp_path: Path
     выходы = [датасет[0][0] for _ in range(8)]
     различия = [bool((выходы[0] != другой).any()) for другой in выходы[1:]]
     assert any(различия), "аугментации не применились ни разу за восемь попыток"
+
+
+def test_train_трансформы_воспроизводимы_по_сиду(tmp_path: Path) -> None:
+    """Один сид — одна последовательность аугментаций, другой сид — другая."""
+    образцы = [Sample(path=кроп(tmp_path), class_idx=0, is_multi_car=False)]
+
+    def последовательность(сид: int) -> list[Tensor]:
+        датасет = CropDataset(
+            образцы, build_transforms(64, train=True, mean=СРЕДНЕЕ, std=ОТКЛОНЕНИЕ, seed=сид)
+        )
+        return [датасет[0][0] for _ in range(4)]
+
+    первая = последовательность(1337)
+    вторая = последовательность(1337)
+    другая = последовательность(7331)
+    assert all(bool((левый == правый).all()) for левый, правый in zip(первая, вторая, strict=True))
+    assert any(bool((левый != правый).any()) for левый, правый in zip(первая, другая, strict=True))
+
+
+def test_воркеры_аугментируют_по_разному_и_воспроизводимо(tmp_path: Path) -> None:
+    """Один и тот же кроп в двух воркерах — разные аугментации, при повторе те же.
+
+    Fork-копии загрузчика получают один и тот же объект `A.Compose`, поэтому без
+    пересева в `worker_init_fn` все воркеры идут одной последовательностью
+    параметров аугментаций: восемь воркеров дают не восемь разных картинок, а
+    восемь копий одной.
+    """
+    один_и_тот_же = кроп(tmp_path)
+    образцы = [
+        Sample(path=один_и_тот_же, class_idx=номер, is_multi_car=False) for номер in range(4)
+    ]
+
+    def прогон() -> list[Tensor]:
+        загрузчик = make_loader(
+            образцы,
+            build_transforms(64, train=True, mean=СРЕДНЕЕ, std=ОТКЛОНЕНИЕ, seed=1337),
+            batch_size=1,
+            shuffle=False,
+            num_workers=2,
+            seed=1337,
+        )
+        return [картинки for картинки, _ in загрузчик]
+
+    первый = прогон()
+    второй = прогон()
+    assert bool((первый[0] != первый[1]).any()), "два воркера дали одну и ту же аугментацию"
+    assert all(bool((левый == правый).all()) for левый, правый in zip(первый, второй, strict=True))
 
 
 def test_загрузчик_собирает_батч(tmp_path: Path) -> None:

@@ -244,9 +244,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         # разворачивает вложенный `ArcFaceConfig` в словарь, и конструктор
         # получил бы `dict` вместо датакласса.
         конфиг = replace(конфиг, epochs=аргументы.epochs)
-    # Засеваются все три генератора: `albumentations` дёргает и `random`, и
-    # `numpy.random`, поэтому без них аугментации прогона невоспроизводимы, хотя
-    # `seed` лежит в конфиге и уезжает в манифест.
+    # Глобальные генераторы засеваются ради torch (инициализация головы, dropout)
+    # и ради того, что дёргает `random`/`numpy` в самом проекте. Аугментации сюда
+    # не входят: у трансформов albumentations 2.x свои `py_random` и
+    # `random_generator` от энтропии ОС, они засеваются через
+    # `build_transforms(seed=...)` и пересеваются в воркерах.
     random.seed(конфиг.seed)
     np.random.seed(конфиг.seed)
     torch.manual_seed(конфиг.seed)
@@ -272,12 +274,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         read_samples(
             splits_dir() / "train.parquet", кропы, num_classes=len(индекс), skip_multi_car=True
         ),
-        build_transforms(конфиг.img_size, train=True, mean=модель.mean, std=модель.std),
+        build_transforms(
+            конфиг.img_size, train=True, mean=модель.mean, std=модель.std, seed=конфиг.seed
+        ),
         batch_size=конфиг.batch_size,
         shuffle=True,
         num_workers=конфиг.num_workers,
+        seed=конфиг.seed,
     )
     проверочные = {
+        # Здесь `seed` не нужен: только `Resize` и нормализация, `shuffle=False` —
+        # порядок и содержимое батчей детерминированы без всякого генератора.
         имя: make_loader(
             read_samples(
                 splits_dir() / f"{имя}.parquet",
