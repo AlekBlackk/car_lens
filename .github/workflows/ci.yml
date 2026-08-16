@@ -47,4 +47,4 @@ jobs:
       - run: uv sync --locked --group dev
 
       - name: Инварианты схемы и теста на утечку
-        run: uv run pytest tests/test_split.py tests/test_schema.py -v
+        run: uv run pytest tests/test_split.py tests/test_schema.py tests/test_hashing.py tests/test_ingest_build.py -v

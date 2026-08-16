@@ -24,6 +24,29 @@ uv sync --group dev --group train
 uv run ruff check . && uv run mypy && uv run pytest
 ```
 
+## Скелет M-1: данные Stanford Cars
+
+Датасет и веса детектора скачиваются один раз и в git не попадают.
+
+```bash
+uv run --group train python -m scripts.fetch_stanford
+```
+
+```bash
+uv run --group train python -m scripts.build_stanford_splits
+```
+
+Второй скрипт пишет `train/val/test.parquet` в `$CARLENS_DATA_ROOT/splits`
+и отчёт о прогоне в `$CARLENS_DATA_ROOT/runs/m1b_ingest_<дата>/`.
+
+Каталог скелета `catalog/stanford.yaml` — расходный и к продакшн-каталогу
+`canonical.yaml` отношения не имеет (решение Р-7). Он генерируется и
+перезаписывается командой:
+
+```bash
+uv run python -m scripts.gen_stanford_catalog
+```
+
 ## Зафиксированные версии
 
 Точные версии живут в `uv.lock`. Ключевые пины и причины — §13.4
