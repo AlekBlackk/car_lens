@@ -67,12 +67,24 @@ files = ["pipeline", "scripts", "tests"]
 module = [
     "cv2.*",
     "imagehash.*",
-    "ultralytics.*",
-    "datasets.*",
     "rapidfuzz.*",
     "pyarrow.*",
 ]
 ignore_missing_imports = true
+
+# Пакеты из группы `train`: в CI их нет, на машине разработчика есть. Без
+# `follow_imports = skip` проверка типов зависела бы от того, установлена ли
+# группа: в CI модуль становится `Any` и всё зелено, локально mypy читает
+# настоящие аннотации и падает. Пропуск делает результат одинаковым в обоих
+# окружениях. Обёртки над этими пакетами тонкие и покрыты тестами на подставных
+# объектах, поэтому потеря типов здесь ничего не стоит.
+[[tool.mypy.overrides]]
+module = [
+    "ultralytics.*",
+    "datasets.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
