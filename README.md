@@ -56,6 +56,22 @@ uv run --group train python -m scripts.build_stanford_splits
 uv run python -m scripts.gen_stanford_catalog
 ```
 
+## Скелет M-1: обучение
+
+```bash
+uv run --group train python -m training.train
+```
+
+Пишет прогон в `$CARLENS_DATA_ROOT/runs/m1_2_train_<дата>/`: карточку,
+метрики по эпохам, манифест и два чекпоинта — `best.pt` по `val top1_model`
+и `last.pt`. Конфиг по умолчанию — `training/configs/skeleton_stanford.yaml`.
+
+Санитарный прогон перед полным (три эпохи, десять шагов на эпоху):
+
+```bash
+uv run --group train python -m training.train --epochs 3 --limit-batches 10
+```
+
 ## Зафиксированные версии
 
 Точные версии живут в `uv.lock`. Ключевые пины и причины — §13.4
