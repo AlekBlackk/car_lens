@@ -70,7 +70,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["pipeline", "scripts", "tests"]
+files = ["pipeline", "scripts", "tests", "training"]
 
 [[tool.mypy.overrides]]
 module = [
@@ -91,6 +91,9 @@ ignore_missing_imports = true
 module = [
     "ultralytics.*",
     "datasets.*",
+    "torch.*",
+    "timm.*",
+    "albumentations.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"
