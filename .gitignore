@@ -10,6 +10,9 @@ runs/
 *.mlmodelc
 *.bin
 !catalog/**/*.bin
+# Фикстура индекса — не артефакт прогона, а часть контракта §13.2: её читает
+# Node-тест, собрать индекс сам он не может (нужны веса и torch).
+!tests/fixtures/index/*.bin
 
 # Python
 __pycache__/

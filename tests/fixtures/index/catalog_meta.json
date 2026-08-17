@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "generated_at": "2026-08-17T00:00:00Z",
+  "model_weights_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "embedding_dim": 256,
+  "centroids_per_class": 4,
+  "classes": [
+    {
+      "model_id": "acme__one",
+      "brand": "Acme",
+      "display": "Acme One",
+      "platform_group": null
+    },
+    {
+      "model_id": "acme__two",
+      "brand": "Acme",
+      "display": "Acme Two",
+      "platform_group": "p2"
+    }
+  ]
+}
