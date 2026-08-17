@@ -31,8 +31,27 @@ train = [
     "ultralytics==8.4.120",
     "datasets==5.0.1",
 ]
+# Экспорт идёт в отдельной venv, а не в обучающей: `litert-torch` тянет свой стек
+# конвертера (jax, xdsl, torchao), и держать его рядом с обучением значило бы решать
+# конфликты версий каждый раз, когда двигается любая из двух половин.
+# `torch` продублирован из группы `train` тем же пином не для установки — его и так
+# притянет `litert-torch` — а чтобы окружение экспорта не разошлось с тем, в котором
+# писался чекпоинт: `torch.load` на другой минорной версии читает его иначе.
+# `ai-edge-litert` — рантайм LiteRT, который приходит вместе с `litert-torch`; пин
+# прямой, потому что интерпретатор импортируется в коде экспорта напрямую, а
+# транзитивная зависимость контрактом не является и может уехать со следующим
+# релизом конвертера.
+# `scikit-learn` здесь не про экспорт: в M-1.4 индекс эталонов пересобирается на
+# выходах квантованной модели, а k-means для центроидов берётся из sklearn. Запускается
+# это в venv экспорта, где иначе `KMeans` не найдётся — причём не на импорте, а через
+# сорок минут после старта, на самой сборке центроидов. `timm` нужен там же и раньше:
+# без него не собрать архитектуру, в которую грузится чекпоинт.
 export = [
+    "torch==2.12.0",
+    "timm==1.0.28",
+    "scikit-learn==1.9.0",
     "litert-torch==0.9.3",
+    "ai-edge-litert==2.1.6",
     "onnx==1.21.0",
     "onnxruntime==1.28.0",
 ]
@@ -76,7 +95,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["pipeline", "scripts", "tests", "training"]
+files = ["export", "pipeline", "scripts", "tests", "training"]
 
 [[tool.mypy.overrides]]
 module = [
@@ -105,7 +124,28 @@ module = [
 ignore_missing_imports = true
 follow_imports = "skip"
 
+# Пакеты группы `export`: причина та же, что у `train` выше, только окружений уже три —
+# CI, venv обучения и venv экспорта, и `litert-torch` установлен ровно в последнем. Без
+# пропуска mypy давал бы три разных ответа на один и тот же код.
+# Имена модулей проверены в собранной venv, а не выведены из имён пакетов: дистрибутив
+# `litert-torch` ставит модуль `litert_torch`, `ai-edge-litert` — `ai_edge_litert`;
+# `torchao` попадает сюда потому, что в torch 2.12 PT2E-квантизация живёт там
+# (`torch.ao.quantization.quantize_pt2e` из старых примеров больше не существует).
+[[tool.mypy.overrides]]
+module = [
+    "litert_torch.*",
+    "ai_edge_litert.*",
+    "ai_edge_quantizer.*",
+    "torchao.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+# Маркер, а не skipif по импорту: тесты экспорта запускаются только в venv экспорта, а
+# джоб `python` в CI ставит одну группу `dev` и торча там нет вовсе. Регистрация нужна,
+# чтобы `-m "not export"` не молчал об опечатке в имени маркера.
+markers = ["export: требует venv экспорта с litert-torch и ai-edge-litert"]

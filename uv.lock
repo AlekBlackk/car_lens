@@ -270,9 +270,13 @@ dev = [
     { name = "types-pyyaml" },
 ]
 export = [
+    { name = "ai-edge-litert" },
     { name = "litert-torch" },
     { name = "onnx" },
     { name = "onnxruntime" },
+    { name = "scikit-learn" },
+    { name = "timm" },
+    { name = "torch" },
 ]
 train = [
     { name = "albumentations" },
@@ -307,9 +311,13 @@ dev = [
     { name = "types-pyyaml" },
 ]
 export = [
+    { name = "ai-edge-litert", specifier = "==2.1.6" },
     { name = "litert-torch", specifier = "==0.9.3" },
     { name = "onnx", specifier = "==1.21.0" },
     { name = "onnxruntime", specifier = "==1.28.0" },
+    { name = "scikit-learn", specifier = "==1.9.0" },
+    { name = "timm", specifier = "==1.0.28" },
+    { name = "torch", specifier = "==2.12.0" },
 ]
 train = [
     { name = "albumentations", specifier = "==2.0.8" },
