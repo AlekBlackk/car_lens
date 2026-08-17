@@ -72,6 +72,52 @@ uv run --group train python -m training.train
 uv run --group train python -m training.train --epochs 3 --limit-batches 10
 ```
 
+## Скелет M-1: индекс эталонов
+
+Сборка `catalog_index.bin` по §13.2 из чекпоинта обучения:
+
+```bash
+uv run --group train python -m training.build_index \
+  --checkpoint $CARLENS_DATA_ROOT/runs/m1_2_train_<дата>/best.pt --device cuda
+```
+
+Пишет в `runs/m1_2_train_<дата>/index/`: `catalog_index.bin`, спутник
+`catalog_meta.json` (порядок классов, sha256 которого лежит в заголовке
+бинарника) и `report.json` с размерами и хешами. Индекс — расходный артефакт
+прогона рядом с весами, по которым собран, и в git не хранится (решение Р-22);
+в приложение он копируется явным шагом сборки на M-1.5.
+
+Оценка индекса — top-1/top-5 по косинусу к центроидам, той же арифметикой
+метрик, что мерила голову ArcFace:
+
+```bash
+uv run --group train python -m scripts.eval_index \
+  --index $CARLENS_DATA_ROOT/runs/m1_2_train_<дата>/index \
+  --checkpoint $CARLENS_DATA_ROOT/runs/m1_2_train_<дата>/best.pt --device cuda
+```
+
+Кладёт `index_metrics.json` рядом с индексом.
+
+Читалка формата на TypeScript живёт в `app/src/vision/catalogIndex.ts` и
+проверяется на коммитнутой фикстуре `tests/fixtures/index/`:
+
+```bash
+cd app && npm ci && npm run build && npm test
+```
+
+Прочитать этим же кодом настоящий собранный индекс:
+
+```bash
+node app/scripts/dump-index.mjs $CARLENS_DATA_ROOT/runs/m1_2_train_<дата>/index
+```
+
+Фикстуру пересобирает генератор — после любой правки формата это обязательно,
+иначе `tests/test_index_fixture.py` падает:
+
+```bash
+uv run python -m scripts.gen_index_fixture
+```
+
 ## Зафиксированные версии
 
 Точные версии живут в `uv.lock`. Ключевые пины и причины — §13.4
