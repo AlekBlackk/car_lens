@@ -83,3 +83,23 @@ def test_многомашинные_выбрасываются_по_флагу(t
     assert len(без_многомашинных) == 1
     assert len(со_всеми) == 2
     assert со_всеми[1].is_multi_car is True
+
+
+def test_пустой_сплит_отвергается(tmp_path: Path) -> None:
+    """Сплит без строк — дыра в данных, а не пустой список образцов."""
+    файл, кропы = подготовить(tmp_path)
+    with pytest.raises(DatasetError, match="ни одного образца"):
+        read_samples(файл, кропы, num_classes=171, skip_multi_car=True)
+
+
+def test_сплит_из_одних_многомашинных_отвергается(tmp_path: Path) -> None:
+    """Фильтр §3.5, съевший весь сплит, — тот же пустой датасет.
+
+    Сообщение обязано показать число отброшенных: иначе непонятно, сплит пуст
+    или его выел `skip_multi_car`.
+    """
+    файл, кропы = подготовить(tmp_path, строка(is_multi_car=True))
+    with pytest.raises(DatasetError, match="отброшено многомашинных: 1"):
+        read_samples(файл, кропы, num_classes=171, skip_multi_car=True)
+    # Без фильтра та же строка читается: пустоту делает именно фильтр.
+    assert len(read_samples(файл, кропы, num_classes=171, skip_multi_car=False)) == 1

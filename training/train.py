@@ -36,7 +36,7 @@ from torch.utils.data import DataLoader
 
 from pipeline.catalog import STANFORD_CATALOG_PATH, class_index, load_catalog
 from pipeline.paths import crops_dir, runs_dir, splits_dir
-from training.config import SKELETON_CONFIG_PATH, TrainConfig, load_config
+from training.config import SKELETON_CONFIG_PATH, TrainConfig, load_config, validate_epoch_budgets
 from training.dataset import build_transforms, make_loader
 from training.evaluate import evaluate
 from training.metrics import Metrics
@@ -149,13 +149,19 @@ def render_report(
     device: str,
     seconds: float,
     peak_vram_mb: float,
+    started_at: datetime,
 ) -> str:
-    """Карточка прогона на русском (§10 дизайна)."""
+    """Карточка прогона на русском (§10 дизайна).
+
+    `started_at` — метка старта, из которой собрано имя каталога прогона.
+    Рендеринг идёт в конце прогона, и `datetime.now()` здесь поставил бы дату
+    финиша: для 33 минут это косметика, для прогона через полночь — уже враньё.
+    """
     худшие = sorted(val.per_class_recall.items(), key=lambda пара: пара[1])[:10]
     строки = [
         "# Карточка прогона M-1.2",
         "",
-        f"Дата: {datetime.now(UTC).date().isoformat()}",
+        f"Дата: {started_at.date().isoformat()}",
         "",
         f"- Бэкбон: `{config.backbone}`",
         f"- Классов: {len(val.per_class_recall)} из встреченных в val",
@@ -178,13 +184,19 @@ def render_report(
         "лежат в `best.pt`, и в M-1.3 поедут они, а не финальные из таблицы выше —",
         "порог ниже сверяйте с этим числом.",
         "",
-        "Строки `(EMA)` считаются один раз в конце прогона и отвечают на вопрос, какие",
-        "веса брать в M-1.3: сырые или усреднённые. Отбор `best.pt` идёт по сырым.",
+        "Строки `(EMA)` считаются один раз в конце прогона, и читать их как ответ на",
+        "вопрос «сырые веса или усреднённые» нельзя. В `AveragedModel` завёрнут только",
+        "бэкбон: голова ArcFace остаётся сырой, а BN-буферы torch при `use_buffers=False`",
+        "копирует из живой модели на каждом `update_parameters`. Измерен, значит, гибрид —",
+        "усреднённый бэкбон с сырой головой и сырыми буферами, а не усреднённая модель.",
+        "Числа посчитаны и воспроизводимы, но аргументом за или против усреднения не",
+        "являются: веса для M-1.3 берутся сырые, из `best.pt`. Подробности — долг 7 в §11",
+        "дизайна; честная оценка требует усреднять голову вместе с бэкбоном и стоит ещё",
+        "одного прогона, поэтому на M-1.2 не делалась.",
         "",
-        "Осторожно: числа `(EMA)` посчитаны на финальном усреднении, то есть на",
+        "Отдельно: числа `(EMA)` посчитаны на финальном усреднении, то есть на",
         "`ema_state` из `last.pt`. В `best.pt` лежит `ema_state` лучшей по сырым весам",
-        "эпохи — другие тензоры, и к числам выше они отношения не имеют. Если по этой",
-        "таблице выбран вариант EMA, грузить `ema_state` из `last.pt`.",
+        "эпохи — другие тензоры, и к числам выше они отношения не имеют.",
         "",
         "Пороги §5.2 к этому прогону не применяются (Р-13): они про 150 классов на",
         "уличных данных. Единственный порог здесь — `val top1_model >= 0.50`, пол",
@@ -208,6 +220,19 @@ def render_report(
         for запись in эпохи
     ]
     return "\n".join(строки) + "\n"
+
+
+def _пик_vram_мб(device: torch.device) -> float:
+    """Пик выделенной torch памяти на устройстве, в МБ. Вне cuda — ноль.
+
+    Считается по учёту torch, а не по `nvidia-smi`: кеш аллокатора и контекст
+    драйвера сюда не входят, так что число ниже занятого в системе.
+    """
+    if device.type != "cuda":
+        return 0.0
+    # `float(...)` не ради арифметики (байты и так целые), а ради mypy: у него
+    # импорты torch пропущены, и `max_memory_allocated` возвращает `Any`.
+    return float(torch.cuda.max_memory_allocated()) / 1024 / 1024
 
 
 def _git_sha() -> str:
@@ -244,6 +269,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         # разворачивает вложенный `ArcFaceConfig` в словарь, и конструктор
         # получил бы `dict` вместо датакласса.
         конфиг = replace(конфиг, epochs=аргументы.epochs)
+        # Override едет после валидации, поэтому эпоховые бюджеты перепроверяются
+        # здесь: иначе `--epochs 2` при `warmup_epochs: 3` прошло бы молча, и весь
+        # прогон остался бы в разогреве — тот же приём, что у `--limit-batches`.
+        validate_epoch_budgets(конфиг, source="--epochs")
+    # Флаги, поменявшие прогон, едут в манифест: `config.yaml` рядом с ним — копия
+    # файла до override'ов, и по одному ему нельзя понять, почему в журнале две
+    # эпохи вместо шестидесяти. Пустой объект означает «прогон ровно по конфигу».
+    переопределения: dict[str, Any] = {}
+    if аргументы.epochs is not None:
+        переопределения["epochs"] = аргументы.epochs
+    if аргументы.limit_batches is not None:
+        переопределения["limit_batches"] = аргументы.limit_batches
+    if аргументы.no_pretrained:
+        переопределения["no_pretrained"] = True
     # Глобальные генераторы засеваются ради torch (инициализация головы, dropout)
     # и ради того, что дёргает `random`/`numpy` в самом проекте. Аугментации сюда
     # не входят: у трансформов albumentations 2.x свои `py_random` и
@@ -311,13 +350,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     # SHA за прогон не меняется, а `git rev-parse` на 60 эпохах — 61 запуск.
     хеш_коммита = _git_sha()
 
-    прогон = runs_dir() / f"m1_2_train_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
+    старт = datetime.now(UTC)
+    прогон = runs_dir() / f"m1_2_train_{старт.strftime('%Y%m%d_%H%M%S')}"
     прогон.mkdir(parents=True, exist_ok=True)
     (прогон / "config.yaml").write_text(
         аргументы.config.read_text(encoding="utf-8"), encoding="utf-8"
     )
 
     журнал: list[dict[str, Any]] = []
+    лучший = -1.0
+    лучшая_эпоха = -1
 
     def записать_метрики(**итоги: Any) -> None:
         """Перезаписать `metrics.json` текущим журналом плюс переданные итоги.
@@ -325,14 +367,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         Вызывается в конце каждой эпохи, а не только после цикла: падение на
         55-й эпохе из 60 иначе теряет весь журнал, хотя чекпоинты уже на диске.
         Единственное место сборки файла — чтобы формат не разъехался.
+
+        `best_epoch`, `best_val_top1` и `peak_vram_mb` пишутся на каждом вызове, а
+        не один раз в конце: по ним сверяют, что в M-1.3 поедут веса из `best.pt`,
+        и после падения на 55-й эпохе они нужны ровно так же, как журнал.
         """
         (прогон / "metrics.json").write_text(
-            json.dumps({"epochs": журнал, **итоги}, ensure_ascii=False, indent=2),
+            json.dumps(
+                {
+                    "epochs": журнал,
+                    "best_epoch": лучшая_эпоха,
+                    "best_val_top1": лучший,
+                    "peak_vram_mb": _пик_vram_мб(устройство),
+                    **итоги,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
 
-    лучший = -1.0
-    лучшая_эпоха = -1
     начало = time.monotonic()
     for эпоха in range(конфиг.epochs):
         отсечка = time.monotonic()
@@ -391,16 +445,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         модель, голова, проверочные["test"], idx_to_model_id=обратный, device=устройство
     )
     # EMA оценивается один раз в конце прогона: на 171 классе поэпохальная оценка
-    # удваивает время валидации, а для решения «какие веса брать в M-1.3 — сырые
-    # или EMA» хватает финального числа. `ema.module` — тот же `CarClassifier`,
-    # голова у EMA общая с сырой моделью: в `AveragedModel` она не заворачивалась.
+    # удваивает время валидации, а числа всё равно измеряют гибрид — усреднённый
+    # бэкбон с сырой головой и сырыми BN-буферами (долг 7 в §11 дизайна), так что
+    # серия таких чисел по эпохам не добавит к ним смысла. `ema.module` — тот же
+    # `CarClassifier`, голова у EMA общая с сырой: в `AveragedModel` она не заворачивалась.
     метрики_val_ema = evaluate(
         ema.module, голова, проверочные["val"], idx_to_model_id=обратный, device=устройство
     )
     метрики_test_ema = evaluate(
         ema.module, голова, проверочные["test"], idx_to_model_id=обратный, device=устройство
     )
-    вram = torch.cuda.max_memory_allocated() / 1024 / 1024 if устройство.type == "cuda" else 0.0
+    пик_vram = _пик_vram_мб(устройство)
     прошло = time.monotonic() - начало
 
     записать_метрики(
@@ -418,6 +473,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "seed": конфиг.seed,
                 "device": str(устройство),
                 "git_sha": хеш_коммита,
+                "cli_overrides": переопределения,
                 "packages": {
                     "torch": torch.__version__,
                     "config": str(аргументы.config),
@@ -440,7 +496,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             best_val_top1=лучший,
             device=str(устройство),
             seconds=прошло,
-            peak_vram_mb=вram,
+            peak_vram_mb=пик_vram,
+            started_at=старт,
         ),
         encoding="utf-8",
     )

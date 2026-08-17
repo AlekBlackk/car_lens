@@ -32,8 +32,15 @@ class ArcFaceHead(nn.Module):  # type: ignore[misc]
         self.m = m
 
     def forward(self, embedding: Tensor, target: Tensor | None = None) -> Tensor:
-        """Логиты. Без `target` — `cosine * s`, ими считаются метрики."""
-        косинус = F.linear(F.normalize(embedding), F.normalize(self.weight))
+        """Логиты. Без `target` — `cosine * s`, ими считаются метрики.
+
+        Считает только в fp32, и это требование головы, а не вызывающего: `clamp`
+        к `±(1 - 1e-7)` в bf16 вырождается в `±1` (мантисса 8 бит), а `acos` рядом
+        с `±1` даёт `NaN` в градиенте — веха уже стоила из-за этого блокера.
+        Косинус поэтому приводится к fp32 сразу после `F.linear`: на fp32-пути это
+        no-op, а под autocast делает голову безопасной у любого вызывающего.
+        """
+        косинус = F.linear(F.normalize(embedding), F.normalize(self.weight)).float()
         косинус = косинус.clamp(-1.0 + 1e-7, 1.0 - 1e-7)
         if target is None:
             return косинус * self.s

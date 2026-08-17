@@ -74,26 +74,50 @@ def load_config(path: Path) -> TrainConfig:
 
     конфиг = TrainConfig(
         backbone=str(остальное["backbone"]),
-        embedding_dim=int(остальное["embedding_dim"]),
-        img_size=int(остальное["img_size"]),
-        batch_size=int(остальное["batch_size"]),
-        epochs=int(остальное["epochs"]),
+        embedding_dim=_целое(path, "embedding_dim", остальное["embedding_dim"]),
+        img_size=_целое(path, "img_size", остальное["img_size"]),
+        batch_size=_целое(path, "batch_size", остальное["batch_size"]),
+        epochs=_целое(path, "epochs", остальное["epochs"]),
         optimizer=str(остальное["optimizer"]),
-        lr=float(остальное["lr"]),
-        weight_decay=float(остальное["weight_decay"]),
+        lr=_дробное(path, "lr", остальное["lr"]),
+        weight_decay=_дробное(path, "weight_decay", остальное["weight_decay"]),
         scheduler=str(остальное["scheduler"]),
-        warmup_epochs=int(остальное["warmup_epochs"]),
+        warmup_epochs=_целое(path, "warmup_epochs", остальное["warmup_epochs"]),
         arcface=arcface,
         amp=str(остальное["amp"]),
-        ema_decay=float(остальное["ema_decay"]),
-        grad_clip=float(остальное["grad_clip"]),
-        backbone_lr_mult=float(остальное["backbone_lr_mult"]),
-        backbone_lr_mult_epochs=int(остальное["backbone_lr_mult_epochs"]),
-        num_workers=int(остальное["num_workers"]),
-        seed=int(остальное["seed"]),
+        ema_decay=_дробное(path, "ema_decay", остальное["ema_decay"]),
+        grad_clip=_дробное(path, "grad_clip", остальное["grad_clip"]),
+        backbone_lr_mult=_дробное(path, "backbone_lr_mult", остальное["backbone_lr_mult"]),
+        backbone_lr_mult_epochs=_целое(
+            path, "backbone_lr_mult_epochs", остальное["backbone_lr_mult_epochs"]
+        ),
+        num_workers=_целое(path, "num_workers", остальное["num_workers"]),
+        seed=_целое(path, "seed", остальное["seed"]),
     )
     _проверить_значения(path, конфиг)
     return конфиг
+
+
+def validate_epoch_budgets(config: TrainConfig, *, source: str) -> None:
+    """Проверить, что каждый эпоховый бюджет строго меньше `epochs`.
+
+    Функция публичная, потому что вызывается дважды: из `load_config` и из
+    `train.py` после CLI-override'а `--epochs`, который перекрывает конфиг уже
+    после валидации. Бюджет, не меньший числа эпох, означает, что режим, ради
+    которого он введён (полный lr после разогрева, конечная маржа, снятый
+    множитель бэкбона), целиком не наступит — прогон проверяет не то, что
+    задумано, и молча.
+
+    `source` — что показать в сообщении: путь конфига или имя флага.
+    """
+    бюджеты = (
+        ("warmup_epochs", config.warmup_epochs),
+        ("margin_warmup_epochs", config.arcface.margin_warmup_epochs),
+        ("backbone_lr_mult_epochs", config.backbone_lr_mult_epochs),
+    )
+    for имя, значение in бюджеты:
+        if значение >= config.epochs:
+            raise ConfigError(f"{source}: {имя}={значение} не меньше epochs={config.epochs}")
 
 
 def _разобрать_arcface(path: Path, сырое: Any) -> ArcFaceConfig:
@@ -102,11 +126,40 @@ def _разобрать_arcface(path: Path, сырое: Any) -> ArcFaceConfig:
     ожидаемые = {поле.name for поле in fields(ArcFaceConfig)}
     _сверить_ключи(path, set(сырое), ожидаемые, где="arcface")
     return ArcFaceConfig(
-        s=float(сырое["s"]),
-        margin_start=float(сырое["margin_start"]),
-        margin_end=float(сырое["margin_end"]),
-        margin_warmup_epochs=int(сырое["margin_warmup_epochs"]),
+        s=_дробное(path, "arcface.s", сырое["s"]),
+        margin_start=_дробное(path, "arcface.margin_start", сырое["margin_start"]),
+        margin_end=_дробное(path, "arcface.margin_end", сырое["margin_end"]),
+        margin_warmup_epochs=_целое(
+            path, "arcface.margin_warmup_epochs", сырое["margin_warmup_epochs"]
+        ),
     )
+
+
+def _целое(path: Path, ключ: str, значение: Any) -> int:
+    """Целочисленное поле. Строка, дробное и `bool` отвергаются.
+
+    `int()` вместо этой проверки давал `epochs: 60.9` → 60 и `batch_size: "48"`
+    → 48, то есть ровно то молчаливое приведение, от которого докстринг модуля
+    обещает защиту, а на мусоре (`epochs: "шестьдесят"`) пробивал наружу голый
+    `ValueError` мимо `ConfigError`. `bool` отвергается отдельно, потому что в
+    Python он подкласс `int`, и `epochs: yes` иначе прошло бы как 1.
+    """
+    if isinstance(значение, bool) or not isinstance(значение, int | float):
+        raise ConfigError(f"{path}: {ключ}={значение!r} должно быть целым числом")
+    if isinstance(значение, float) and not значение.is_integer():
+        raise ConfigError(f"{path}: {ключ}={значение!r} должно быть целым, дробное недопустимо")
+    return int(значение)
+
+
+def _дробное(path: Path, ключ: str, значение: Any) -> float:
+    """Поле с плавающей точкой. Строка и `bool` отвергаются, целое годится.
+
+    Целое пропускается сознательно: `s: 32` и `s: 32.0` — одно значение, а вот
+    `lr: "3e-4"` из YAML приходит строкой, и `float()` съел бы её молча.
+    """
+    if isinstance(значение, bool) or not isinstance(значение, int | float):
+        raise ConfigError(f"{path}: {ключ}={значение!r} должно быть числом")
+    return float(значение)
 
 
 def _сверить_ключи(path: Path, есть: set[str], ожидаемые: set[str], *, где: str = "") -> None:
@@ -128,7 +181,4 @@ def _проверить_значения(path: Path, конфиг: TrainConfig) 
         raise ConfigError(f"{path}: amp={конфиг.amp!r}, допустим только bf16")
     if конфиг.epochs <= 0 or конфиг.batch_size <= 0 or конфиг.img_size <= 0:
         raise ConfigError(f"{path}: epochs, batch_size и img_size должны быть положительными")
-    if конфиг.warmup_epochs >= конфиг.epochs:
-        raise ConfigError(
-            f"{path}: warmup_epochs={конфиг.warmup_epochs} не меньше epochs={конфиг.epochs}"
-        )
+    validate_epoch_budgets(конфиг, source=str(path))

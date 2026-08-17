@@ -34,6 +34,9 @@ def brand_of(model_id: str) -> str:
     return марка
 
 
+TOP_K = 5
+
+
 def aggregate(
     top5: Sequence[Sequence[int]],
     targets: Sequence[int],
@@ -43,14 +46,26 @@ def aggregate(
     """Свести предсказания в метрики.
 
     `top5[i]` — индексы классов по убыванию уверенности, `top5[i][0]` —
-    предсказание top-1. `targets[i]` — истинный индекс класса.
+    предсказание top-1; список короче пяти отвергается, иначе top-3 посчитался
+    бы как top-5 под именем `top5_model`. Список длиннее пяти допустим, но
+    попадание считается только по первым `TOP_K`.
+    `targets[i]` — истинный индекс класса.
     `KeyError`, если встретился индекс, которого нет в `idx_to_model_id`:
     разъехавшийся каталог обязан ронять оценку, а не занижать её молча.
+    `ValueError`, если `idx_to_model_id` неинъективен — см. ниже.
     """
     if len(top5) != len(targets):
         raise ValueError(f"несовпадение длин: {len(top5)} предсказаний, {len(targets)} меток")
     if not targets:
         raise ValueError("пустая выборка")
+    # Два индекса с одним `model_id` перетёрли бы друг друга в `per_class_recall`:
+    # число классов в отчёте молча уменьшилось бы, а recall склеился по двум
+    # разным классам. Проверка по значениям, а не по ключам: ключи уникальны сами.
+    повторы = sorted(
+        model_id for model_id, сколько in Counter(idx_to_model_id.values()).items() if сколько > 1
+    )
+    if повторы:
+        raise ValueError(f"idx_to_model_id неинъективен: {повторы} под разными индексами")
 
     попаданий_1 = 0
     попаданий_5 = 0
@@ -58,14 +73,18 @@ def aggregate(
     верных_в_классе: Counter[int] = Counter()
     всего_в_классе: Counter[int] = Counter()
 
-    for предсказания, цель in zip(top5, targets, strict=True):
+    for номер, (предсказания, цель) in enumerate(zip(top5, targets, strict=True)):
+        if len(предсказания) < TOP_K:
+            raise ValueError(
+                f"строка {номер}: {len(предсказания)} предсказаний, а top5 требует {TOP_K}"
+            )
         истинный_id = idx_to_model_id[цель]
         предсказанный_id = idx_to_model_id[предсказания[0]]
         всего_в_классе[цель] += 1
         if предсказания[0] == цель:
             попаданий_1 += 1
             верных_в_классе[цель] += 1
-        if цель in предсказания:
+        if цель in предсказания[:TOP_K]:
             попаданий_5 += 1
         if brand_of(предсказанный_id) == brand_of(истинный_id):
             попаданий_марка += 1

@@ -15,7 +15,17 @@ import torch
 
 from pipeline.schema import COLUMNS, write_split
 
-КЛАССЫ = {"acura__rl": 0, "acura__tl": 1, "bmw__x5": 2}
+# Классов шесть, а не три: `evaluate` сверяет число выходов головы с `TOP_K` до
+# форварда и зовёт `topk(TOP_K)` без клампинга — на трёх классах он отказался бы
+# считать («классов меньше 5»). Шесть классов гоняют полный путь `topk(5)`.
+КЛАССЫ = {
+    "acura__rl": 0,
+    "acura__tl": 1,
+    "bmw__x5": 2,
+    "chevrolet__corvette": 3,
+    "chevrolet__express": 4,
+    "ford__f150": 5,
+}
 # Базовый lr конфига ниже: тест расписания сверяется с ним, а не с литералом,
 # чтобы не стать пустым, если конфиг теста однажды поправят.
 БАЗОВЫЙ_LR = 1.0e-3
@@ -32,6 +42,13 @@ def каталог(tmp_path: Path) -> Path:
                         "models": {"rl": {"display": "Acura RL"}, "tl": {"display": "Acura TL"}}
                     },
                     "BMW": {"models": {"x5": {"display": "BMW X5"}}},
+                    "Chevrolet": {
+                        "models": {
+                            "corvette": {"display": "Chevrolet Corvette"},
+                            "express": {"display": "Chevrolet Express"},
+                        }
+                    },
+                    "Ford": {"models": {"f150": {"display": "Ford F-150"}}},
                 },
             },
             sort_keys=False,
@@ -154,8 +171,9 @@ def test_смоук_прогон_пишет_чекпоинт_и_карточку
     метрики = json.loads((прогон / "metrics.json").read_text(encoding="utf-8"))
     assert len(метрики["epochs"]) == 2
     assert метрики["epochs"][0]["loss"] > 0
-    # EMA оценивается один раз в конце прогона: без этих чисел решать «сырые
-    # веса или EMA» в M-1.3 нечем.
+    # Проверка формата, а не EMA: наличие ключей говорит, что оценка EMA доехала до
+    # файла, но не что усреднение вообще работало — это проверяет
+    # `test_ema_обновляется_на_каждом_шаге`.
     for ключ in ("val", "test", "val_ema", "test_ema"):
         assert "top1_model" in метрики[ключ], f"в metrics.json нет {ключ}.top1_model"
 
@@ -181,6 +199,146 @@ def test_смоук_прогон_пишет_чекпоинт_и_карточку
     журнал = метрики["epochs"]
     лучшая = max(range(len(журнал)), key=lambda номер: журнал[номер]["val_top1_model"])
     assert чекпоинт["epoch"] == лучшая
+
+    # Верхний уровень `metrics.json`: по нему сверяют, какие веса поедут в M-1.3, не
+    # пересчитывая `max` по журналу и не открывая `best.pt` через torch.
+    assert метрики["best_epoch"] == лучшая, "best_epoch в metrics.json не совпал с best.pt"
+    assert метрики["best_val_top1"] == pytest.approx(журнал[лучшая]["val_top1_model"])
+    # Прогон на cpu: torch не учитывает VRAM, ноль здесь — правильное значение.
+    assert метрики["peak_vram_mb"] == pytest.approx(0.0)
+
+    манифест = json.loads((прогон / "manifest.json").read_text(encoding="utf-8"))
+    # `config.yaml` рядом — копия файла до override'ов, поэтому применённые флаги
+    # должны быть в манифесте: иначе прогон необъясним по артефактам.
+    assert манифест["cli_overrides"] == {"no_pretrained": True}
+
+    # Карточка — единственный человекочитаемый артефакт вехи, и проверка «файл
+    # существует» проходит на пустом файле. Проверяются четыре вещи, которые в ней
+    # обязаны быть: строка таблицы метрик, лучшая эпоха, пик VRAM и дата.
+    карточка = (прогон / "report.md").read_text(encoding="utf-8")
+    assert "| val | " in карточка, "в карточке нет строки таблицы про val"
+    assert f"Лучшая эпоха: {лучшая}," in карточка, "в карточке нет лучшей эпохи"
+    assert "- Пик VRAM: 0 МБ" in карточка, "в карточке нет строки про пик VRAM"
+    # Дата в карточке обязана совпадать с датой в имени каталога прогона. Проверка
+    # сквозная и на подмену метки старта на «сейчас» не ловится: смоук стартует и
+    # рендерит в один день. За это отвечает `test_дата_карточки_из_метки_старта`.
+    дата_каталога = прогон.name.removeprefix("m1_2_train_")[:8]
+    ожидаемая = f"{дата_каталога[:4]}-{дата_каталога[4:6]}-{дата_каталога[6:8]}"
+    assert f"Дата: {ожидаемая}" in карточка, "дата карточки не совпала с именем каталога"
+
+
+def test_дата_карточки_из_метки_старта(tmp_path: Path) -> None:
+    """`render_report` печатает дату старта, а не дату рендеринга.
+
+    Метка старта здесь заведомо из другого дня, поэтому возврат к `datetime.now(UTC)`
+    внутри `render_report` виден сразу. Сквозная проверка в смоуке этого не может:
+    там старт и рендеринг попадают в одни сутки, и обе даты совпадают при любой
+    реализации.
+    """
+    from datetime import UTC, datetime
+
+    from training.config import load_config
+    from training.metrics import Metrics
+    from training.train import render_report
+
+    метрики = Metrics(
+        top1_model=0.5, top5_model=0.75, top1_brand=0.5, per_class_recall={"acura__rl": 0.5}
+    )
+    журнал = [{"epoch": 0, "loss": 1.0, "lr": БАЗОВЫЙ_LR, "val_top1_model": 0.5, "seconds": 1.0}]
+
+    карточка = render_report(
+        load_config(конфиг(tmp_path)),
+        журнал,
+        метрики,
+        метрики,
+        val_ema=метрики,
+        test_ema=метрики,
+        best_epoch=0,
+        best_val_top1=0.5,
+        device="cpu",
+        seconds=61.0,
+        peak_vram_mb=0.0,
+        started_at=datetime(2020, 1, 1, 23, 59, tzinfo=UTC),
+    )
+
+    assert "Дата: 2020-01-01" in карточка
+    сегодня = datetime.now(UTC).date().isoformat()
+    assert сегодня not in карточка, f"в карточке дата рендеринга ({сегодня}), а не старта"
+
+
+def test_ema_обновляется_на_каждом_шаге(tmp_path: Path) -> None:
+    """Ловит невызванный `ema.update_parameters` внутри `train_one_epoch`.
+
+    Сравнивать веса EMA с сырыми бессмысленно: при `ema_decay: 0.9998` за три
+    шага они разойдутся на величину, неотличимую от шума, а при выключенном
+    обновлении разойдутся тоже — сырые-то едут. Считается число усреднений
+    (`n_averaged` внутри `AveragedModel`): без вызова оно останется нулём.
+    """
+    from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
+    from torch.utils.data import DataLoader, TensorDataset
+
+    from training.config import load_config
+    from training.model import create_model
+    from training.train import make_optimizer, train_one_epoch
+
+    настройки = load_config(конфиг(tmp_path))
+    модель, голова = create_model(
+        настройки.backbone,
+        num_classes=len(КЛАССЫ),
+        embedding_dim=настройки.embedding_dim,
+        pretrained=False,
+        s=настройки.arcface.s,
+        m=настройки.arcface.margin_start,
+    )
+    картинки = torch.randn(6, 3, настройки.img_size, настройки.img_size)
+    метки = torch.tensor([0, 1, 2, 0, 1, 2])
+    загрузчик = DataLoader(TensorDataset(картинки, метки), batch_size=настройки.batch_size)
+    шагов = 3  # 6 картинок при batch_size 2
+    оптимизатор = make_optimizer(
+        модель, голова, lr=настройки.lr, weight_decay=настройки.weight_decay
+    )
+    ema = AveragedModel(модель, multi_avg_fn=get_ema_multi_avg_fn(настройки.ema_decay))
+    assert int(ema.n_averaged) == 0
+
+    train_one_epoch(
+        модель,
+        голова,
+        загрузчик,
+        оптимизатор,
+        ema,
+        epoch=0,
+        config=настройки,
+        device=torch.device("cpu"),
+        steps_per_epoch=шагов,
+        limit_batches=None,
+    )
+
+    assert int(ema.n_averaged) == шагов, "ema.update_parameters вызвана не на каждом шаге"
+
+
+def test_override_epochs_валидируется_после_применения(tmp_path: Path) -> None:
+    """`--epochs 1` при `warmup_epochs: 1` обязан падать, а не молча разогреваться.
+
+    Override едет после `load_config`, поэтому без перепроверки бюджетов прогон
+    целиком остался бы в разогреве — и никто бы не узнал.
+    """
+    from training.config import ConfigError
+    from training.train import main
+
+    with pytest.raises(ConfigError, match="--epochs: warmup_epochs=1 не меньше epochs=1"):
+        main(
+            [
+                "--config",
+                str(конфиг(tmp_path)),
+                "--catalog",
+                str(каталог(tmp_path)),
+                "--device",
+                "cpu",
+                "--no-pretrained",
+                "--epochs",
+                "1",
+            ]
+        )
 
 
 def test_лимит_батчей_учитывается_в_знаменателе_расписания(
@@ -222,3 +380,7 @@ def test_лимит_батчей_учитывается_в_знаменател�
     assert журнал[0]["lr"] == pytest.approx(БАЗОВЫЙ_LR)
     # Дальше идёт косинус вниз, поэтому эпоха 1 обязана уйти ниже `base_lr`.
     assert журнал[1]["lr"] < БАЗОВЫЙ_LR
+
+    # Оба применённых флага обязаны попасть в манифест, а не только последний.
+    манифест = json.loads((прогон / "manifest.json").read_text(encoding="utf-8"))
+    assert манифест["cli_overrides"] == {"limit_batches": 2, "no_pretrained": True}

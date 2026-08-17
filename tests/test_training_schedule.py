@@ -38,6 +38,34 @@ def test_lr_около_нуля_на_последнем_шаге() -> None:
     assert 0.0 <= последний < БАЗА * 0.01
 
 
+def test_lr_без_разогрева_начинается_с_базы() -> None:
+    """`warmup_steps == 0`: разогрева нет, косинус идёт от `base_lr` с нулевого шага.
+
+    Граница опасна делением на ноль в множителе разогрева — его обходит условие
+    `warmup_steps > 0`. Поведение разумное (полный косинус вместо разогрева),
+    поэтому закрепляется тестом, а не чинится.
+    """
+    assert lr_at(0, base_lr=БАЗА, total_steps=ВСЕГО, warmup_steps=0) == pytest.approx(БАЗА)
+    значения = [
+        lr_at(шаг, base_lr=БАЗА, total_steps=ВСЕГО, warmup_steps=0) for шаг in range(0, ВСЕГО, 50)
+    ]
+    assert значения == sorted(значения, reverse=True)
+    # Отрицательного lr быть не может ни на одном шаге: косинус не ниже -1.
+    assert min(значения) >= 0.0
+
+
+def test_маржа_без_разогрева_сразу_конечная() -> None:
+    """`warmup_epochs == 0`: маржа равна `end` с нулевой эпохи, а не делится на ноль."""
+    assert margin_at(0, start=0.2, end=0.5, warmup_epochs=0) == pytest.approx(0.5)
+    assert margin_at(59, start=0.2, end=0.5, warmup_epochs=0) == pytest.approx(0.5)
+
+
+def test_множитель_бэкбона_при_нулевых_эпохах_не_применяется() -> None:
+    """`epochs == 0`: пониженного темпа у бэкбона нет ни на одной эпохе, включая нулевую."""
+    assert backbone_mult(0, mult=0.1, epochs=0) == 1.0
+    assert backbone_mult(59, mult=0.1, epochs=0) == 1.0
+
+
 def test_маржа_стартовая_на_нулевой_эпохе() -> None:
     assert margin_at(0, start=0.2, end=0.5, warmup_epochs=10) == pytest.approx(0.2)
 
