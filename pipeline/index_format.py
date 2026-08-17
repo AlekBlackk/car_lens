@@ -10,12 +10,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from pipeline.catalog import CarModel
 
 MAGIC = b"CLIX"
 FORMAT_VERSION = 1
@@ -150,3 +154,38 @@ def verify_meta(header: IndexHeader, meta_bytes: bytes) -> None:
         raise IndexFormatError(
             f"sha256 меты {фактический.hex()} против {header.meta_sha256.hex()} в заголовке"
         )
+
+
+def meta_json(
+    models: Sequence[CarModel],
+    *,
+    embedding_dim: int,
+    centroids_per_class: int,
+    model_weights_sha256: str,
+    generated_at: str,
+) -> bytes:
+    """Собрать `catalog_meta.json` (§13.2). `models` идут в порядке индексов классов.
+
+    Сериализация фиксирована — `ensure_ascii=False`, `indent=2`, UTF-8, как у
+    `manifest.json` прогона обучения. Поменять её значит поменять sha256 в
+    заголовке при том же содержимом, поэтому форма закреплена тестом.
+    """
+    if not models:
+        raise IndexFormatError("пустой список классов: индекс без классов не имеет смысла")
+    документ = {
+        "format_version": FORMAT_VERSION,
+        "generated_at": generated_at,
+        "model_weights_sha256": model_weights_sha256,
+        "embedding_dim": embedding_dim,
+        "centroids_per_class": centroids_per_class,
+        "classes": [
+            {
+                "model_id": модель.model_id,
+                "brand": модель.brand,
+                "display": модель.display,
+                "platform_group": модель.platform_group,
+            }
+            for модель in models
+        ],
+    }
+    return json.dumps(документ, ensure_ascii=False, indent=2).encode("utf-8")

@@ -3,22 +3,30 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import struct
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from pipeline.catalog import CarModel
 from pipeline.index_format import (
     DTYPE_FLOAT32,
     HEADER_SIZE,
     IndexFormatError,
+    meta_json,
     read_index,
     verify_meta,
     write_index,
 )
 
 МЕТА = b'{"format_version": 1}'
+
+МОДЕЛИ = (
+    CarModel(model_id="audi__a5", brand="Audi", display="Audi A5", platform_group=None),
+    CarModel(model_id="bmw__x5", brand="BMW", display="BMW X5", platform_group="g05"),
+)
 
 
 def _центроиды(классов: int = 2, центроидов: int = 4, размерность: int = 8) -> np.ndarray:
@@ -143,3 +151,62 @@ def test_форма_центроидов_проверяется(tmp_path: Path) 
     файл = tmp_path / "catalog_index.bin"
     with pytest.raises(IndexFormatError, match="три измерения"):
         write_index(файл, np.zeros((2, 8), dtype=np.float32), meta_bytes=МЕТА)
+
+
+def test_мета_содержит_поля_спеки() -> None:
+    байты = meta_json(
+        МОДЕЛИ,
+        embedding_dim=256,
+        centroids_per_class=4,
+        model_weights_sha256="ab" * 32,
+        generated_at="2026-08-17T09:00:00Z",
+    )
+    мета = json.loads(байты)
+    assert мета["format_version"] == 1
+    assert мета["embedding_dim"] == 256
+    assert мета["centroids_per_class"] == 4
+    assert мета["model_weights_sha256"] == "ab" * 32
+    assert мета["generated_at"] == "2026-08-17T09:00:00Z"
+    assert мета["classes"] == [
+        {"model_id": "audi__a5", "brand": "Audi", "display": "Audi A5", "platform_group": None},
+        {"model_id": "bmw__x5", "brand": "BMW", "display": "BMW X5", "platform_group": "g05"},
+    ]
+
+
+def test_позиция_в_classes_есть_индекс_класса() -> None:
+    """Поля idx нет намеренно (§13.2): порядок и есть нумерация."""
+    байты = meta_json(
+        МОДЕЛИ,
+        embedding_dim=256,
+        centroids_per_class=4,
+        model_weights_sha256="ab" * 32,
+        generated_at="2026-08-17T09:00:00Z",
+    )
+    мета = json.loads(байты)
+    assert all("idx" not in запись for запись in мета["classes"])
+
+
+def test_мета_детерминирована() -> None:
+    """Два вызова дают байт в байт одно: иначе sha256 в заголовке ничего не значит."""
+
+    def собрать() -> bytes:
+        return meta_json(
+            МОДЕЛИ,
+            embedding_dim=256,
+            centroids_per_class=4,
+            model_weights_sha256="ab" * 32,
+            generated_at="2026-08-17T09:00:00Z",
+        )
+
+    assert собрать() == собрать()
+
+
+def test_пустой_список_классов_отвергается() -> None:
+    with pytest.raises(IndexFormatError, match="пустой"):
+        meta_json(
+            (),
+            embedding_dim=256,
+            centroids_per_class=4,
+            model_weights_sha256="ab" * 32,
+            generated_at="2026-08-17T09:00:00Z",
+        )
