@@ -48,3 +48,26 @@ jobs:
 
       - name: Инварианты схемы и теста на утечку
         run: uv run pytest tests/test_split.py tests/test_schema.py tests/test_hashing.py tests/test_ingest_build.py -v
+
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Установить зависимости
+        run: npm ci
+        working-directory: app
+
+      - name: Собрать TypeScript
+        run: npm run build
+        working-directory: app
+
+      - name: Тесты читалки индекса
+        run: npm test
+        working-directory: app
