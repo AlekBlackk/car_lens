@@ -1,0 +1,5 @@
+# Фикстура индекса эталонов должна пережить checkout байт в байт: sha256
+# catalog_meta.json вшит в заголовок catalog_index.bin (§13.2), и подстановка
+# CRLF под Windows (core.autocrlf=true) развалила бы сверку хеша.
+tests/fixtures/index/catalog_meta.json -text
+tests/fixtures/index/catalog_index.bin binary
