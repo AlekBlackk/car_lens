@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,22 @@ def _load_json(path: Path) -> dict[str, Any] | None:
         return None
     результат: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     return результат
+
+
+def _required(документ: Mapping[str, Any], ключ: str, откуда: str) -> Any:
+    """Значение по ключу или `SystemExit` с именем ключа и документа.
+
+    Обращения по строке, до которых `check_provenance` не доходит, обязаны отказывать так
+    же диагностируемо, как обёрнутые в перехват ниже. Ключ `weights` сверка в ветке
+    INT8-индекса не читает вовсе (`export/provenance.py:66`), поэтому голый `KeyError`
+    доехал бы до пользователя трейсбеком без имени файла — тем самым, от которого перехват
+    и избавлялся.
+    """
+    if ключ not in документ:
+        raise SystemExit(
+            f"{откуда}: нет ключа {ключ!r} — документ неполон или собран чужой версией"
+        )
+    return документ[ключ]
 
 
 def _torch_embeddings(
@@ -112,6 +129,22 @@ def main() -> None:
     if отчёт_экспорта is None:
         raise SystemExit(f"{аргументы.export}: нет export_report.json — сначала to_tflite")
     манифест_экспорта = отчёт_экспорта["manifest"]
+    # Хеш файла на диске против записанного в манифесте. `check_provenance` эту дыру не
+    # закрывает: он сверяет записанные строки друг с другом (`export/provenance.py:91-92`),
+    # а не то, что лежит по пути `--checkpoint`. Опечатка в пути или сосед с похожим именем
+    # дали бы чужую базу PyTorch при зелёной сверке происхождения, дельты считались бы от
+    # неверного эталона, а `parity.json` вышел бы с виду валидным — то есть вердикт §4.6
+    # стал бы неправдой без единого сообщения об ошибке.
+    ожидаемый_чекпоинт = str(
+        _required(манифест_экспорта, "checkpoint_sha256", "export_report.json → manifest")
+    )
+    фактический_чекпоинт = sha256_of_file(аргументы.checkpoint)
+    if фактический_чекпоинт != ожидаемый_чекпоинт:
+        raise SystemExit(
+            f"{аргументы.checkpoint}: sha256 {фактический_чекпоинт} против "
+            f"{ожидаемый_чекпоинт} в манифесте экспорта — экспортирован другой чекпоинт, "
+            "и база PyTorch считалась бы не той моделью"
+        )
     путь_fp32 = аргументы.export / "classifier_fp32.tflite"
     путь_int8 = аргументы.export / "classifier_int8.tflite"
     # Без этой проверки первым об отсутствии файла сообщил бы `sha256_of_file` — сырым
@@ -176,8 +209,13 @@ def main() -> None:
         embedding_dim=конфиг["embedding_dim"],
         pretrained=False,
     )
-    веса = "model_state" if манифест_экспорта["weights"] == "raw" else "ema_state"
-    модель.load_state_dict(чекпоинт[веса])
+    # Оба обращения через `_required`: `weights` сверка происхождения в ветке INT8-индекса
+    # не читает, а имени `ema_state` она не проверяет ни в одной из ветвей — один файл
+    # чекпоинта содержит двое весов, и отсутствие нужных обязано называться, а не падать
+    # `KeyError` из середины загрузки.
+    режим = _required(манифест_экспорта, "weights", "export_report.json → manifest")
+    веса = "model_state" if режим == "raw" else "ema_state"
+    модель.load_state_dict(_required(чекпоинт, веса, str(аргументы.checkpoint)))
     устройство = torch.device(аргументы.device)
     модель.to(устройство)
 
