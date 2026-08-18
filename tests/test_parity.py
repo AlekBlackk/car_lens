@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -29,11 +31,23 @@ def test_совпадающие_матрицы_дают_нули() -> None:
 
 
 def test_сырое_расхождение_считается_поэлементно() -> None:
+    """Все четыре поля различают статистики: разница [0, 0.5, 0] даёт им разные числа."""
     эталон = np.array([[1.0, 2.0, 4.0]], dtype=np.float32)
     кандидат = np.array([[1.0, 2.5, 4.0]], dtype=np.float32)
     дельта = raw_deltas(эталон, кандидат)
     assert дельта.max_abs == pytest.approx(0.5)
+    assert дельта.median_abs == pytest.approx(0.0)
+    assert дельта.p99_abs == pytest.approx(0.49)
     assert дельта.max_rel == pytest.approx(0.25)
+
+
+def test_max_rel_прижимает_знаменатель_у_нуля() -> None:
+    """Ноль в эталоне не имеет права превратить относительную ошибку в бесконечность."""
+    эталон = np.array([[0.0, 1.0]], dtype=np.float32)
+    кандидат = np.array([[1e-3, 1.0]], dtype=np.float32)
+    дельта = raw_deltas(эталон, кандидат)
+    assert math.isfinite(дельта.max_rel)
+    assert дельта.max_rel == pytest.approx(1000.0)
 
 
 def test_разные_формы_падают() -> None:
@@ -44,6 +58,30 @@ def test_разные_формы_падают() -> None:
 def test_пустой_вход_падает() -> None:
     with pytest.raises(ParityError, match="пуст"):
         raw_deltas(np.zeros((0, 8), dtype=np.float32), np.zeros((0, 8), dtype=np.float32))
+
+
+def test_нулевая_размерность_падает() -> None:
+    """Строки есть, а столбцов нет: numpy упал бы на `max()` сырым ValueError."""
+    with pytest.raises(ParityError, match="пуст"):
+        raw_deltas(np.zeros((5, 0), dtype=np.float32), np.zeros((5, 0), dtype=np.float32))
+
+
+def test_nan_в_кандидате_падает() -> None:
+    """nan прошёл бы порог приёмки как «расхождения нет»: `nan > 1e-3` — это False."""
+    эталон = np.ones((3, 4), dtype=np.float32)
+    кандидат = эталон.copy()
+    кандидат[1, 2] = np.nan
+    with pytest.raises(ParityError, match="неконечн"):
+        raw_deltas(эталон, кандидат)
+
+
+def test_inf_в_эталоне_падает() -> None:
+    """inf даёт из одного вызова несогласованные поля: `max_abs=inf` при `p99_abs=nan`."""
+    кандидат = np.ones((3, 4), dtype=np.float32)
+    эталон = кандидат.copy()
+    эталон[0, 0] = np.inf
+    with pytest.raises(ParityError, match="неконечн"):
+        cosine_deltas(эталон, кандидат)
 
 
 def test_косинус_не_зависит_от_длины_вектора() -> None:
@@ -63,6 +101,7 @@ def test_косинус_видит_хвост() -> None:
     дельта = cosine_deltas(эталон, кандидат)
     assert дельта.median == pytest.approx(1.0, abs=1e-6)
     assert дельта.min == pytest.approx(0.0, abs=1e-6)
+    assert дельта.p1 == pytest.approx(0.99, abs=1e-6)
 
 
 def test_нулевой_вектор_падает() -> None:

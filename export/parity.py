@@ -52,8 +52,16 @@ def _проверить(reference: np.ndarray, candidate: np.ndarray) -> None:
         raise ParityError(f"несовпадение форм: {reference.shape} против {candidate.shape}")
     if reference.ndim != 2:
         raise ParityError(f"ожидалась матрица (n, dim), получено {reference.shape}")
-    if len(reference) == 0:
+    # `size`, а не число строк: форма (n, 0) — тоже пустая выборка, и без этого numpy
+    # падал бы на `max()` сырым `ValueError` мимо `ParityError` и без диагноза.
+    if reference.size == 0:
         raise ParityError("выборка пуста: сравнивать нечего")
+    # nan сравнивается с любым порогом как False, поэтому без этого стража `max_abs=nan`
+    # прошёл бы приёмку §4.6 как PASS: детектор ошибки конвертации оказался бы fail-open
+    # ровно на самом частом её симптоме. `inf` попадает под тот же страж, потому что даёт
+    # из одного вызова несогласованные поля — `max_abs=inf` при `p99_abs=nan`.
+    if not bool(np.isfinite(reference).all()) or not bool(np.isfinite(candidate).all()):
+        raise ParityError("неконечные значения: nan или inf делают расхождение неопределённым")
 
 
 def raw_deltas(reference: np.ndarray, candidate: np.ndarray) -> RawDelta:
