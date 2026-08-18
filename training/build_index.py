@@ -141,7 +141,9 @@ def main() -> None:
     from training.samples import read_samples
 
     аргументы = _parse_args()
-    чекпоинт: dict[str, Any] = torch.load(аргументы.checkpoint, map_location="cpu")
+    чекпоинт: dict[str, Any] = torch.load(
+        аргументы.checkpoint, map_location="cpu", weights_only=True
+    )
     каталог = load_catalog(аргументы.catalog)
     индекс: dict[str, int] = чекпоинт["class_index"]
     check_class_index(индекс, class_index(каталог))

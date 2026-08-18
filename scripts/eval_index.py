@@ -12,33 +12,17 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-import numpy as np
 import torch
 
 from pipeline.catalog import STANFORD_CATALOG_PATH
 from pipeline.index_format import read_index, verify_meta
+from pipeline.knn import top5_by_centroids
 from pipeline.paths import crops_dir, splits_dir
 from training.build_index import collect_embeddings
 from training.dataset import build_transforms, make_loader
-from training.metrics import TOP_K, aggregate
+from training.metrics import aggregate
 from training.model import create_model
 from training.samples import read_samples
-
-
-def top5_by_centroids(embeddings: np.ndarray, centroids: np.ndarray) -> list[list[int]]:
-    """Индексы top-5 классов по максимуму косинуса к их центроидам.
-
-    `centroids` — `(классы, центроиды, измерения)`, всё нормализовано, поэтому
-    косинус — скалярное произведение. Максимум по центроидам берётся до сортировки:
-    top-5 — это пять разных классов, а не пять ближайших центроидов, которые могут
-    принадлежать одному.
-    """
-    классов, _, размерность = centroids.shape
-    плоские = centroids.reshape(-1, размерность)
-    сходства = embeddings @ плоские.T
-    по_классам = сходства.reshape(len(embeddings), классов, -1).max(axis=2)
-    порядок = np.argsort(-по_классам, axis=1)[:, :TOP_K]
-    return [[int(класс) for класс in строка] for строка in порядок]
 
 
 def _parse_args() -> argparse.Namespace:
@@ -56,7 +40,7 @@ def main() -> None:
     заголовок, центроиды = read_index(аргументы.index / "catalog_index.bin")
     verify_meta(заголовок, (аргументы.index / "catalog_meta.json").read_bytes())
 
-    чекпоинт = torch.load(аргументы.checkpoint, map_location="cpu")
+    чекпоинт = torch.load(аргументы.checkpoint, map_location="cpu", weights_only=True)
     индекс: dict[str, int] = чекпоинт["class_index"]
     обратный = {значение: ключ for ключ, значение in индекс.items()}
     конфиг = чекпоинт["config"]
