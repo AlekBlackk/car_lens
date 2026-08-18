@@ -271,6 +271,7 @@ dev = [
 ]
 export = [
     { name = "ai-edge-litert" },
+    { name = "albumentations" },
     { name = "litert-torch" },
     { name = "onnx" },
     { name = "onnxruntime" },
@@ -313,6 +314,7 @@ dev = [
 ]
 export = [
     { name = "ai-edge-litert", specifier = "==2.1.6" },
+    { name = "albumentations", specifier = "==2.0.8" },
     { name = "litert-torch", specifier = "==0.9.3" },
     { name = "onnx", specifier = "==1.21.0" },
     { name = "onnxruntime", specifier = "==1.28.0" },

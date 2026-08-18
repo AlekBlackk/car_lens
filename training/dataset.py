@@ -20,6 +20,13 @@ from torch.utils.data import DataLoader, Dataset, get_worker_info
 
 from training.samples import DatasetError, Sample
 
+# Версия препроцессинга. Индекс эталонов и экспортированная модель обязаны быть
+# посчитаны одним и тем же преобразованием; число попадает в манифесты обоих и
+# сверяется при паритете. Поднимается руками при любой правке `build_transforms`:
+# автоматической связи нет, и лучше честная дисциплина, чем хеш исходника,
+# ломающийся от переименования переменной.
+PREPROCESS_VERSION = 1
+
 
 def build_transforms(
     img_size: int,
