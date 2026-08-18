@@ -1,0 +1,303 @@
+"""Паритет PyTorch против TFLite fp32 и INT8 (§4.6 дизайна M-1.4).
+
+Метрика считается через индекс эталонов, а не через голову ArcFace: голова на
+устройство не едет, и мерить ей значит измерять путь, которым продукт не
+пользуется (Р-27).
+
+Порог берётся от базы этого же прогона — PyTorch с текущим fp32-индексом на той же
+выборке, — а не от чисел §8 дизайна M-1.3: там другая выборка и другой отбор.
+
+Приёмочный прогон идёт с `--limit 0`, то есть сплитом целиком. Срез вердиктом §4.6
+не является: `read_samples` сохраняет порядок сплита, а он сгруппирован по классам,
+поэтому `--limit N` накрывает только первые классы — числа выйдут правдоподобными и
+при этом ни о чём.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+
+from export.parity import cosine_deltas, metric_delta, raw_deltas, top1_churn
+from export.provenance import check_provenance
+from export.to_tflite import _run_tflite, sha256_of_file
+from pipeline.index_format import read_index, verify_meta
+from pipeline.knn import top5_by_centroids
+from pipeline.paths import crops_dir, splits_dir
+from training.dataset import build_transforms, make_loader
+from training.metrics import Metrics, aggregate
+from training.model import create_model
+from training.samples import read_samples
+
+RAW_MAX_ABS = 1e-3
+TOP1_DROP_LIMIT_PP = -1.5
+
+# Норма, ниже которой нормализовать нечего. Значение то же, что у `_MIN_DENOMINATOR` в
+# `export/parity.py` и `export/to_tflite.py`, но константа продублирована, а не
+# импортирована: приватное имя соседнего модуля контрактом не является. Задача у неё и
+# другая — не прижать знаменатель, а отказаться от прогона: здесь деление идёт на живой
+# знаменатель, и подмена нуля порогом дала бы не диагноз, а мусорный эмбеддинг.
+_MIN_NORM = 1e-6
+
+
+def _load_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    результат: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return результат
+
+
+def _torch_embeddings(
+    model: torch.nn.Module, loader: Any, device: torch.device
+) -> tuple[np.ndarray, np.ndarray]:
+    """Сырые, **ненормированные** эмбеддинги и метки.
+
+    `collect_embeddings` из `training.build_index` здесь не годится: он нормализует
+    внутри, а сравнение §4.4 требует сырых значений — нормализация скрыла бы ровно
+    ту ошибку конвертации, ради которой сырой слой и заведён.
+    """
+    model.eval()
+    куски: list[np.ndarray] = []
+    метки: list[np.ndarray] = []
+    with torch.no_grad():
+        for картинки, цели in loader:
+            эмбеддинг = model(картинки.to(device, non_blocking=True)).float()
+            куски.append(эмбеддинг.cpu().numpy().astype(np.float32))
+            метки.append(np.asarray(цели.cpu(), dtype=np.int64))
+    if not куски:
+        raise SystemExit("выборка пуста: сравнивать нечего")
+    return np.concatenate(куски), np.concatenate(метки)
+
+
+def _tflite_embeddings(path: Path, loader: Any) -> np.ndarray:
+    """Тот же загрузчик через LiteRT.
+
+    Загрузчик перебирается заново на каждый рантайм: при `shuffle=False` порядок
+    повторяем, а держать все картинки сплита в памяти — это около двух гигабайт
+    ради удобства записи.
+
+    `_run_tflite` создаёт `Interpreter` на каждый батч, и это принято сознательно:
+    время прогона определяется покадровым `invoke` внутри него, а кеш интерпретатора
+    потребовал бы правки чужого модуля ради выигрыша, которого не видно.
+    """
+    куски = [_run_tflite(path, картинки.numpy()) for картинки, _ in loader]
+    # Через явно типизированную переменную: стабы numpy перегружают `concatenate` по dtype,
+    # на списке `ndarray` без параметров перегрузка неоднозначна, и результат вырождается в
+    # `Any`, которого `.astype` уже не восстанавливает. Strict-mypy ловит такой возврат.
+    собранные: np.ndarray = np.concatenate(куски, axis=0).astype(np.float32)
+    return собранные
+
+
+def _parse_args() -> argparse.Namespace:
+    парсер = argparse.ArgumentParser(description="Паритет PyTorch против TFLite")
+    парсер.add_argument("--export", type=Path, required=True, help="каталог с .tflite")
+    парсер.add_argument("--index", type=Path, required=True, help="каталог с catalog_index.bin")
+    парсер.add_argument("--checkpoint", type=Path, required=True)
+    парсер.add_argument("--splits", nargs="+", default=["val", "test"])
+    парсер.add_argument("--limit", type=int, default=0, help="0 — сплит целиком")
+    парсер.add_argument("--device", default="cuda")
+    return парсер.parse_args()
+
+
+def main() -> None:
+    аргументы = _parse_args()
+    отчёт_экспорта = _load_json(аргументы.export / "export_report.json")
+    if отчёт_экспорта is None:
+        raise SystemExit(f"{аргументы.export}: нет export_report.json — сначала to_tflite")
+    манифест_экспорта = отчёт_экспорта["manifest"]
+    путь_fp32 = аргументы.export / "classifier_fp32.tflite"
+    путь_int8 = аргументы.export / "classifier_int8.tflite"
+    # Без этой проверки первым об отсутствии файла сообщил бы `sha256_of_file` — сырым
+    # `FileNotFoundError` из середины сверки происхождения, где про причину не сказано
+    # ничего. А причина у пропавшего INT8 ровно одна и известная.
+    for путь in (путь_fp32, путь_int8):
+        if not путь.is_file():
+            raise SystemExit(
+                f"{путь}: файла нет — вероятно, экспорт шёл с --skip-int8; "
+                "перезапустите `python -m export.to_tflite` без этого флага"
+            )
+
+    заголовок, центроиды = read_index(аргументы.index / "catalog_index.bin")
+    байты_меты = (аргументы.index / "catalog_meta.json").read_bytes()
+    verify_meta(заголовок, байты_меты)
+    мета = json.loads(байты_меты)
+    # Манифест читается первым: его наличие переключает `check_provenance` на ветку
+    # INT8-индекса, где `report.json` не участвует вовсе. Передать туда прочитанный
+    # отчёт значило бы намекать, что он на что-то влияет.
+    манифест_индекса = _load_json(аргументы.index / "index_manifest.json")
+    отчёт_индекса = (
+        None if манифест_индекса is not None else _load_json(аргументы.index / "report.json")
+    )
+    # Все документы сверки читаются здесь, значит и входной контракт — обязанность этого
+    # модуля. `check_provenance` берёт ключи по индексу, и отсутствующий ключ доехал бы до
+    # пользователя трейсбеком, в котором не назван ни файл, ни то, что его надо пересобрать.
+    try:
+        check_provenance(
+            export_manifest=манифест_экспорта,
+            catalog_meta=мета,
+            index_report=отчёт_индекса,
+            index_manifest=манифест_индекса,
+            int8_sha256=sha256_of_file(путь_int8),
+        )
+    except KeyError as ошибка:
+        ключ = str(ошибка.args[0]) if ошибка.args else "?"
+        источники: dict[str, Any] = {
+            "export_report.json → manifest": манифест_экспорта,
+            "catalog_meta.json": мета,
+            "report.json": отчёт_индекса,
+            "index_manifest.json": манифест_индекса,
+        }
+        где = ", ".join(
+            имя
+            for имя, документ in источники.items()
+            if документ is not None and ключ not in документ
+        )
+        raise SystemExit(
+            f"сверка происхождения: нет ключа {ключ!r} в {где or 'документах сверки'} — "
+            "документ собран другой версией пайплайна, пересоберите его"
+        ) from ошибка
+
+    чекпоинт: dict[str, Any] = torch.load(
+        аргументы.checkpoint, map_location="cpu", weights_only=True
+    )
+    индекс: dict[str, int] = чекпоинт["class_index"]
+    обратный = {значение: ключ for ключ, значение in индекс.items()}
+    конфиг = чекпоинт["config"]
+    модель, _ = create_model(
+        конфиг["backbone"],
+        num_classes=len(индекс),
+        embedding_dim=конфиг["embedding_dim"],
+        pretrained=False,
+    )
+    веса = "model_state" if манифест_экспорта["weights"] == "raw" else "ema_state"
+    модель.load_state_dict(чекпоинт[веса])
+    устройство = torch.device(аргументы.device)
+    модель.to(устройство)
+
+    итоги: dict[str, Any] = {"baseline": {}, "runtimes": {}, "deltas": {}}
+    провалы: list[str] = []
+    for имя in аргументы.splits:
+        образцы = read_samples(
+            splits_dir() / f"{имя}.parquet",
+            crops_dir() / "stanford",
+            num_classes=len(индекс),
+            skip_multi_car=False,
+        )
+        if аргументы.limit:
+            образцы = образцы[: аргументы.limit]
+        загрузчик = make_loader(
+            образцы,
+            build_transforms(
+                чекпоинт["img_size"],
+                train=False,
+                mean=tuple(чекпоинт["mean"]),
+                std=tuple(чекпоинт["std"]),
+            ),
+            batch_size=конфиг["batch_size"],
+            shuffle=False,
+            num_workers=конфиг["num_workers"],
+        )
+        сырой_эталон, метки = _torch_embeddings(модель, загрузчик, устройство)
+        сырой_fp32 = _tflite_embeddings(путь_fp32, загрузчик)
+        сырой_int8 = _tflite_embeddings(путь_int8, загрузчик)
+
+        по_рантаймам: dict[str, Metrics] = {}
+        топы: dict[str, list[list[int]]] = {}
+        for ключ, сырые in (
+            ("pytorch", сырой_эталон),
+            ("tflite_fp32", сырой_fp32),
+            ("tflite_int8", сырой_int8),
+        ):
+            # Норма считается один раз и служит сразу приговором и делителем. Без стража
+            # деление отдаёт `nan` (или ноль, если норма переполнилась в `inf`),
+            # `top5_by_centroids` возвращает по нему мусор, а `aggregate` печатает
+            # правдоподобные проценты. Роняет прогон в итоге `export/parity.py` на
+            # дельтах, то есть на два шага позже места поломки и с чужим диагнозом.
+            нормы = np.linalg.norm(сырые, axis=1, keepdims=True)
+            if not bool(np.isfinite(сырые).all()) or not bool(np.isfinite(нормы).all()):
+                raise SystemExit(
+                    f"{имя}/{ключ}: неконечные эмбеддинги — nan, inf либо переполнение "
+                    "нормы; нормализовать их нельзя, а метрики вышли бы правдоподобными"
+                )
+            if bool((нормы < _MIN_NORM).any()):
+                raise SystemExit(
+                    f"{имя}/{ключ}: норма эмбеддинга {float(нормы.min()):.3e} ниже "
+                    f"{_MIN_NORM:.0e} — направления у вектора нет, косинус не определён"
+                )
+            нормированные = сырые / нормы
+            топ5 = top5_by_centroids(нормированные.astype(np.float32), центроиды)
+            топы[ключ] = топ5
+            по_рантаймам[ключ] = aggregate(
+                топ5, [int(метка) for метка in метки], idx_to_model_id=обратный
+            )
+
+        итоги["baseline"][имя] = {
+            **asdict(по_рантаймам["pytorch"]),
+            "examples": len(метки),
+        }
+        итоги["runtimes"][имя] = {ключ: asdict(значение) for ключ, значение in по_рантаймам.items()}
+        итоги["deltas"][имя] = {
+            "fp32": {
+                "raw": asdict(raw_deltas(сырой_эталон, сырой_fp32)),
+                "cosine": asdict(cosine_deltas(сырой_эталон, сырой_fp32)),
+                "top1_churn": top1_churn(топы["pytorch"], топы["tflite_fp32"]),
+                "metrics_pp": metric_delta(по_рантаймам["pytorch"], по_рантаймам["tflite_fp32"]),
+            },
+            "int8": {
+                "raw": asdict(raw_deltas(сырой_эталон, сырой_int8)),
+                "cosine": asdict(cosine_deltas(сырой_эталон, сырой_int8)),
+                "top1_churn": top1_churn(топы["pytorch"], топы["tflite_int8"]),
+                "metrics_pp": metric_delta(по_рантаймам["pytorch"], по_рантаймам["tflite_int8"]),
+            },
+        }
+
+        расхождение_fp32 = итоги["deltas"][имя]["fp32"]["raw"]["max_abs"]
+        if расхождение_fp32 > RAW_MAX_ABS:
+            провалы.append(
+                f"{имя}: fp32-TFLite расходится с PyTorch на {расхождение_fp32:.2e} "
+                f"при пороге {RAW_MAX_ABS:.0e} — сломан граф, а не квантизация"
+            )
+        просадка = итоги["deltas"][имя]["int8"]["metrics_pp"]["top1_model"]
+        if просадка < TOP1_DROP_LIMIT_PP:
+            провалы.append(
+                f"{имя}: top1_model INT8 ниже базы на {abs(просадка):.2f} п.п. "
+                f"при допуске {abs(TOP1_DROP_LIMIT_PP)} п.п."
+            )
+        print(
+            f"{имя}: база {по_рантаймам['pytorch'].top1_model:.4f}, "
+            f"fp32 {по_рантаймам['tflite_fp32'].top1_model:.4f}, "
+            f"int8 {по_рантаймам['tflite_int8'].top1_model:.4f} "
+            f"({просадка:+.2f} п.п.), churn {итоги['deltas'][имя]['int8']['top1_churn']:.3f}"
+        )
+
+    итоги["thresholds"] = {
+        "raw_max_abs": RAW_MAX_ABS,
+        "top1_drop_limit_pp": TOP1_DROP_LIMIT_PP,
+        "failures": провалы,
+        "passed": not провалы,
+    }
+    итоги["manifest"] = {
+        "export_report": манифест_экспорта,
+        "index_dir": str(аргументы.index),
+        "index_sha256": sha256_of_file(аргументы.index / "catalog_index.bin"),
+        "limit": аргументы.limit,
+    }
+    (аргументы.export / "parity.json").write_text(
+        json.dumps(итоги, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    if провалы:
+        for строка in провалы:
+            print(f"ПРОВАЛ {строка}", file=sys.stderr)
+        raise SystemExit(1)
+    print("паритет пройден")
+
+
+if __name__ == "__main__":
+    main()
