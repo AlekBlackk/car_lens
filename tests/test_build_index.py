@@ -99,7 +99,9 @@ def test_эмбеддер_tflite_разбирает_путь() -> None:
 
 
 def test_неизвестный_эмбеддер_падает() -> None:
-    with pytest.raises(BuildIndexError, match="эмбеддер"):
+    # Не `match="эмбеддер"`: это слово есть в обоих сообщениях `parse_embedder`, и тест
+    # прошёл бы на чужой ветке отказа. Регэксп обязан различать.
+    with pytest.raises(BuildIndexError, match="неизвестный эмбеддер"):
         parse_embedder("onnx:/tmp/model.onnx")
 
 
