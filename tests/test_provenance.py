@@ -19,6 +19,13 @@ INT8_SHA = "bb" * 32
 }
 МЕТА: dict[str, Any] = {"model_weights_sha256": ЧЕКПОИНТ_SHA, "embedding_dim": 256}
 ОТЧЁТ_ИНДЕКСА: dict[str, Any] = {"weights": "raw", "embedding_dim": 256}
+МАНИФЕСТ_ИНДЕКСА: dict[str, Any] = {
+    "source": "tflite",
+    "source_model_sha256": INT8_SHA,
+    "checkpoint_sha256": ЧЕКПОИНТ_SHA,
+    "preprocess_version": 1,
+    "weights": "raw",
+}
 
 
 def test_fp32_индекс_из_того_же_чекпоинта_проходит() -> None:
@@ -123,5 +130,33 @@ def test_разная_версия_препроцессинга_отвергае
                 "preprocess_version": 2,
                 "weights": "raw",
             },
+            int8_sha256=INT8_SHA,
+        )
+
+
+def test_int8_мета_от_fp32_сборки_отвергается() -> None:
+    """Индекс пересобран на `.tflite`, а `catalog_meta.json` осталась от fp32-сборки.
+
+    Мета и манифест индекса — два разных файла, и расходятся они независимо: sha
+    модели в манифесте уже верный, поэтому проверку держит только сверка меты.
+    """
+    with pytest.raises(ProvenanceError, match="model_weights_sha256 меты"):
+        check_provenance(
+            export_manifest=МАНИФЕСТ,
+            catalog_meta=МЕТА,
+            index_report=None,
+            index_manifest=МАНИФЕСТ_ИНДЕКСА,
+            int8_sha256=INT8_SHA,
+        )
+
+
+def test_int8_индекс_от_другого_чекпоинта_отвергается() -> None:
+    """Тот же `.tflite`, но чекпоинт в манифесте индекса чужой: сборка рассинхронизирована."""
+    with pytest.raises(ProvenanceError, match="index_manifest"):
+        check_provenance(
+            export_manifest=МАНИФЕСТ,
+            catalog_meta={**МЕТА, "model_weights_sha256": INT8_SHA},
+            index_report=None,
+            index_manifest={**МАНИФЕСТ_ИНДЕКСА, "checkpoint_sha256": "ee" * 32},
             int8_sha256=INT8_SHA,
         )
