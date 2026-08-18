@@ -101,6 +101,42 @@ def collect_embeddings(
     return np.concatenate(куски), np.concatenate(метки)
 
 
+def parse_embedder(spec: str) -> tuple[str, Path | None]:
+    """Разобрать `--embedder`: `torch` или `tflite:<путь>`.
+
+    Строкой, а не двумя флагами: путь имеет смысл ровно при одном значении вида,
+    и раздельные флаги позволяли бы задать бессмысленную пару.
+    """
+    if spec == "torch":
+        return "torch", None
+    вид, _, путь = spec.partition(":")
+    if вид != "tflite":
+        raise BuildIndexError(f"неизвестный эмбеддер {spec!r}: ожидался torch или tflite:<путь>")
+    if not путь:
+        raise BuildIndexError(f"эмбеддер {spec!r} без пути к модели")
+    return "tflite", Path(путь)
+
+
+def collect_embeddings_tflite(
+    model_path: Path, loader: Iterable[tuple[Tensor, Tensor]]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Те же эмбеддинги, но считает их LiteRT. Нормализация — здесь, как и в torch-пути."""
+    from export.to_tflite import _run_tflite
+
+    куски: list[np.ndarray] = []
+    метки: list[np.ndarray] = []
+    for картинки, цели in loader:
+        сырые = _run_tflite(model_path, картинки.numpy())
+        нормы = np.linalg.norm(сырые, axis=1, keepdims=True)
+        if bool(np.any(нормы == 0)):
+            raise BuildIndexError("нулевой эмбеддинг из TFLite: индекс по нему не построить")
+        куски.append((сырые / нормы).astype(np.float32))
+        метки.append(np.asarray(цели.cpu(), dtype=np.int64))
+    if not куски:
+        raise BuildIndexError("выборка пуста: нечего складывать в индекс")
+    return np.concatenate(куски), np.concatenate(метки)
+
+
 def sha256_of_file(path: Path) -> str:
     """sha256 файла в hex."""
     хеш = hashlib.sha256()
@@ -129,6 +165,7 @@ def _parse_args() -> argparse.Namespace:
     парсер.add_argument("--split", default="train")
     парсер.add_argument("--weights", choices=("raw", "ema"), default="raw")
     парсер.add_argument("--device", default="cuda")
+    парсер.add_argument("--embedder", default="torch", help="torch | tflite:<путь>")
     парсер.add_argument("--out", type=Path, default=None)
     return парсер.parse_args()
 
@@ -136,11 +173,12 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     import torch
 
-    from training.dataset import build_transforms, make_loader
+    from training.dataset import PREPROCESS_VERSION, build_transforms, make_loader
     from training.model import create_model
     from training.samples import read_samples
 
     аргументы = _parse_args()
+    вид_эмбеддера, путь_модели = parse_embedder(аргументы.embedder)
     чекпоинт: dict[str, Any] = torch.load(
         аргументы.checkpoint, map_location="cpu", weights_only=True
     )
@@ -177,7 +215,11 @@ def main() -> None:
         shuffle=False,
         num_workers=конфиг["num_workers"],
     )
-    эмбеддинги, метки = collect_embeddings(модель, загрузчик, устройство)
+    if вид_эмбеддера == "torch":
+        эмбеддинги, метки = collect_embeddings(модель, загрузчик, устройство)
+    else:
+        assert путь_модели is not None
+        эмбеддинги, метки = collect_embeddings_tflite(путь_модели, загрузчик)
     центроиды = stack_centroids(
         эмбеддинги,
         метки,
@@ -190,11 +232,19 @@ def main() -> None:
     каталог_вывода.mkdir(parents=True, exist_ok=True)
     по_индексу = {значение: ключ_ for ключ_, значение in индекс.items()}
     модели = tuple(каталог.by_id(по_индексу[i]) for i in range(len(индекс)))
+    # Развёрнуто в if/else, а не условным выражением: `путь_модели` объявлен как
+    # `Path | None`, и внутри выражения его непустоту нечем сузить — mypy в strict
+    # ругался бы на `arg-type`. Ветвление то же, что и у сбора эмбеддингов выше.
+    if вид_эмбеддера == "torch":
+        хеш_весов = sha256_of_file(аргументы.checkpoint)
+    else:
+        assert путь_модели is not None
+        хеш_весов = sha256_of_file(путь_модели)
     мета = meta_json(
         модели,
         embedding_dim=центроиды.shape[2],
         centroids_per_class=CENTROIDS_PER_CLASS,
-        model_weights_sha256=sha256_of_file(аргументы.checkpoint),
+        model_weights_sha256=хеш_весов,
         generated_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     )
     путь_меты = каталог_вывода / "catalog_meta.json"
@@ -202,10 +252,30 @@ def main() -> None:
     путь_индекса = каталог_вывода / "catalog_index.bin"
     заголовок = write_index(путь_индекса, центроиды, meta_bytes=путь_меты.read_bytes())
 
+    if вид_эмбеддера == "tflite":
+        assert путь_модели is not None
+        (каталог_вывода / "index_manifest.json").write_text(
+            json.dumps(
+                {
+                    "source": "tflite",
+                    "source_model": путь_модели.name,
+                    "source_model_sha256": хеш_весов,
+                    "checkpoint_sha256": sha256_of_file(аргументы.checkpoint),
+                    "preprocess_version": PREPROCESS_VERSION,
+                    "weights": аргументы.weights,
+                    "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
     размеры = np.bincount(метки, minlength=len(индекс))
     отчёт = {
         "checkpoint": str(аргументы.checkpoint),
         "weights": аргументы.weights,
+        "embedder": аргументы.embedder,
         "split": аргументы.split,
         "num_classes": заголовок.num_classes,
         "centroids_per_class": заголовок.centroids_per_class,

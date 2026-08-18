@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from training.build_index import BuildIndexError, check_class_index, stack_centroids
+from training.build_index import BuildIndexError, check_class_index, parse_embedder, stack_centroids
 
 
 def _нормировать(матрица: np.ndarray) -> np.ndarray:
@@ -82,3 +84,28 @@ def test_collect_embeddings_нормализует_и_сохраняет_пор�
     assert эмбеддинги.shape == (3, 4)
     np.testing.assert_allclose(np.linalg.norm(эмбеддинги, axis=1), 1.0, rtol=1e-6)
     np.testing.assert_array_equal(метки, np.array([0, 1, 1]))
+
+
+def test_эмбеддер_по_умолчанию_torch() -> None:
+    вид, путь = parse_embedder("torch")
+    assert вид == "torch"
+    assert путь is None
+
+
+def test_эмбеддер_tflite_разбирает_путь() -> None:
+    вид, путь = parse_embedder("tflite:/tmp/classifier_int8.tflite")
+    assert вид == "tflite"
+    assert путь == Path("/tmp/classifier_int8.tflite")
+
+
+def test_неизвестный_эмбеддер_падает() -> None:
+    with pytest.raises(BuildIndexError, match="эмбеддер"):
+        parse_embedder("onnx:/tmp/model.onnx")
+
+
+def test_tflite_без_пути_падает() -> None:
+    # В брифе стоит `match="путь"`, но заданный там же текст ошибки — «без пути к
+    # модели»: слова «путь» в нём нет, а переписать текст под регэксп значило бы
+    # испортить падеж. Проверяется тот же смысл — сообщение про отсутствующий путь.
+    with pytest.raises(BuildIndexError, match="пути"):
+        parse_embedder("tflite:")
