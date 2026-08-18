@@ -41,6 +41,51 @@ def _игрушка() -> Any:
     return модель
 
 
+def _подробности(dtype: Any, quantization: tuple[float, int]) -> dict[str, Any]:
+    """Запись `get_input_details()`, собранная руками: восемь ключей из §6 разведки.
+
+    Типы ключей повторяются дословно: `dtype` — класс numpy-типа, а не строка, `shape` —
+    `ndarray`, а не список. Подделка с `dtype='int8'` проверяла бы не тот контракт, что
+    живёт в рантайме, и молча разошлась бы с ним в первую же правку.
+    """
+    return {
+        "name": "serving_default_args_0",
+        "index": 0,
+        "shape": np.array([1, 3, 16, 16], dtype=np.int32),
+        "shape_signature": np.array([1, 3, 16, 16], dtype=np.int32),
+        "dtype": dtype,
+        "quantization": quantization,
+        "quantization_parameters": {
+            "scales": np.array([], dtype=np.float32),
+            "zero_points": np.array([], dtype=np.int32),
+            "quantized_dimension": 0,
+            "block_size": 0,
+        },
+        "sparsity_parameters": {},
+    }
+
+
+def _рантайм(входы: list[list[int]], выходы: list[list[int]]) -> dict[str, Any]:
+    """Ответ `runtime_details`, собранный руками: `_проверить_контракт` ест именно его.
+
+    Форма записи здесь беднее, чем у `_подробности`: `runtime_details` уже привёл
+    `ndarray` к списку и класс типа к имени, и проверять надо то, что доходит до отчёта.
+    """
+
+    def описать(формы: list[list[int]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": f"tensor_{номер}",
+                "shape": форма,
+                "dtype": "float32",
+                "quantization": {"scale": 0.0, "zero_point": 0},
+            }
+            for номер, форма in enumerate(формы)
+        ]
+
+    return {"input_details": описать(входы), "output_details": описать(выходы), "layout": "NCHW"}
+
+
 def test_fp32_повторяет_pytorch(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     pytest.importorskip("litert_torch")
@@ -103,3 +148,77 @@ def test_int8_отдаёт_деквантованный_выход(tmp_path: Pat
     # Квантизация — потеря точности, а не поломка, поэтому порог свободнее fp32-го;
     # сырые коды в него не пролезли бы даже близко.
     assert float(np.abs(с_torch - с_tflite).max()) <= 0.05
+
+
+def test_страж_ловит_неконечные_значения() -> None:
+    """`nan` и `inf` обязаны быть отказом, а не числом в отчёте.
+
+    С любым порогом `nan` сравнивается как False, то есть быстрая сверка на сломанном
+    графе была бы fail-open, а `json.dumps` дописал бы в `export_report.json` литерал
+    `NaN`, которого строгий парсер на M-2 не примет. Роль обязана попадать в сообщение:
+    без неё непонятно, какой из трёх матриц или косинусов испорчен.
+    """
+    pytest.importorskip("litert_torch")
+
+    from export.to_tflite import ExportError, _проверить_конечность
+
+    # Здоровый случай молчит. `assert ... is None` тут невозможен: mypy запрещает читать
+    # значение функции, объявленной как `-> None`.
+    _проверить_конечность(np.array([[1.0, -2.5], [0.0, 3.0]]), "эталон")
+    for значение in (np.nan, np.inf, -np.inf):
+        with pytest.raises(ExportError, match="косинусы"):
+            _проверить_конечность(np.array([1.0, значение]), "косинусы")
+
+
+def test_параметры_границы_отвергают_чужой_dtype(tmp_path: Path) -> None:
+    """Границей может быть float32 или int8, всё остальное — отказ.
+
+    Конвертер не запускается: проверяется разбор `get_input_details()`, а не тулчейн.
+    Последствия у третьего dtype асимметричны — на входе `set_tensor` упал бы сам по
+    несовпадению типов, а на выходе `uint8` или `int16` тихо доехал бы сырыми кодами до
+    косинусов как эмбеддинг.
+    """
+    pytest.importorskip("litert_torch")
+
+    from export.to_tflite import ExportError, _параметры_границы
+
+    путь = tmp_path / "toy.tflite"
+    assert _параметры_границы(_подробности(np.float32, (0.0, 0)), "вход", путь) is None
+    assert _параметры_границы(_подробности(np.int8, (0.5, -3)), "вход", путь) == (0.5, -3)
+    with pytest.raises(ExportError, match="нулевым scale"):
+        _параметры_границы(_подробности(np.int8, (0.0, 0)), "выход", путь)
+    with pytest.raises(ExportError) as отказ:
+        _параметры_границы(_подробности(np.uint8, (0.5, 128)), "выход", путь)
+    # Путь и фактическое имя типа — в сообщении: иначе по падению не понять, какой из
+    # двух артефактов прогона испорчен и чем именно.
+    assert "uint8" in str(отказ.value)
+    assert str(путь) in str(отказ.value)
+
+
+def test_контракт_форм_ловит_чужой_граф(tmp_path: Path) -> None:
+    """Формы графа против §4.5, включая число тензоров.
+
+    `embedding_dim` в манифесте берётся из конфига чекпоинта, поэтому `check_provenance`
+    сверит конфиг с индексом и расхождение самого графа не заметит: без этой проверки
+    конвертер, отдавший другую размерность, оставил бы зелёный отчёт.
+    """
+    pytest.importorskip("litert_torch")
+
+    from export.to_tflite import ExportError, _проверить_контракт
+
+    путь = tmp_path / "toy.tflite"
+    # Обе раскладки законны: порядок осей выбирает конвертер, а не мы.
+    _проверить_контракт(_рантайм([[1, 3, 16, 16]], [[1, 8]]), путь, 16, 8)
+    _проверить_контракт(_рантайм([[1, 16, 16, 3]], [[1, 8]]), путь, 16, 8)
+    with pytest.raises(ExportError, match="320"):
+        _проверить_контракт(_рантайм([[1, 3, 16, 16]], [[1, 8]]), путь, 320, 8)
+    with pytest.raises(ExportError, match="embedding_dim"):
+        _проверить_контракт(_рантайм([[1, 3, 16, 16]], [[1, 8]]), путь, 16, 256)
+    with pytest.raises(ExportError, match="раскладок"):
+        _проверить_контракт(_рантайм([[1, 1, 16, 16]], [[1, 8]]), путь, 16, 8)
+    # Лишний выход — не безвредная деталь: `_run_tflite` жёстко берёт нулевой индекс, то
+    # есть за эмбеддинг ушёл бы тензор, случайно оказавшийся первым.
+    with pytest.raises(ExportError, match="выходов 2"):
+        _проверить_контракт(_рантайм([[1, 3, 16, 16]], [[1, 8], [1, 8]]), путь, 16, 8)
+    with pytest.raises(ExportError, match="входов 2"):
+        _проверить_контракт(_рантайм([[1, 3, 16, 16], [1, 4]], [[1, 8]]), путь, 16, 8)
