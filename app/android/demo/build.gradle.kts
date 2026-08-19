@@ -34,7 +34,9 @@ android {
                 val файлы = манифест["files"] as Map<*, *>
                 ключиМоделей.associateWith { ключ ->
                     val запись = файлы[ключ] as Map<*, *>
-                    "${запись["sha256"]}" to "${запись["name"]}"
+                    // Касты строгие: пропущенный ключ обязан уронить сборку здесь, а не
+                    // протечь в APK литералом «null» вместо эталонной суммы.
+                    (запись["sha256"] as String) to (запись["name"] as String)
                 }
             } else {
                 ключиМоделей.associateWith { "" to "" }
@@ -59,6 +61,7 @@ android {
 // моделей нечего — ассетов нет, а пустые поля `BuildConfig` не с чем сверять.
 val проверкаМанифеста =
     tasks.register("checkModelsManifest") {
+        group = "verification"
         description = "Проверяет, что модели разложены в app/android/models/."
         val манифест = манифестМоделей
         val сообщение = сообщениеОбОтсутствии

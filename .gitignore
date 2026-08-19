@@ -39,6 +39,7 @@ yarn-error.log*
 # Разложенные модели — артефакт прогона (Р-22, как индекс и веса), а не исходник.
 app/android/models/
 app/android/.gradle/
+app/android/.kotlin/
 app/android/build/
 app/android/*/build/
 app/android/local.properties
