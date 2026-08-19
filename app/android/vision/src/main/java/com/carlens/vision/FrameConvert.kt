@@ -1,11 +1,11 @@
 package com.carlens.vision
 
-import java.nio.ByteBuffer
-import kotlin.math.floor
-import kotlin.math.min
-
 /**
- * Выборка пикселей из плоскостей YUV_420_888 сразу в тензор модели.
+ * Выборка пикселей источника кадра сразу в тензор модели.
+ *
+ * Источник — `FrameSource`: плоскости YUV с камеры или готовые RGB-пиксели в тестах
+ * паритета. Геометрия, поля и раскладка живут здесь и общие для обоих, различается
+ * только чтение цвета — иначе тестовый путь проверял бы свою копию арифметики.
  *
  * Полный RGB-кадр не материализуется: промежуточный битмап — это лишний проход по
  * памяти на каждом кадре, и ровно на его отсутствии стоит отказ от NDK (§3 дизайна).
@@ -23,20 +23,21 @@ object FrameConvert {
      * Возвращает то же отображение, что `Letterbox.forFrame`: вызывающий разворачивает
      * им боксы обратно в координаты выпрямленного кадра.
      */
-    fun letterbox(frame: YuvFrame, spec: TensorSpec, padValue: Int, dst: FloatArray): Letterbox {
+    fun letterbox(frame: FrameSource, spec: TensorSpec, padValue: Int, dst: FloatArray): Letterbox {
         require(dst.size >= spec.floatCount) {
             "буфер назначения ${dst.size} против ${spec.floatCount} по спецификации тензора"
         }
         require(padValue in 0..255) { "значение поля $padValue вне 0..255" }
         val выпрямленный = frame.upright
         val отображение = Letterbox.forFrame(выпрямленный, spec.size)
+        val цвет = FloatArray(3)
         for (строка in 0 until spec.size) {
             for (столбец in 0 until spec.size) {
                 val xВыпрямленный = (столбец + 0.5f - отображение.padX) / отображение.scale - 0.5f
                 val yВыпрямленный = (строка + 0.5f - отображение.padY) / отображение.scale - 0.5f
                 записать(
                     frame, выпрямленный, spec, dst,
-                    строка, столбец, xВыпрямленный, yВыпрямленный, padValue,
+                    строка, столбец, xВыпрямленный, yВыпрямленный, padValue, цвет,
                 )
             }
         }
@@ -50,27 +51,28 @@ object FrameConvert {
      * берутся зажатием координаты, а не серым, иначе кроп у края кадра получает рамку,
      * которой не было в обучающих кропах.
      */
-    fun crop(frame: YuvFrame, boxUpright: Box, pad: Float, spec: TensorSpec, dst: FloatArray) {
+    fun crop(frame: FrameSource, boxUpright: Box, pad: Float, spec: TensorSpec, dst: FloatArray) {
         require(dst.size >= spec.floatCount) {
             "буфер назначения ${dst.size} против ${spec.floatCount} по спецификации тензора"
         }
         val выпрямленный = frame.upright
         val область = Boxes.pad(boxUpright, выпрямленный.width, выпрямленный.height, pad)
         require(область.w > 0f && область.h > 0f) { "пустой бокс: ${область.w}×${область.h}" }
+        val цвет = FloatArray(3)
         for (строка in 0 until spec.size) {
             for (столбец in 0 until spec.size) {
                 val xВыпрямленный = область.x + (столбец + 0.5f) * область.w / spec.size - 0.5f
                 val yВыпрямленный = область.y + (строка + 0.5f) * область.h / spec.size - 0.5f
                 записать(
                     frame, выпрямленный, spec, dst,
-                    строка, столбец, xВыпрямленный, yВыпрямленный, БЕЗ_ПОЛЯ,
+                    строка, столбец, xВыпрямленный, yВыпрямленный, БЕЗ_ПОЛЯ, цвет,
                 )
             }
         }
     }
 
     private fun записать(
-        frame: YuvFrame,
+        frame: FrameSource,
         выпрямленный: UprightSize,
         spec: TensorSpec,
         dst: FloatArray,
@@ -79,6 +81,7 @@ object FrameConvert {
         xВыпрямленный: Float,
         yВыпрямленный: Float,
         padValue: Int,
+        цвет: FloatArray,
     ) {
         val внеКадра = xВыпрямленный < 0f || yВыпрямленный < 0f ||
             xВыпрямленный > выпрямленный.width - 1f || yВыпрямленный > выпрямленный.height - 1f
@@ -90,36 +93,12 @@ object FrameConvert {
             записатьПиксель(spec, dst, строка, столбец, серый, серый, серый)
             return
         }
-        val xСенсора =
+        val xБуфера =
             Rotation.sensorX(xВыпрямленный, yВыпрямленный, выпрямленный, frame.rotationDegrees)
-        val yСенсора =
+        val yБуфера =
             Rotation.sensorY(xВыпрямленный, yВыпрямленный, выпрямленный, frame.rotationDegrees)
-        val яркость = выбрать(
-            frame.y, frame.yRowStride, frame.yPixelStride, frame.width, frame.height,
-            xСенсора, yСенсора,
-        )
-        // Пиксель хромы `j` покрывает пиксели яркости `2j` и `2j+1`, то есть его центр
-        // лежит в `2j + 0.5` координат сенсора — отсюда обратный перевод.
-        val xХромы = (xСенсора - 0.5f) / 2f
-        val yХромы = (yСенсора - 0.5f) / 2f
-        val синева = выбрать(
-            frame.u, frame.uvRowStride, frame.uvPixelStride, frame.uvWidth, frame.uvHeight,
-            xХромы, yХромы,
-        )
-        val краснота = выбрать(
-            frame.v, frame.uvRowStride, frame.uvPixelStride, frame.uvWidth, frame.uvHeight,
-            xХромы, yХромы,
-        )
-        // BT.601, ограниченный диапазон: Y 16…235, U/V 16…240 — так отдаёт камера.
-        val линейная = 1.164f * (яркость - 16f)
-        val дельтаU = синева - 128f
-        val дельтаV = краснота - 128f
-        записатьПиксель(
-            spec, dst, строка, столбец,
-            (линейная + 1.596f * дельтаV).coerceIn(0f, 255f),
-            (линейная - 0.813f * дельтаV - 0.391f * дельтаU).coerceIn(0f, 255f),
-            (линейная + 2.018f * дельтаU).coerceIn(0f, 255f),
-        )
+        frame.sampleRgb(xБуфера, yБуфера, цвет)
+        записатьПиксель(spec, dst, строка, столбец, цвет[0], цвет[1], цвет[2])
     }
 
     private fun записатьПиксель(
@@ -164,34 +143,4 @@ object FrameConvert {
         dst[смещение] = нормированное
     }
 
-    /** Билинейная выборка одного байта плоскости с зажатием координат по её границам. */
-    private fun выбрать(
-        буфер: ByteBuffer,
-        rowStride: Int,
-        pixelStride: Int,
-        ширина: Int,
-        высота: Int,
-        x: Float,
-        y: Float,
-    ): Float {
-        val xЗажатый = x.coerceIn(0f, ширина - 1f)
-        val yЗажатый = y.coerceIn(0f, высота - 1f)
-        val x0 = floor(xЗажатый).toInt()
-        val y0 = floor(yЗажатый).toInt()
-        val x1 = min(x0 + 1, ширина - 1)
-        val y1 = min(y0 + 1, высота - 1)
-        val долиX = xЗажатый - x0
-        val долиY = yЗажатый - y0
-        val слева = y0 * rowStride
-        val снизу = y1 * rowStride
-        val верх = смешать(байт(буфер, слева + x0 * pixelStride), байт(буфер, слева + x1 * pixelStride), долиX)
-        val низ = смешать(байт(буфер, снизу + x0 * pixelStride), байт(буфер, снизу + x1 * pixelStride), долиX)
-        return смешать(верх, низ, долиY)
-    }
-
-    private fun смешать(первое: Float, второе: Float, доля: Float): Float =
-        первое + (второе - первое) * доля
-
-    private fun байт(буфер: ByteBuffer, индекс: Int): Float =
-        (буфер.get(индекс).toInt() and 0xFF).toFloat()
 }

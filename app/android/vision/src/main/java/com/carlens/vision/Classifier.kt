@@ -67,7 +67,7 @@ internal class Classifier(
     }
 
     /** Эмбеддинг кропа, нормализованный L2. Массив свежий: он уходит наружу. */
-    fun embed(frame: YuvFrame, box: Box, pad: Float): FloatArray {
+    fun embed(frame: FrameSource, box: Box, pad: Float): FloatArray {
         FrameConvert.crop(frame, box, pad, tensorSpec, пиксели)
         записатьВход()
         выходнойБуфер.rewind()

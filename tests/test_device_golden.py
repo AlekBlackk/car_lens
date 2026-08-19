@@ -99,6 +99,13 @@ def test_боксы_детектора_согласованы_с_кропом(э
             assert запись["box"][поле] == pytest.approx(запись["detector_box"][поле], abs=1e-3)
 
 
+def test_кадр_ссылается_на_свой_тензор(эталон: dict[str, Any]) -> None:
+    """Уровень B сравнивает свой кроп с этим PNG: ссылка обязана быть в самой записи."""
+    for номер, запись in enumerate(эталон["frame"]):
+        assert запись["tensor_png"] == эталон["tensor"][номер]["png"]
+        assert (ЭТАЛОН.parent / запись["tensor_png"]).is_file()
+
+
 def test_записи_ссылаются_на_разные_картинки(эталон: dict[str, Any]) -> None:
     for уровень in ("tensor", "frame"):
         пути = [запись["png"] for запись in эталон[уровень]]

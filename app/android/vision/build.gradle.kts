@@ -26,6 +26,9 @@ android {
         // Фикстура формата индекса общая с TypeScript-читалкой: две реализации одного
         // формата обязаны проверяться на одном файле, иначе они разъедутся.
         getByName("test").resources.srcDir(rootProject.file("../../tests/fixtures/index"))
+        // Эталон паритета (задача 10) едет в инструментальный APK ассетами: тест на
+        // устройстве читает те же PNG и тот же `golden.json`, что собрал питон.
+        getByName("androidTest").assets.srcDir(rootProject.file("../../tests/fixtures/device"))
     }
 }
 
@@ -34,6 +37,7 @@ dependencies {
     implementation(libs.litert.gpu)
     implementation(libs.litert.gpu.api)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.androidx.annotation)
     testImplementation(libs.junit)
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.junit)

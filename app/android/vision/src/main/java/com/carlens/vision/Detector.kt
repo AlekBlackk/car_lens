@@ -168,7 +168,7 @@ internal class Detector(
      * GPU-делегат может не подняться, и тогда всё работает медленнее, но одинаково: это
      * видно в `delegateMode`, а не в тишине.
      */
-    fun detect(frame: YuvFrame): List<Box> {
+    fun detect(frame: FrameSource): List<Box> {
         val отображение = FrameConvert.letterbox(
             frame, спек, contract.letterboxPadValue, пиксели,
         )

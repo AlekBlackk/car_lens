@@ -1,7 +1,5 @@
 package com.carlens.vision
 
-import java.nio.ByteBuffer
-
 enum class TensorLayout { NHWC, NCHW }
 
 enum class ChannelOrder { RGB, BGR }
@@ -40,59 +38,4 @@ data class TensorSpec(
     }
 
     val floatCount: Int get() = size * size * 3
-}
-
-/**
- * Кадр YUV_420_888 как набор буферов и шагов. Отдельный тип, а не `android.media.Image`:
- * так вся арифметика препроцессинга проверяется JVM-тестами без устройства, а адаптер
- * от `Image` остаётся тонким и проверяется на телефоне.
- */
-class YuvFrame(
-    val width: Int,
-    val height: Int,
-    val rotationDegrees: Int,
-    val y: ByteBuffer,
-    val yRowStride: Int,
-    val yPixelStride: Int,
-    val u: ByteBuffer,
-    val v: ByteBuffer,
-    val uvRowStride: Int,
-    val uvPixelStride: Int,
-) {
-    /** Ширина плоскости хромы: у YUV_420_888 она вдвое меньше, с округлением вверх. */
-    val uvWidth: Int get() = (width + 1) / 2
-
-    val uvHeight: Int get() = (height + 1) / 2
-
-    val upright: UprightSize get() = Rotation.upright(width, height, rotationDegrees)
-
-    init {
-        require(width > 0 && height > 0) { "пустой кадр ${width}x$height" }
-        require(yRowStride > 0 && yPixelStride > 0) {
-            "шаги плоскости Y: ряд $yRowStride, пиксель $yPixelStride"
-        }
-        require(uvRowStride > 0 && uvPixelStride > 0) {
-            "шаги плоскостей хромы: ряд $uvRowStride, пиксель $uvPixelStride"
-        }
-        // Перепутанные местами плоскости или шаги — самая частая ошибка адаптера от
-        // `Image`, и без этой сверки она даёт либо чужие пиксели, либо
-        // IndexOutOfBounds из глубины выборки, где по номеру байта уже ничего не понять.
-        сверитьВместимость("Y", y, yRowStride, yPixelStride, width, height)
-        сверитьВместимость("U", u, uvRowStride, uvPixelStride, uvWidth, uvHeight)
-        сверитьВместимость("V", v, uvRowStride, uvPixelStride, uvWidth, uvHeight)
-    }
-
-    private fun сверитьВместимость(
-        имя: String,
-        буфер: ByteBuffer,
-        rowStride: Int,
-        pixelStride: Int,
-        ширина: Int,
-        высота: Int,
-    ) {
-        val нужно = rowStride * (высота - 1) + (ширина - 1) * pixelStride + 1
-        require(буфер.capacity() >= нужно) {
-            "плоскость $имя: ${буфер.capacity()} байт против $нужно по шагам ${ширина}x$высота"
-        }
-    }
 }

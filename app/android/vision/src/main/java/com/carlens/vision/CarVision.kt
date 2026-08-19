@@ -1,7 +1,9 @@
 package com.carlens.vision
 
 import android.content.res.AssetManager
+import android.graphics.Bitmap
 import android.media.Image
+import androidx.annotation.VisibleForTesting
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -112,6 +114,75 @@ class CarVision private constructor(
             uvRowStride = синева.rowStride,
             uvPixelStride = синева.pixelStride,
         )
+    }
+
+    /**
+     * Эмбеддинг готового кропа: вход теста паритета уровня A.
+     *
+     * Битмап обязан быть стороной `img_size` — тот же тензор, что питон сохранил в PNG
+     * до нормализации. Кроп берётся по всему изображению с нулевым паддингом, то есть
+     * выборка попадает ровно в пиксели, и расхождение с эталоном может дать только
+     * нормализация или сам граф. Не входит в публичный контракт §13.3.
+     */
+    @VisibleForTesting
+    fun embedBitmapForTest(bitmap: Bitmap): FloatArray {
+        проверитьЖивость()
+        val кадр = изБитмапа(bitmap)
+        return classifier.embed(
+            кадр, Box(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat(), 1f), pad = 0f,
+        )
+    }
+
+    /** Кроп, ресайз, нормализация и граф — вход теста паритета уровня B. */
+    @VisibleForTesting
+    fun embedBitmapCropForTest(
+        bitmap: Bitmap,
+        box: Box,
+        pad: Float = 0.08f,
+        topK: Int = 5,
+    ): EmbedResult {
+        проверитьЖивость()
+        val эмбеддинг = classifier.embed(изБитмапа(bitmap), box, pad)
+        return EmbedResult(эмбеддинг, index.knn(эмбеддинг, topK))
+    }
+
+    /**
+     * Пиксели кропа до нормализации — вход теста паритета уровня B.
+     *
+     * Сравнивать эмбеддинги на уровне B бесполезно: классификатор квантованный, и
+     * микроразница в пикселях (0.26 уровня яркости между двумя честными реализациями
+     * билинейной выборки) расходится в косинус 0.97, тогда как настоящая ошибка кропа
+     * даёт 0.87-0.99 — диапазоны перекрываются. По пикселям разделение чистое, и
+     * проверяется ровно то, за что отвечает Kotlin: кроп, паддинг и ресайз.
+     *
+     * Возвращает NHWC RGB в диапазоне 0..255 стороной `img_size`.
+     */
+    @VisibleForTesting
+    fun cropPixelsForTest(bitmap: Bitmap, box: Box, pad: Float = 0.08f): FloatArray {
+        проверитьЖивость()
+        val спек = TensorSpec(
+            size = classifier.tensorSpec.size,
+            layout = TensorLayout.NHWC,
+            channels = ChannelOrder.RGB,
+            scaling = Scaling.Unit01,
+        )
+        val пиксели = FloatArray(спек.floatCount)
+        FrameConvert.crop(изБитмапа(bitmap), box, pad, спек, пиксели)
+        for (индекс in пиксели.indices) пиксели[индекс] *= 255f
+        return пиксели
+    }
+
+    /** Рамки на готовой картинке — вход теста паритета по детектору. */
+    @VisibleForTesting
+    fun detectBitmapForTest(bitmap: Bitmap): List<Box> {
+        проверитьЖивость()
+        return detector.detect(изБитмапа(bitmap))
+    }
+
+    private fun изБитмапа(bitmap: Bitmap): RgbFrame {
+        val пиксели = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(пиксели, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        return RgbFrame(пиксели, bitmap.width, bitmap.height)
     }
 
     private fun проверитьЖивость() {
