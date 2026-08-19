@@ -225,3 +225,26 @@ def test_stage_читает_из_паритета_путь_от_рабочего
     assert (куда / "catalog_index.bin").read_bytes() == b"INT8"
     записанный = json.loads(манифест.read_text(encoding="utf-8"))
     assert записанный["provenance"]["index_source"] == "tflite"
+
+
+def test_stage_называет_оба_прочтения_пути_из_паритета(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Не нашлось ни от прогона, ни от рабочего каталога — отказ обязан назвать оба места.
+
+    В `parity.json` лежит строка без корня, и по ней не видно, от чего её считали. Диагноз
+    «индекс не собран» указал бы на один из двух путей, а искать пользователю по обоим.
+    """
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    (прогон / "export" / "parity.json").write_text(
+        json.dumps({"manifest": {"index_dir": "чужой/index_int8"}}), encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as отказ:
+        stage(прогон, детектор, tmp_path / "models")
+
+    текст = str(отказ.value)
+    assert "чужой/index_int8" in текст
+    assert str(прогон / "чужой" / "index_int8") in текст
+    assert str(Path("чужой") / "index_int8") in текст
