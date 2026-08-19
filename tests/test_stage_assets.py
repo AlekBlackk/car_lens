@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -181,3 +182,46 @@ def test_stage_роняет_на_расхождении_происхождени
 
     with pytest.raises(Exception, match="sha256"):
         stage(прогон, детектор, tmp_path / "models")
+
+
+def test_stage_читает_из_паритета_путь_от_рабочего_каталога(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`verify_parity` записывает путь индекса ровно как его набрали в командной строке.
+
+    Гоняют её из корня репозитория, то есть в `parity.json` лежит `runs/<прогон>/index_int8`
+    — путь от рабочего каталога, а не от прогона. Прочтение только от прогона давало бы
+    `run/runs/<прогон>/index_int8` с диагнозом «индекс не собран», то есть путь по умолчанию,
+    ради которого `parity.json` и читается, не работал бы в штатном вызове.
+    """
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    # Индекс на выходах квантованной модели: он и отличает выбранный каталог от `index/`
+    # — другими байтами и пометкой происхождения в манифесте.
+    хеш_int8 = hashlib.sha256(b"int8").hexdigest()
+    индекс = прогон / "index_int8"
+    индекс.mkdir()
+    (индекс / "catalog_index.bin").write_bytes(b"INT8")
+    (индекс / "catalog_meta.json").write_text(
+        json.dumps({**МЕТА, "model_weights_sha256": хеш_int8}), encoding="utf-8"
+    )
+    (индекс / "index_manifest.json").write_text(
+        json.dumps(
+            {
+                "source_model_sha256": хеш_int8,
+                "checkpoint_sha256": ЧЕКПОИНТ_SHA,
+                "preprocess_version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (прогон / "export" / "parity.json").write_text(
+        json.dumps({"manifest": {"index_dir": "run/index_int8"}}), encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    куда = tmp_path / "models"
+
+    манифест = stage(прогон, детектор, куда)
+
+    assert (куда / "catalog_index.bin").read_bytes() == b"INT8"
+    записанный = json.loads(манифест.read_text(encoding="utf-8"))
+    assert записанный["provenance"]["index_source"] == "tflite"
