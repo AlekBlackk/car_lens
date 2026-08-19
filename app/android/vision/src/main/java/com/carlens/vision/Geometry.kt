@@ -55,11 +55,32 @@ object Rotation {
      * кадрами, и поворот, живущий снаружи, каждый потребитель применит по-своему.
      */
     fun toSensor(xUpright: Float, yUpright: Float, upright: UprightSize, degrees: Int): FloatArray =
+        floatArrayOf(
+            sensorX(xUpright, yUpright, upright, degrees),
+            sensorY(xUpright, yUpright, upright, degrees),
+        )
+
+    /**
+     * Те же формулы покоординатно, без массива на выходе.
+     *
+     * Нужны препроцессингу: `FrameConvert` зовёт перевод на каждый пиксель тензора, и
+     * `FloatArray` на вызов — это 173 тысячи аллокаций на кадр 416×416 (§глобальные
+     * ограничения вехи: ни одной аллокации в горячем пути).
+     */
+    fun sensorX(xUpright: Float, yUpright: Float, upright: UprightSize, degrees: Int): Float =
         when (нормализовать(degrees)) {
-            0 -> floatArrayOf(xUpright, yUpright)
-            90 -> floatArrayOf(yUpright, upright.width - 1f - xUpright)
-            180 -> floatArrayOf(upright.width - 1f - xUpright, upright.height - 1f - yUpright)
-            else -> floatArrayOf(upright.height - 1f - yUpright, xUpright)
+            0 -> xUpright
+            90 -> yUpright
+            180 -> upright.width - 1f - xUpright
+            else -> upright.height - 1f - yUpright
+        }
+
+    fun sensorY(xUpright: Float, yUpright: Float, upright: UprightSize, degrees: Int): Float =
+        when (нормализовать(degrees)) {
+            0 -> yUpright
+            90 -> upright.width - 1f - xUpright
+            180 -> upright.height - 1f - yUpright
+            else -> xUpright
         }
 
     private fun нормализовать(degrees: Int): Int {
