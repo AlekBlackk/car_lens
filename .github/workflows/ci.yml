@@ -71,3 +71,21 @@ jobs:
       - name: Тесты читалки индекса
         run: npm test
         working-directory: app
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Сборка и JVM-тесты модуля vision
+        working-directory: app/android
+        run: ./gradlew :vision:assembleDebug :vision:testDebugUnitTest

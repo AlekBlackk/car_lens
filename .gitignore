@@ -36,9 +36,11 @@ npm-debug.log*
 yarn-error.log*
 
 # Android
+# Разложенные модели — артефакт прогона (Р-22, как индекс и веса), а не исходник.
+app/android/models/
 app/android/.gradle/
 app/android/build/
-app/android/app/build/
+app/android/*/build/
 app/android/local.properties
 *.keystore
 !debug.keystore

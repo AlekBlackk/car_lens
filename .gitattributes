@@ -3,3 +3,7 @@
 # CRLF под Windows (core.autocrlf=true) развалила бы сверку хеша.
 tests/fixtures/index/catalog_meta.json -text
 tests/fixtures/index/catalog_index.bin binary
+
+# Обёртка Gradle — POSIX-скрипт: при core.autocrlf=true checkout под Windows подставил
+# бы CRLF, и `./gradlew` из Git Bash упал бы на `bad interpreter`.
+app/android/gradlew text eol=lf
