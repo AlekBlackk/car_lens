@@ -18,6 +18,16 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
+    // Инструментальные тесты по умолчанию идут в отладочном варианте, а замер латентности
+    // в нём меряет не то: APK androidTest собирается `android:debuggable=true`, и ART в
+    // отладочном процессе ограничивает JIT. Флаг переключает вариант, не трогая умолчание:
+    // ./gradlew :vision:connectedReleaseAndroidTest -Pcarlens.testRelease
+    testBuildType = if (providers.gradleProperty("carlens.testRelease").isPresent) {
+        "release"
+    } else {
+        "debug"
+    }
+
     sourceSets {
         // Модели лежат в одном каталоге на всё дерево и подключаются туда, где нужны:
         // инструментальному APK библиотеки — как свои ассеты. Отсутствие каталога не

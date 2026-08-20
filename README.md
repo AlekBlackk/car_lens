@@ -335,8 +335,20 @@ cd app/android && ./gradlew :vision:connectedDebugAndroidTest -Pandroid.testInst
 ```
 
 Печатает p50/p95 по стадиям в logcat (`adb logcat -d -s System.out:I | grep ЗАМЕР`) для
-делегата по устройству и для принудительного CPU (`AssetSpec(allowGpu = false)`). Числа
-прогона на S23 Ultra и выводы из них — [`bench/latency.md`](bench/latency.md).
+делегата по устройству и для принудительного CPU (`AssetSpec(allowGpu = false)`).
+
+Так снимать нельзя, если числа нужны для решений: APK androidTest отладочного варианта
+собирается `android:debuggable=true`, и ART в таком процессе ограничивает JIT — стадии на
+Kotlin выходят втрое-впятеро медленнее, чем на самом деле. Замер вехи снимается релизным
+вариантом:
+
+```bash
+cd app/android && ./gradlew :vision:connectedReleaseAndroidTest -Pcarlens.testRelease -Pandroid.testInstrumentationRunnerArguments.class=com.carlens.vision.LatencyTest
+```
+
+Флаг `-Pcarlens.testRelease` переключает `testBuildType` модуля `:vision`; без него всё
+идёт по-прежнему в отладочном варианте. Числа обоих прогонов на S23 Ultra и выводы —
+[`bench/latency.md`](bench/latency.md).
 
 **Зелёный CI не является свидетельством того, что путь на устройстве работает.** Джоба
 `android` гоняет только JVM-тесты модуля `:vision`: инструментальные требуют телефона и
