@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native'
 import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera'
 import { useSharedValue, Worklets } from 'react-native-worklets-core'
-import { НакопительЦеныМоста, type СтадияМоста } from './src/vision/latency'
+import { НакопительЦеныМоста, часыМоста, type СтадияМоста } from './src/vision/latency'
 import { detect, embedAndMatch, matchEmbedding, type Box } from './src/vision/plugins'
 import { shouldClassify } from './src/vision/throttle'
 import { mapBoxToView } from './src/vision/viewMapping'
@@ -102,12 +102,16 @@ export default function App(): React.JSX.Element {
       'worklet'
       try {
         // Замер цены моста (Task 10 M-1.6): `t_до`/`t_после` вокруг каждого из трёх
-        // вызовов границы native↔JS, `Date.now()` — тот же источник времени, что уже
-        // используется троттлингом ниже в этом же worklet'е (`performance.now()` в
-        // worklet-контексте Hermes не гарантирован без отдельного полифилла).
-        const tДетектДо = Date.now()
+        // вызовов границы native↔JS через `часыМоста()` — `performance.now()` из
+        // `react-native-worklets-core` (декоратор кладёт его в рантайм воркета сам,
+        // см. комментарий в `latency.ts`), а не `Date.now()`: цена перехода границы
+        // ожидается в микросекундах, и миллисекундное разрешение `Date.now()` там —
+        // не измерение, а шум (находка I3 финального ревью M-1.6). Троттлинг ниже
+        // по-прежнему на `Date.now()` — там счёт на десятки миллисекунд, и цена
+        // квантования не имеет значения.
+        const tДетектДо = часыМоста()
         const результат = detect(frame, MAX_DET)
-        отметитьЦенуМоста('detect', tДетектДо, Date.now(), результат.nativeMs)
+        отметитьЦенуМоста('detect', tДетектДо, часыМоста(), результат.nativeMs)
         обновитьДетекцию(результат.boxes, результат.frameWidth, результат.frameHeight)
 
         // Троттлинг — на JS-стороне (§6.2 спеки): не чаще ~8 Гц и не больше двух кропов
@@ -116,27 +120,27 @@ export default function App(): React.JSX.Element {
         const дляКлассификации = shouldClassify(сейчас, последняяКлассификация.value, результат.boxes)
         if (дляКлассификации.length > 0) {
           последняяКлассификация.value = сейчас
-          const tEmbedДо = Date.now()
+          const tEmbedДо = часыМоста()
           const { results: результатыКлассификации, nativeMs: embedNativeMs } = embedAndMatch(
             frame,
             дляКлассификации,
             CLASSIFY_PAD,
             CLASSIFY_TOP_K,
           )
-          отметитьЦенуМоста('embedAndMatch', tEmbedДо, Date.now(), embedNativeMs)
+          отметитьЦенуМоста('embedAndMatch', tEmbedДо, часыМоста(), embedNativeMs)
           const первый = результатыКлассификации[0]
           const топ1 = первый?.matches[0]
           if (первый != null && топ1 != null) {
             // Третий путь границы на том же векторе. EMA в этой вехе нет (§13.3), поэтому
             // вызов существует ради сверки: `matchEmbedding` обязан вернуть ровно то, что
             // `embedAndMatch` уже посчитал внутри себя.
-            const tMatchДо = Date.now()
+            const tMatchДо = часыМоста()
             const { matches: сверкаMatches, nativeMs: matchNativeMs } = matchEmbedding(
               frame,
               первый.embedding,
               CLASSIFY_TOP_K,
             )
-            отметитьЦенуМоста('matchEmbedding', tMatchДо, Date.now(), matchNativeMs)
+            отметитьЦенуМоста('matchEmbedding', tMatchДо, часыМоста(), matchNativeMs)
             const сверка = сверкаMatches[0]
             обновитьКлассификацию(
               топ1.classIdx,

@@ -5,9 +5,7 @@ import android.os.SystemClock
 import com.mrousavy.camera.core.types.Orientation
 import com.mrousavy.camera.frameprocessors.Frame
 import com.mrousavy.camera.frameprocessors.FrameProcessorPlugin
-import com.mrousavy.camera.frameprocessors.SharedArray
 import com.mrousavy.camera.frameprocessors.VisionCameraProxy
-import java.nio.ByteOrder
 
 /**
  * Угол кадра в градусах поворота по часовой стрелке.
@@ -59,19 +57,20 @@ class CarVisionDetectPlugin(
             val кадрЭкрана = Rotation.upright(frame.image.width, frame.image.height, уголКадра)
             val отобранные = боксыЭкрана.sortedByDescending { it.conf }.take(maxDet)
 
-            val буфер = SharedArray(proxy, отобранные.size * 5 * 4)
-            val числа = буфер.byteBuffer.order(ByteOrder.nativeOrder()).asFloatBuffer()
+            val (буфер, числа) = floatSharedArray(proxy, отобранные.size * 5)
             отобранные.forEach { бокс ->
                 числа.put(бокс.x); числа.put(бокс.y)
                 числа.put(бокс.w); числа.put(бокс.h)
                 числа.put(бокс.conf)
             }
-            mapOf(
-                "nativeNs" to (SystemClock.elapsedRealtimeNanos() - начало).toDouble(),
-                "frameWidth" to кадрЭкрана.width,
-                "frameHeight" to кадрЭкрана.height,
-                "count" to отобранные.size,
-                "boxes" to буфер,
+            ответМоста(
+                SystemClock.elapsedRealtimeNanos() - начало,
+                отобранные.size,
+                mapOf(
+                    "frameWidth" to кадрЭкрана.width,
+                    "frameHeight" to кадрЭкрана.height,
+                    "boxes" to буфер,
+                ),
             )
         }
     }

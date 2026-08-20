@@ -6,7 +6,6 @@ import com.mrousavy.camera.frameprocessors.Frame
 import com.mrousavy.camera.frameprocessors.FrameProcessorPlugin
 import com.mrousavy.camera.frameprocessors.SharedArray
 import com.mrousavy.camera.frameprocessors.VisionCameraProxy
-import java.nio.ByteOrder
 
 /**
  * Совпадения для готового вектора.
@@ -38,7 +37,7 @@ class CarVisionMatchPlugin(
         val общий = params?.get("embedding") as? SharedArray
             ?: error("embedding: ожидался ArrayBuffer, пришло ${params?.get("embedding")}")
         val topK = (params?.get("topK") as? Number)?.toInt() ?: 5
-        val числа = общий.byteBuffer.order(ByteOrder.nativeOrder()).asFloatBuffer()
+        val числа = общий.asFloatBuffer()
         val вектор = FloatArray(числа.remaining())
         числа.get(вектор)
 
@@ -50,16 +49,15 @@ class CarVisionMatchPlugin(
             // `CatalogIndex.knn` отдаёт `min(topK, numClasses)` совпадений, а не ровно
             // `topK`. Наружу поэтому уезжает фактическое число: проверка длины по `topK`
             // на маленьком каталоге падала бы на совершенно верном ответе.
-            val буфер = SharedArray(proxy, совпадения.size * 2 * 4)
-            val плоские = буфер.byteBuffer.order(ByteOrder.nativeOrder()).asFloatBuffer()
+            val (буфер, плоские) = floatSharedArray(proxy, совпадения.size * 2)
             совпадения.forEach { совпадение ->
                 плоские.put(совпадение.classIdx.toFloat())
                 плоские.put(совпадение.sim)
             }
-            mapOf(
-                "nativeNs" to (SystemClock.elapsedRealtimeNanos() - начало).toDouble(),
-                "count" to совпадения.size,
-                "matches" to буфер,
+            ответМоста(
+                SystemClock.elapsedRealtimeNanos() - начало,
+                совпадения.size,
+                mapOf("matches" to буфер),
             )
         }
     }

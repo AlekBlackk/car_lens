@@ -65,10 +65,17 @@ export type EmbedMatchCallResult = { results: EmbedMatchResult[]; nativeMs: numb
  * Сырой ответ моста. `emb0`/`emb1` — слоты, по одному на бокс (не больше двух, см.
  * `MAX_CROPS` в `throttle.ts` и `МАКСИМУМ_КРОПОВ` в `CarVisionEmbedPlugin.kt`), поэтому
  * ключи адресуются динамически, а не перечислены полями.
+ *
+ * `matchCount` — фактическое число совпадений на бокс, а не запрошенный `topK` (находка
+ * I1 финального ревью M-1.6): `CatalogIndex.knn` на Kotlin-стороне отдаёт
+ * `min(topK, numClasses)`, и на каталоге меньше `topK` буфер `matches` укладывается по
+ * этому меньшему числу. Считать по `topK`, как раньше, значило бы читать за пределами
+ * того, что нативная сторона реально записала — TS-проверка длины ниже это ловит.
  */
 type RawEmbedResult = {
   nativeNs: number
   count: number
+  matchCount: number
   matches: ArrayBuffer
   [ключСлота: string]: unknown
 }
@@ -77,7 +84,8 @@ const плагинЭмбеддинга = VisionCameraProxy.initFrameProcessorPlu
 
 /**
  * Эмбеддинг и top-K для уже отобранных троттлингом боксов (см. `shouldClassify` в
- * `throttle.ts`). Длина `matches` проверяется жёстко по тому же принципу, что в `detect`.
+ * `throttle.ts`). Длина `matches` проверяется жёстко по тому же принципу, что в `detect`,
+ * но по `matchCount`, а не по запрошенному `topK` — см. комментарий у `RawEmbedResult`.
  */
 export function embedAndMatch(frame: Frame, boxes: Box[], pad: number, topK: number): EmbedMatchCallResult {
   'worklet'
@@ -89,10 +97,17 @@ export function embedAndMatch(frame: Frame, boxes: Box[], pad: number, topK: num
     плоские.push(бокс.x, бокс.y, бокс.w, бокс.h, бокс.conf)
   })
   const сырое = плагинЭмбеддинга.call(frame, { boxes: плоские, pad, topK }) as unknown as RawEmbedResult
+  const matchCount = сырое.matchCount
+  // `count` меньше запрошенного `topK` законен (в индексе может быть меньше классов),
+  // больше — нет: это означало бы, что нативная сторона считает `topK` не тем, что
+  // прислал JS. Та же проверка, что уже есть в `matchEmbedding` ниже.
+  if (matchCount > topK) {
+    throw new Error(`совпадений на бокс ${matchCount} больше запрошенных topK=${topK}`)
+  }
   const числаСовпадений = new Float32Array(сырое.matches)
-  if (числаСовпадений.length !== сырое.count * topK * 2) {
+  if (числаСовпадений.length !== сырое.count * matchCount * 2) {
     throw new Error(
-      `совпадения: ${числаСовпадений.length} чисел против ${сырое.count * topK * 2} по count*topK*2`,
+      `совпадения: ${числаСовпадений.length} чисел против ${сырое.count * matchCount * 2} по count*matchCount*2`,
     )
   }
   const результаты: EmbedMatchResult[] = []
@@ -104,8 +119,8 @@ export function embedAndMatch(frame: Frame, boxes: Box[], pad: number, topK: num
     // уедет в состояние трека.
     const эмбеддинг = new Float32Array(слот).slice()
     const matches: Match[] = []
-    for (let к = 0; к < topK; к++) {
-      const сдвиг = (номер * topK + к) * 2
+    for (let к = 0; к < matchCount; к++) {
+      const сдвиг = (номер * matchCount + к) * 2
       matches.push({
         classIdx: числаСовпадений[сдвиг]!,
         sim: числаСовпадений[сдвиг + 1]!,

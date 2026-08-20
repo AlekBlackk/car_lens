@@ -6,7 +6,6 @@ import com.mrousavy.camera.frameprocessors.Frame
 import com.mrousavy.camera.frameprocessors.FrameProcessorPlugin
 import com.mrousavy.camera.frameprocessors.SharedArray
 import com.mrousavy.camera.frameprocessors.VisionCameraProxy
-import java.nio.ByteOrder
 
 /**
  * Эмбеддинг и top-K для боксов, выбранных троттлингом в JS.
@@ -23,6 +22,20 @@ import java.nio.ByteOrder
  * `frame.orientation.toDegrees()` — та же функция, что использует `CarVisionDetectPlugin`
  * (объявлена там `internal`, поэтому доступна и здесь без импорта: оба файла в одном
  * пакете `com.carlens.vision`). Второй копии этого маппинга здесь нет намеренно.
+ *
+ * ## Число совпадений на бокс (находка I1 финального ревью M-1.6)
+ *
+ * `CatalogIndex.knn` отдаёт `min(topK, numClasses)` совпадений, а не ровно `topK`
+ * (комментарий на месте, `CatalogIndex.kt`). Буфер `matches` раньше выделялся размером
+ * `count * topK * 2`, но заполнялся по фактическому (меньшему на маленьком каталоге)
+ * числу — хвост буфера оставался нулями, TS отдавал их как настоящие совпадения
+ * `{classIdx: 0, sim: 0}`, а при двух боксах совпадения второго сдвигались в область
+ * первого. `CarVisionMatchPlugin` эту же семантику уже решал правильно (отдавал
+ * фактическое `count`), здесь исправлено симметрично: фактическое число совпадений на
+ * бокс уезжает наружу отдельным полем `matchCount`, и буфер укладывается по нему, а не
+ * по `topK`. Оно одинаково для каждого бокса одного вызова — один индекс, один `topK`,
+ * — поэтому одного числа на весь ответ достаточно; `check` ниже документирует это
+ * предположение и упал бы, если `CatalogIndex.knn` вдруг перестанет быть таким.
  */
 class CarVisionEmbedPlugin(
     private val proxy: VisionCameraProxy,
@@ -55,25 +68,28 @@ class CarVisionEmbedPlugin(
             // `уголКадра` работает в той же системе координат. Любой доворот тут увёл бы
             // кроп мимо машины, причём тихо — подписи стали бы просто хуже.
             val результаты = зрение.embedAndMatch(frame.image, уголКадра, боксы, pad, topK)
-            val ответ = HashMap<String, Any>()
-            val совпадения = SharedArray(proxy, результаты.size * topK * 2 * 4)
-            val числаСовпадений =
-                совпадения.byteBuffer.order(ByteOrder.nativeOrder()).asFloatBuffer()
+            val фактическийTopK = результаты.firstOrNull()?.matches?.size ?: 0
+            val (совпадения, числаСовпадений) =
+                floatSharedArray(proxy, результаты.size * фактическийTopK * 2)
+            val поля = HashMap<String, Any>()
             результаты.forEachIndexed { номер, результат ->
                 val слот = слоты[номер] ?: SharedArray(proxy, результат.embedding.size * 4)
                     .also { слоты[номер] = it }
-                слот.byteBuffer.order(ByteOrder.nativeOrder()).asFloatBuffer()
-                    .put(результат.embedding)
-                ответ["emb$номер"] = слот
+                слот.asFloatBuffer().put(результат.embedding)
+                поля["emb$номер"] = слот
+                check(результат.matches.size == фактическийTopK) {
+                    "матчей у бокса $номер: ${результат.matches.size} против $фактическийTopK " +
+                        "у бокса 0 — один вызов embedAndMatch обязан отдавать одинаковое число " +
+                        "совпадений на каждый бокс (один индекс, один topK)"
+                }
                 результат.matches.forEach { совпадение ->
                     числаСовпадений.put(совпадение.classIdx.toFloat())
                     числаСовпадений.put(совпадение.sim)
                 }
             }
-            ответ["nativeNs"] = (SystemClock.elapsedRealtimeNanos() - начало).toDouble()
-            ответ["count"] = результаты.size
-            ответ["matches"] = совпадения
-            ответ
+            поля["matches"] = совпадения
+            поля["matchCount"] = фактическийTopK
+            ответМоста(SystemClock.elapsedRealtimeNanos() - начало, результаты.size, поля)
         }
     }
 
