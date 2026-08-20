@@ -38,6 +38,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Поля объявляются в обоих случаях, а отсутствие манифеста роняет не конфигурацию,
         // а задачу `checkModelsManifest` ниже: Gradle конфигурирует все подпроекты перед
@@ -89,4 +90,14 @@ dependencies {
     implementation(project(":vision"))
     implementation("com.facebook.react:react-android")
     implementation("com.facebook.react:hermes-android")
+
+    // Задача 7: `SharedArrayContractTest` использует `androidx.camera.core.ImageProxy`/
+    // `ImageInfo` (тестовый дубль поверх `android.media.Image`) и JUnit-раннер
+    // инструментальных тестов. `camera-core` — зависимость `:vision`, объявленная там как
+    // `implementation`, а не `api`, поэтому транзитивно в androidTest `:app` не попадает
+    // (проверено компиляцией: `Unresolved reference: ImageProxy`) — нужна явная androidTest
+    // зависимость на ту же версию, что пинована в `libs.versions.toml` (`camerax`).
+    androidTestImplementation(libs.camera.core)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }
