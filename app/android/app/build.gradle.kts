@@ -69,8 +69,8 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 
-// Отказ на фазе выполнения, а не конфигурации: проверка висит в зависимостях `preBuild`,
-// поэтому падает любая сборка `:app` и не падает ничего в `:vision`.
+// Отказ на фазе выполнения, а не конфигурации: проверка висит в зависимостях задачи
+// упаковки ассетов, поэтому падает только сборка APK и не падает ничего в `:vision`.
 val проверкаМанифеста =
     tasks.register("checkModelsManifest") {
         group = "verification"
@@ -83,7 +83,10 @@ val проверкаМанифеста =
             }
         }
     }
-tasks.named("preBuild") { dependsOn(проверкаМанифеста) }
+// Только упаковка APK требует моделей: компиляция Kotlin их не читает, а CI собирает
+// именно её, без разложенных ассетов.
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }
+    .configureEach { dependsOn(проверкаМанифеста) }
 
 dependencies {
     // Будущие задачи (3-11) добавят сюда вызовы FrameProcessorPlugin из `:vision`.

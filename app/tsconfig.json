@@ -3,6 +3,10 @@
   "compilerOptions": {
     // Базовый конфиг тянет типы `jest`, а раннер тестов здесь — vitest (см.
     // `package.json`, `"test": "vitest run"`); `@types/jest` в devDependencies нет.
-    "types": ["react-native"]
+    "types": ["react-native"],
+    // Базовый `module: es2015` не разрешает `import.meta` (нужен читалке индекса в
+    // тестах для поиска фикстур). Только для проверки типов (noEmit): бандл Metro
+    // собирает через отдельный babel-конфиг, эта настройка на него не влияет.
+    "module": "esnext"
   }
 }

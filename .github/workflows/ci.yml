@@ -64,11 +64,15 @@ jobs:
         run: npm ci
         working-directory: app
 
-      - name: Собрать TypeScript
-        run: npm run build
+      - name: Типы
+        run: npm run typecheck
         working-directory: app
 
-      - name: Тесты читалки индекса
+      - name: Линт
+        run: npm run lint
+        working-directory: app
+
+      - name: Тесты
         run: npm test
         working-directory: app
 
@@ -86,6 +90,20 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Сборка и JVM-тесты модуля vision
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Установить зависимости JS
+        # Нужны Gradle: React Native Gradle Plugin и автолинкинг резолвятся из node_modules.
+        run: npm ci
+        working-directory: app
+
+      - name: JVM-тесты vision и компиляция моста
         working-directory: app/android
-        run: ./gradlew :vision:assembleDebug :vision:testDebugUnitTest
+        # APK не собираем: §16.3 спеки запрещает — Android SDK на раннере поднимается
+        # дольше, чем длится весь остальной пайплайн. Компиляция ловит конфликт версий
+        # и автолинкинга в CI, а не на телефоне.
+        run: ./gradlew :vision:testDebugUnitTest :app:compileDebugKotlin
