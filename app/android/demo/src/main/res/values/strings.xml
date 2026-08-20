@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CarLens demo</string>
+    <string name="разрешение_нужно">Нужен доступ к камере: без него показывать нечего. Выдайте разрешение в настройках приложения и запустите снова.</string>
+    <string name="модели_не_загрузились">Модели не загрузились: %1$s</string>
+    <string name="камера_не_поднялась">Камера не поднялась: %1$s</string>
+</resources>

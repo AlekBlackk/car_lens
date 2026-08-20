@@ -75,6 +75,7 @@ tasks.named("preBuild") { dependsOn(проверкаМанифеста) }
 
 dependencies {
     implementation(project(":vision"))
+    implementation(libs.androidx.activity)
     implementation(libs.camera.core)
     implementation(libs.camera.camera2)
     implementation(libs.camera.lifecycle)
