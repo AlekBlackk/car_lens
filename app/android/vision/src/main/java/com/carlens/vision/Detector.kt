@@ -82,6 +82,7 @@ internal class Detector(
     model: ByteBuffer,
     private val contract: DetectorContract,
     spec: TensorSpec,
+    allowGpu: Boolean = true,
 ) : AutoCloseable {
 
     private var делегат: GpuDelegate? = null
@@ -98,7 +99,7 @@ internal class Detector(
     private val единицы: Float
 
     init {
-        val (созданный, режим, созданныйДелегат) = поднять(model)
+        val (созданный, режим, созданныйДелегат) = поднять(model, allowGpu)
         интерпретатор = созданный
         delegateMode = режим
         делегат = созданныйДелегат
@@ -188,9 +189,12 @@ internal class Detector(
         делегат = null
     }
 
-    private fun поднять(model: ByteBuffer): Triple<Interpreter, DelegateMode, GpuDelegate?> {
+    private fun поднять(
+        model: ByteBuffer,
+        allowGpu: Boolean,
+    ): Triple<Interpreter, DelegateMode, GpuDelegate?> {
         val список = CompatibilityList()
-        if (список.use { it.isDelegateSupportedOnThisDevice }) {
+        if (allowGpu && список.use { it.isDelegateSupportedOnThisDevice }) {
             val делегатGpu = GpuDelegate()
             val результат = runCatching {
                 Interpreter(model, Interpreter.Options().addDelegate(делегатGpu))
@@ -199,7 +203,8 @@ internal class Detector(
             делегатGpu.close()
         }
         // Отказ GPU не фатален: CPU-путь даёт те же числа, только медленнее. Молчать о
-        // подмене нельзя — она объясняет и время кадра, и разряд батареи.
+        // подмене нельзя — она объясняет и время кадра, и разряд батареи. Сюда же
+        // приходит запрошенный CPU: путь один, и замер меряет ровно то, что поедет.
         model.rewind()
         val параметры = Interpreter.Options().setNumThreads(ЧИСЛО_ПОТОКОВ)
         return Triple(Interpreter(model, параметры), DelegateMode.CPU, null)

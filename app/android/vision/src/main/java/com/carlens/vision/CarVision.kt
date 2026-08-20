@@ -30,6 +30,14 @@ data class IndexInfo(val numClasses: Int, val embeddingDim: Int, val centroidsPe
 data class AssetSpec(
     val manifestName: String = "models_manifest.json",
     val expected: Map<String, String> = emptyMap(),
+    /**
+     * Разрешён ли GPU-делегат детектора.
+     *
+     * `false` — принудительный CPU. Нужен замеру латентности: делегат выбирается по
+     * устройству, и без принудительного пути вторую половину таблицы `bench/latency.md`
+     * снять нечем. Классификатор считается на CPU всегда, флаг его не трогает.
+     */
+    val allowGpu: Boolean = true,
 )
 
 /**
@@ -218,6 +226,7 @@ class CarVision private constructor(
                     model = прямойБуфер(прочитать(assets, манифест, spec, "detector")),
                     contract = манифест.detector,
                     spec = манифест.detectorSpec(),
+                    allowGpu = spec.allowGpu,
                 )
             }.getOrElse { отказ ->
                 классификатор.close()
