@@ -83,6 +83,38 @@ object Rotation {
             else -> xUpright
         }
 
+    /**
+     * Бокс из одного выпрямленного кадра в другой, повёрнутый по часовой на `degrees`.
+     *
+     * Нужен, когда угол анализа и угол экрана разошлись: при заблокированной ориентации
+     * телефон поворачивают, а экран остаётся, и кадр, выпрямленный по физическому углу,
+     * лежит в системе координат, повёрнутой относительно того, что видит зритель.
+     * Рисовать бокс без этого пересчёта — рисовать уверенно не там.
+     *
+     * `frame` — размер исходного выпрямленного кадра; у результата стороны меняются
+     * местами при 90 и 270, как в `upright`.
+     */
+    fun rotateBox(box: Box, frame: UprightSize, degrees: Int): Box =
+        when (нормализовать(degrees)) {
+            0 -> box
+            90 -> Box(frame.height - box.y - box.h, box.x, box.h, box.w, box.conf)
+            180 -> Box(
+                frame.width - box.x - box.w, frame.height - box.y - box.h,
+                box.w, box.h, box.conf,
+            )
+            else -> Box(box.y, frame.width - box.x - box.w, box.h, box.w, box.conf)
+        }
+
+    /**
+     * На сколько повернуть бокс анализа, чтобы он лёг в кадр экрана.
+     *
+     * Оба угла — повороты одного и того же буфера сенсора: анализ выпрямлен на
+     * `analysisDegrees`, экран показывает то же, выпрямленное на `displayDegrees`.
+     * Значит разница и есть искомый поворот.
+     */
+    fun betweenUpright(analysisDegrees: Int, displayDegrees: Int): Int =
+        нормализовать(displayDegrees - analysisDegrees)
+
     private fun нормализовать(degrees: Int): Int {
         val угол = ((degrees % 360) + 360) % 360
         require(угол % 90 == 0) { "поворот $degrees не кратен 90" }

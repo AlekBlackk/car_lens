@@ -45,6 +45,82 @@ class GeometryTest {
     }
 
     @Test
+    fun `нулевой поворот оставляет бокс на месте`() {
+        val бокс = Box(x = 100f, y = 200f, w = 60f, h = 40f, conf = 0.7f)
+        assertEquals(бокс, Rotation.rotateBox(бокс, UprightSize(480, 640), degrees = 0))
+    }
+
+    @Test
+    fun `поворот на 90 по часовой переносит бокс в перевёрнутый кадр`() {
+        // Кадр 480x640, бокс прижат к левому верхнему углу. После поворота по часовой
+        // левый верхний угол уезжает в правый верхний, то есть x нового бокса считается
+        // от высоты исходного кадра.
+        val бокс = Box(x = 10f, y = 20f, w = 60f, h = 40f, conf = 0.7f)
+        val повёрнутый = Rotation.rotateBox(бокс, UprightSize(480, 640), degrees = 90)
+        assertEquals(640f - 60f, повёрнутый.x, 1e-4f)
+        assertEquals(10f, повёрнутый.y, 1e-4f)
+        assertEquals(40f, повёрнутый.w, 1e-4f)
+        assertEquals(60f, повёрнутый.h, 1e-4f)
+        assertEquals(0.7f, повёрнутый.conf, 1e-6f)
+    }
+
+    @Test
+    fun `поворот на 180 отражает бокс по обеим осям`() {
+        val бокс = Box(x = 10f, y = 20f, w = 60f, h = 40f, conf = 0.7f)
+        val повёрнутый = Rotation.rotateBox(бокс, UprightSize(480, 640), degrees = 180)
+        assertEquals(480f - 70f, повёрнутый.x, 1e-4f)
+        assertEquals(640f - 60f, повёрнутый.y, 1e-4f)
+        assertEquals(60f, повёрнутый.w, 1e-4f)
+        assertEquals(40f, повёрнутый.h, 1e-4f)
+    }
+
+    @Test
+    fun `поворот на 270 переносит бокс в противоположный угол`() {
+        val бокс = Box(x = 10f, y = 20f, w = 60f, h = 40f, conf = 0.7f)
+        val повёрнутый = Rotation.rotateBox(бокс, UprightSize(480, 640), degrees = 270)
+        assertEquals(20f, повёрнутый.x, 1e-4f)
+        assertEquals(480f - 70f, повёрнутый.y, 1e-4f)
+        assertEquals(40f, повёрнутый.w, 1e-4f)
+        assertEquals(60f, повёрнутый.h, 1e-4f)
+    }
+
+    @Test
+    fun `четыре поворота по 90 возвращают исходный бокс`() {
+        // Замкнутость важнее отдельных формул: при ошибке в одной из четырёх веток
+        // круг не сойдётся, а на глаз в приложении такая ошибка выглядит как
+        // «работает во всех ориентациях, кроме одной».
+        val исходный = Box(x = 10f, y = 20f, w = 60f, h = 40f, conf = 0.7f)
+        var текущий = исходный
+        var кадр = UprightSize(480, 640)
+        repeat(4) {
+            текущий = Rotation.rotateBox(текущий, кадр, degrees = 90)
+            кадр = UprightSize(кадр.height, кадр.width)
+        }
+        assertEquals(исходный.x, текущий.x, 1e-3f)
+        assertEquals(исходный.y, текущий.y, 1e-3f)
+        assertEquals(исходный.w, текущий.w, 1e-3f)
+        assertEquals(исходный.h, текущий.h, 1e-3f)
+    }
+
+    @Test
+    fun `поворот не кратный 90 роняет с числом в сообщении`() {
+        val отказ = assertThrows(IllegalArgumentException::class.java) {
+            Rotation.rotateBox(Box(0f, 0f, 10f, 10f, 1f), UprightSize(480, 640), degrees = 45)
+        }
+        assertTrue(отказ.message!!.contains("45"))
+    }
+
+    @Test
+    fun `разница углов анализа и экрана даёт поворот оверлея`() {
+        // Экран заблокирован в портрете (0), телефон повёрнут, анализ идёт по
+        // физическому углу — 0 против 90 у экрана. Оверлею нужен поворот на разницу.
+        assertEquals(90, Rotation.betweenUpright(analysisDegrees = 0, displayDegrees = 90))
+        assertEquals(270, Rotation.betweenUpright(analysisDegrees = 90, displayDegrees = 0))
+        assertEquals(0, Rotation.betweenUpright(analysisDegrees = 90, displayDegrees = 90))
+        assertEquals(180, Rotation.betweenUpright(analysisDegrees = 270, displayDegrees = 90))
+    }
+
+    @Test
     fun `поворот на 90 и 270 меняет стороны местами`() {
         assertEquals(UprightSize(1920, 1080), Rotation.upright(1080, 1920, 90))
         assertEquals(UprightSize(1920, 1080), Rotation.upright(1080, 1920, 270))
