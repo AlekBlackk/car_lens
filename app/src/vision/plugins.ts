@@ -107,3 +107,48 @@ export function embedAndMatch(frame: Frame, boxes: Box[], pad: number, topK: num
   }
   return результаты
 }
+
+type RawMatchResult = {
+  nativeNs: number
+  count: number
+  matches: ArrayBuffer
+}
+
+const плагинСовпадений = VisionCameraProxy.initFrameProcessorPlugin('carvisionMatchEmbedding', {})
+
+/**
+ * top-K для вектора, который JS уже держит у себя.
+ *
+ * Тот же поиск, что внутри `embedAndMatch`, но по чужому эмбеддингу: в следующих вехах это
+ * будет EMA трека, здесь — сверка, что третий путь границы согласуется с первым.
+ *
+ * Наружу уходит `embedding.buffer`, а не сам `Float32Array`: в JSI `isArrayBuffer` истинно
+ * только для буфера, и окно над ним ушло бы в ветку «обычный объект», приехав на Kotlin
+ * как `Map<String, Any>` с числовыми ключами. Копия делается лишь тогда, когда окно не
+ * покрывает буфер целиком — иначе на нативную сторону уехали бы лишние числа.
+ */
+export function matchEmbedding(frame: Frame, embedding: Float32Array, topK: number): Match[] {
+  'worklet'
+  if (плагинСовпадений == null) {
+    throw new Error('плагин carvisionMatchEmbedding не зарегистрирован')
+  }
+  const целиком = embedding.byteOffset === 0 && embedding.buffer.byteLength === embedding.length * 4
+  // `.buffer` типизирован как `ArrayBufferLike` из-за `SharedArrayBuffer`, которого в
+  // Hermes нет: сузить до `ArrayBuffer` безопасно, другого варианта тут не бывает.
+  const буфер = (целиком ? embedding.buffer : embedding.slice().buffer) as ArrayBuffer
+  const сырое = плагинСовпадений.call(frame, { embedding: буфер, topK }) as unknown as RawMatchResult
+  const числа = new Float32Array(сырое.matches)
+  if (числа.length !== сырое.count * 2) {
+    throw new Error(`совпадения: ${числа.length} чисел против ${сырое.count * 2} по count*2`)
+  }
+  // `count` меньше `topK` законен (в индексе может быть меньше классов), больше — нет:
+  // это означало бы, что нативная сторона считает `topK` не тем, что прислал JS.
+  if (сырое.count > topK) {
+    throw new Error(`совпадений ${сырое.count} больше запрошенных topK=${topK}`)
+  }
+  const результат: Match[] = []
+  for (let к = 0; к < сырое.count; к++) {
+    результат.push({ classIdx: числа[к * 2]!, sim: числа[к * 2 + 1]! })
+  }
+  return результат
+}

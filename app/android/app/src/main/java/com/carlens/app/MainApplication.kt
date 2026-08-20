@@ -3,6 +3,7 @@ package com.carlens.app
 import android.app.Application
 import com.carlens.vision.CarVisionDetectPlugin
 import com.carlens.vision.CarVisionEmbedPlugin
+import com.carlens.vision.CarVisionMatchPlugin
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -53,6 +54,12 @@ class MainApplication : Application(), ReactApplication {
     // `VisionCameraProxy.initFrameProcessorPlugin` (см. `app/src/vision/plugins.ts`).
     FrameProcessorPluginRegistry.addFrameProcessorPlugin("carvisionEmbedAndMatch") { proxy, _ ->
       CarVisionEmbedPlugin(proxy, applicationContext)
+    }
+    // Третий и последний вызов границы из §13.3 дизайна. Кадр этому плагину не нужен, но
+    // регистрируется он так же и зовётся так же из frame processor'а: `CarVision` не
+    // потокобезопасен, и путь в обход VisionCamera шёл бы с другого потока.
+    FrameProcessorPluginRegistry.addFrameProcessorPlugin("carvisionMatchEmbedding") { proxy, _ ->
+      CarVisionMatchPlugin(proxy, applicationContext)
     }
   }
 }

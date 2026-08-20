@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native'
 import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera'
 import { useSharedValue, Worklets } from 'react-native-worklets-core'
-import { detect, embedAndMatch, type Box } from './src/vision/plugins'
+import { detect, embedAndMatch, matchEmbedding, type Box } from './src/vision/plugins'
 import { shouldClassify } from './src/vision/throttle'
 import { mapBoxToView } from './src/vision/viewMapping'
 
@@ -16,8 +16,18 @@ type Детекция = { боксы: Box[]; frameWidth: number; frameHeight: nu
  * Топ-1 совпадение последнего классифицированного бокса. Чисто отладочный показ:
  * §13.3 дизайна прямо говорит, что итоговая подпись считается по EMA, которой в этой
  * вехе ещё нет — здесь просто «последнее, что вернул мост».
+ *
+ * `сверкаClassIdx` и `сверкаDelta` — тот же топ-1, но полученный вторым путём, плагином
+ * `carvisionMatchEmbedding` на скопированном эмбеддинге. Существуют ради приёмки задачи 8:
+ * два пути к одному и тому же kNN обязаны согласоваться, и увидеть это надо на устройстве,
+ * а не в логе.
  */
-type Классификация = { classIdx: number; sim: number } | null
+type Классификация = {
+  classIdx: number
+  sim: number
+  сверкаClassIdx: number
+  сверкаDelta: number
+} | null
 
 export default function App(): React.JSX.Element {
   const { hasPermission, requestPermission } = useCameraPermission()
@@ -53,8 +63,9 @@ export default function App(): React.JSX.Element {
 
   const обновитьКлассификацию = useMemo(
     () =>
-      Worklets.createRunOnJS((classIdx: number, sim: number) =>
-        установитьКлассификацию({ classIdx, sim }),
+      Worklets.createRunOnJS(
+        (classIdx: number, sim: number, сверкаClassIdx: number, сверкаDelta: number) =>
+          установитьКлассификацию({ classIdx, sim, сверкаClassIdx, сверкаDelta }),
       ),
     [],
   )
@@ -72,9 +83,19 @@ export default function App(): React.JSX.Element {
       if (дляКлассификации.length > 0) {
         последняяКлассификация.value = сейчас
         const результатыКлассификации = embedAndMatch(frame, дляКлассификации, CLASSIFY_PAD, CLASSIFY_TOP_K)
-        const топ1 = результатыКлассификации[0]?.matches[0]
-        if (топ1 != null) {
-          обновитьКлассификацию(топ1.classIdx, топ1.sim)
+        const первый = результатыКлассификации[0]
+        const топ1 = первый?.matches[0]
+        if (первый != null && топ1 != null) {
+          // Третий путь границы на том же векторе. EMA в этой вехе нет (§13.3), поэтому
+          // вызов существует ради сверки: `matchEmbedding` обязан вернуть ровно то, что
+          // `embedAndMatch` уже посчитал внутри себя.
+          const сверка = matchEmbedding(frame, первый.embedding, CLASSIFY_TOP_K)[0]
+          обновитьКлассификацию(
+            топ1.classIdx,
+            топ1.sim,
+            сверка == null ? -1 : сверка.classIdx,
+            сверка == null ? Number.NaN : Math.abs(сверка.sim - топ1.sim),
+          )
         }
       }
     },
@@ -125,9 +146,15 @@ export default function App(): React.JSX.Element {
       <View style={styles.оверлей}>
         <Text style={styles.текст}>Боксы: {детекция.боксы.length}</Text>
         {классификация != null && (
-          <Text style={styles.текст}>
-            Класс {классификация.classIdx} · sim {классификация.sim.toFixed(2)}
-          </Text>
+          <>
+            <Text style={styles.текст}>
+              Класс {классификация.classIdx} · sim {классификация.sim.toFixed(2)}
+            </Text>
+            <Text style={styles.текст}>
+              сверка: класс {классификация.сверкаClassIdx} · Δ{' '}
+              {классификация.сверкаDelta.toExponential(1)}
+            </Text>
+          </>
         )}
       </View>
     </View>
