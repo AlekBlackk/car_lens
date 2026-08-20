@@ -93,10 +93,23 @@ dependencies {
 
     // Задача 7: `SharedArrayContractTest` использует `androidx.camera.core.ImageProxy`/
     // `ImageInfo` (тестовый дубль поверх `android.media.Image`) и JUnit-раннер
-    // инструментальных тестов. `camera-core` — зависимость `:vision`, объявленная там как
-    // `implementation`, а не `api`, поэтому транзитивно в androidTest `:app` не попадает
-    // (проверено компиляцией: `Unresolved reference: ImageProxy`) — нужна явная androidTest
-    // зависимость на ту же версию, что пинована в `libs.versions.toml` (`camerax`).
+    // инструментальных тестов. `:vision` зависимости на `camera-core` не объявляет вовсе —
+    // источник её в classpath `:app` это `implementation "androidx.camera:camera-core:..."`
+    // самой react-native-vision-camera (`node_modules/react-native-vision-camera/android/
+    // build.gradle:187`), автолинкованной через `autolinkLibrariesWithApp()`. `implementation`
+    // не течёт транзитивно в androidTest-конфигурацию `:app` (проверено компиляцией:
+    // `Unresolved reference: ImageProxy`), поэтому нужна явная androidTest-зависимость,
+    // просто чтобы дать компилятору сам факт зависимости на классы `ImageProxy`/`ImageInfo`.
+    //
+    // Версию она НЕ контролирует: react-native-vision-camera форсирует свой собственный
+    // `camera-core` строгим (`strictly`) констрейнтом androidx.camera release train до
+    // `1.5.0-alpha03`, и он побеждает пин `libs.camera.core` = 1.4.1 из `libs.versions.toml`
+    // (`camerax`) — реально резолвится 1.5.0-alpha03 (проверено `:app:dependencies
+    // --configuration debugAndroidTestCompileClasspath`). Интерфейсы `ImageProxy`/`ImageInfo`
+    // в 1.5.0-alpha03 идентичны использованным в тесте (плюс один необязательный
+    // default-метод `toBitmap()`), так что расхождение версий безвредно — не форсировать
+    // 1.4.1 здесь: это сломало бы саму react-native-vision-camera, которой нужна именно
+    // 1.5.0-alpha03.
     androidTestImplementation(libs.camera.core)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.test.runner)
