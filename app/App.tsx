@@ -1,13 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native'
 import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera'
-import { Worklets } from 'react-native-worklets-core'
-import { detect, type Box } from './src/vision/plugins'
+import { useSharedValue, Worklets } from 'react-native-worklets-core'
+import { detect, embedAndMatch, type Box } from './src/vision/plugins'
+import { shouldClassify } from './src/vision/throttle'
 import { mapBoxToView } from './src/vision/viewMapping'
 
 const MAX_DET = 4
+const CLASSIFY_PAD = 0.08
+const CLASSIFY_TOP_K = 5
 
 type Детекция = { боксы: Box[]; frameWidth: number; frameHeight: number }
+
+/**
+ * Топ-1 совпадение последнего классифицированного бокса. Чисто отладочный показ:
+ * §13.3 дизайна прямо говорит, что итоговая подпись считается по EMA, которой в этой
+ * вехе ещё нет — здесь просто «последнее, что вернул мост».
+ */
+type Классификация = { classIdx: number; sim: number } | null
 
 export default function App(): React.JSX.Element {
   const { hasPermission, requestPermission } = useCameraPermission()
@@ -16,7 +26,12 @@ export default function App(): React.JSX.Element {
   // §5) — конвейер сам вычисляет угол кадра из `frame.orientation`.
   const device = useCameraDevice('back')
   const [детекция, установитьДетекцию] = useState<Детекция>({ боксы: [], frameWidth: 0, frameHeight: 0 })
+  const [классификация, установитьКлассификацию] = useState<Классификация>(null)
   const [размерПревью, установитьРазмерПревью] = useState({ width: 0, height: 0 })
+  // Момент последней классификации живёт на стороне worklet-контекста между вызовами
+  // frame processor'а: обычный `useRef`/модульная переменная не пережили бы клонирование
+  // замыкания worklet'а, а `useSharedValue` из react-native-worklets-core — переживает.
+  const последняяКлассификация = useSharedValue(0)
 
   useEffect(() => {
     if (!hasPermission) {
@@ -36,13 +51,34 @@ export default function App(): React.JSX.Element {
     [],
   )
 
+  const обновитьКлассификацию = useMemo(
+    () =>
+      Worklets.createRunOnJS((classIdx: number, sim: number) =>
+        установитьКлассификацию({ classIdx, sim }),
+      ),
+    [],
+  )
+
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet'
       const результат = detect(frame, MAX_DET)
       обновитьДетекцию(результат.boxes, результат.frameWidth, результат.frameHeight)
+
+      // Троттлинг — на JS-стороне (§6.2 спеки): не чаще ~8 Гц и не больше двух кропов
+      // за кадр, иначе классификатор молотил бы на каждом кадре впустую.
+      const сейчас = Date.now()
+      const дляКлассификации = shouldClassify(сейчас, последняяКлассификация.value, результат.boxes)
+      if (дляКлассификации.length > 0) {
+        последняяКлассификация.value = сейчас
+        const результатыКлассификации = embedAndMatch(frame, дляКлассификации, CLASSIFY_PAD, CLASSIFY_TOP_K)
+        const топ1 = результатыКлассификации[0]?.matches[0]
+        if (топ1 != null) {
+          обновитьКлассификацию(топ1.classIdx, топ1.sim)
+        }
+      }
     },
-    [обновитьДетекцию],
+    [обновитьДетекцию, обновитьКлассификацию, последняяКлассификация],
   )
 
   const наРазметке = (событие: LayoutChangeEvent): void => {
@@ -88,6 +124,11 @@ export default function App(): React.JSX.Element {
       ))}
       <View style={styles.оверлей}>
         <Text style={styles.текст}>Боксы: {детекция.боксы.length}</Text>
+        {классификация != null && (
+          <Text style={styles.текст}>
+            Класс {классификация.classIdx} · sim {классификация.sim.toFixed(2)}
+          </Text>
+        )}
       </View>
     </View>
   )

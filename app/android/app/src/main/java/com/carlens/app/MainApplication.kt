@@ -2,6 +2,7 @@ package com.carlens.app
 
 import android.app.Application
 import com.carlens.vision.CarVisionDetectPlugin
+import com.carlens.vision.CarVisionEmbedPlugin
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -47,6 +48,11 @@ class MainApplication : Application(), ReactApplication {
     // регистрации поиск вернёт `undefined` (см. `app/src/vision/plugins.ts`).
     FrameProcessorPluginRegistry.addFrameProcessorPlugin("carvisionDetect") { proxy, _ ->
       CarVisionDetectPlugin(proxy, applicationContext)
+    }
+    // Тот же порядок рассуждений: JS ищет "carvisionEmbedAndMatch" через
+    // `VisionCameraProxy.initFrameProcessorPlugin` (см. `app/src/vision/plugins.ts`).
+    FrameProcessorPluginRegistry.addFrameProcessorPlugin("carvisionEmbedAndMatch") { proxy, _ ->
+      CarVisionEmbedPlugin(proxy, applicationContext)
     }
   }
 }

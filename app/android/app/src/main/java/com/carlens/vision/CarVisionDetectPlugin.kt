@@ -22,7 +22,7 @@ import java.nio.ByteOrder
  * то есть обратно — `PORTRAIT↔0°`, `LANDSCAPE_LEFT↔90°`, `PORTRAIT_UPSIDE_DOWN↔180°`,
  * `LANDSCAPE_RIGHT↔270°`.
  */
-private fun Orientation.toDegrees(): Int =
+internal fun Orientation.toDegrees(): Int =
     when (this) {
         Orientation.PORTRAIT -> 0
         Orientation.LANDSCAPE_LEFT -> 90
