@@ -360,14 +360,18 @@ cd app/android && ./gradlew :vision:connectedReleaseAndroidTest -Pcarlens.testRe
 
 | Пакет | Версия | Почему зафиксирован |
 |---|---|---|
-| AGP | 8.7.3 | Пара к Gradle 8.11.1 из обёртки и compileSdk 35; выше — требование Java 21 в тулчейне |
-| Kotlin | 2.0.21 | Совместим с AGP 8.7 и даёт `kotlinx.serialization` того же поколения |
+| Gradle | 8.10.2 | Требование React Native Gradle Plugin 0.76.5 (шаблон RN 0.76.5 пинует ровно эту версию в обёртке); было 8.11.1, но RN-мост (M-1.6) не собирается на более новой |
+| AGP | 8.6.0 | Требование React Native Gradle Plugin 0.76.5 — версию AGP для всего дерева задаёт сам RNGP; было 8.7.3, но выше эта версия конфликтует со сборкой `:app` |
+| Kotlin | 1.9.24 | Требование React Native Gradle Plugin 0.76.5; было 2.0.21, но RNGP несёт композитную сборку под 1.9.24 |
 | compileSdk / targetSdk | 35 | Диапазон YUV на API 34+ определён явно (`Image.getFormat` и `DYNAMIC_RANGE`), ниже принимается допущением |
 | minSdk | 26 | Нижняя граница §5 спецификации; `ImageWriter` и `YUV_420_888` со стабильными шагами доступны с 26 |
 | litert / litert-gpu / litert-gpu-api | 1.4.2 | В Google Maven `litert-gpu` заканчивается на 1.4.2: GPU-делегат из линии 2.x вынесен в другие координаты. Ветка берётся целиком — смешивать ядро 2.x с делегатом 1.x нельзя |
 | CameraX | 1.4.1 | Пара к compileSdk 35; `ImageAnalysis` отдаёт `YUV_420_888` без промежуточного битмапа |
-| kotlinx-serialization-json | 1.7.3 | Версия, идущая с плагином Kotlin 2.0.21 |
-| JDK | 17 | Требование AGP 8.7; `jvmTarget` модулей тот же |
+| kotlinx-serialization-json | 1.6.3 | Сдвинута вниз вместе с Kotlin 1.9.24: версия 1.7.3 требует Kotlin >= 2.0.0-RC1 и не компилируется под 1.9.24; 1.6.3 — последний релиз ветки 1.6.x, совместимой с Kotlin 1.9.x |
+| JDK | 17 | Требование AGP 8.6; `jvmTarget` модулей тот же |
+| react-native | 0.76.5 | Версия каркаса RN-моста (M-1.6); версия шаблона, из которого унаследованы версии Gradle/AGP/Kotlin выше |
+| react-native-vision-camera | 4.6.4 | Контракт пропа `outputOrientation` и типа `Frame`/`SharedArray` этой линии API зафиксирован в заметках спайка задачи 1; в новых линиях (5.x/6.x) контракт другой |
+| react-native-worklets-core | 1.5.0 | Требование react-native-vision-camera 4 для работы Frame Processors (`Worklets.createRunOnJS`) |
 
 ## Зафиксированные версии
 

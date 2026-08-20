@@ -1,0 +1,7 @@
+<resources>
+
+    <!-- Базовая тема приложения. Кастомизация под RN-каркас M-1.6 не требуется —
+         экран пустой (см. `App.tsx`). -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar" />
+
+</resources>

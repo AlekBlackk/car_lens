@@ -42,6 +42,9 @@ app/android/.gradle/
 app/android/.kotlin/
 app/android/build/
 app/android/*/build/
+# Кеш конфигурации CMake/ninja модуля `:app` (RN-мост, M-1.6) — генерируется Gradle
+# при каждой сборке нативного кодогена автолинковки, не исходник.
+app/android/*/.cxx/
 app/android/local.properties
 *.keystore
 !debug.keystore

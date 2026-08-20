@@ -1,14 +1,8 @@
 {
+  "extends": "@react-native/typescript-config/tsconfig.json",
   "compilerOptions": {
-    "target": "es2022",
-    "module": "node16",
-    "moduleResolution": "node16",
-    "rootDir": "src",
-    "outDir": "dist",
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "declaration": true,
-    "sourceMap": true
-  },
-  "include": ["src/**/*.ts"]
+    // Базовый конфиг тянет типы `jest`, а раннер тестов здесь — vitest (см.
+    // `package.json`, `"test": "vitest run"`); `@types/jest` в devDependencies нет.
+    "types": ["react-native"]
+  }
 }
