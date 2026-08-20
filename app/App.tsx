@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native'
 import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera'
 import { useSharedValue, Worklets } from 'react-native-worklets-core'
+import { НакопительЦеныМоста, type СтадияМоста } from './src/vision/latency'
 import { detect, embedAndMatch, matchEmbedding, type Box } from './src/vision/plugins'
 import { shouldClassify } from './src/vision/throttle'
 import { mapBoxToView } from './src/vision/viewMapping'
@@ -47,6 +48,19 @@ export default function App(): React.JSX.Element {
   // замыкания worklet'а, а `useSharedValue` из react-native-worklets-core — переживает.
   const последняяКлассификация = useSharedValue(0)
 
+  // Накопитель цены моста (Task 10 M-1.6): живёт на JS-стороне, а не в worklet-контексте —
+  // копит массивы произвольной длины по трём стадиям, что `useSharedValue` не умеет.
+  // `useMemo`, а не `useRef`: инстанс нужен один раз и не должен создаваться заново на
+  // каждый рендер, как и остальные мемоизированные мосты в этом компоненте.
+  const накопительЦеныМоста = useMemo(() => new НакопительЦеныМоста(), [])
+  const отметитьЦенуМоста = useMemo(
+    () =>
+      Worklets.createRunOnJS((стадия: СтадияМоста, tДо: number, tПосле: number, nativeMs: number) =>
+        накопительЦеныМоста.добавить(стадия, tДо, tПосле, nativeMs),
+      ),
+    [накопительЦеныМоста],
+  )
+
   useEffect(() => {
     if (!hasPermission) {
       requestPermission().catch(() => {
@@ -87,7 +101,13 @@ export default function App(): React.JSX.Element {
     (frame) => {
       'worklet'
       try {
+        // Замер цены моста (Task 10 M-1.6): `t_до`/`t_после` вокруг каждого из трёх
+        // вызовов границы native↔JS, `Date.now()` — тот же источник времени, что уже
+        // используется троттлингом ниже в этом же worklet'е (`performance.now()` в
+        // worklet-контексте Hermes не гарантирован без отдельного полифилла).
+        const tДетектДо = Date.now()
         const результат = detect(frame, MAX_DET)
+        отметитьЦенуМоста('detect', tДетектДо, Date.now(), результат.nativeMs)
         обновитьДетекцию(результат.boxes, результат.frameWidth, результат.frameHeight)
 
         // Троттлинг — на JS-стороне (§6.2 спеки): не чаще ~8 Гц и не больше двух кропов
@@ -96,14 +116,28 @@ export default function App(): React.JSX.Element {
         const дляКлассификации = shouldClassify(сейчас, последняяКлассификация.value, результат.boxes)
         if (дляКлассификации.length > 0) {
           последняяКлассификация.value = сейчас
-          const результатыКлассификации = embedAndMatch(frame, дляКлассификации, CLASSIFY_PAD, CLASSIFY_TOP_K)
+          const tEmbedДо = Date.now()
+          const { results: результатыКлассификации, nativeMs: embedNativeMs } = embedAndMatch(
+            frame,
+            дляКлассификации,
+            CLASSIFY_PAD,
+            CLASSIFY_TOP_K,
+          )
+          отметитьЦенуМоста('embedAndMatch', tEmbedДо, Date.now(), embedNativeMs)
           const первый = результатыКлассификации[0]
           const топ1 = первый?.matches[0]
           if (первый != null && топ1 != null) {
             // Третий путь границы на том же векторе. EMA в этой вехе нет (§13.3), поэтому
             // вызов существует ради сверки: `matchEmbedding` обязан вернуть ровно то, что
             // `embedAndMatch` уже посчитал внутри себя.
-            const сверка = matchEmbedding(frame, первый.embedding, CLASSIFY_TOP_K)[0]
+            const tMatchДо = Date.now()
+            const { matches: сверкаMatches, nativeMs: matchNativeMs } = matchEmbedding(
+              frame,
+              первый.embedding,
+              CLASSIFY_TOP_K,
+            )
+            отметитьЦенуМоста('matchEmbedding', tMatchДо, Date.now(), matchNativeMs)
+            const сверка = сверкаMatches[0]
             обновитьКлассификацию(
               топ1.classIdx,
               топ1.sim,
@@ -119,7 +153,7 @@ export default function App(): React.JSX.Element {
         return
       }
     },
-    [обновитьДетекцию, обновитьКлассификацию, последняяКлассификация, сообщитьОбОшибке],
+    [обновитьДетекцию, обновитьКлассификацию, отметитьЦенуМоста, последняяКлассификация, сообщитьОбОшибке],
   )
 
   const наРазметке = (событие: LayoutChangeEvent): void => {

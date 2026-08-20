@@ -54,6 +54,14 @@ export type Match = { classIdx: number; sim: number }
 export type EmbedMatchResult = { embedding: Float32Array; matches: Match[] }
 
 /**
+ * `results` — по одному элементу на бокс (см. `EmbedMatchResult`). `nativeMs` — время
+ * нативной стороны на весь вызов `embedAndMatch` целиком, а не на бокс: сырой мост отдаёт
+ * его один раз (`RawEmbedResult.nativeNs`), Task 10 (замер цены моста) читает именно это
+ * поле.
+ */
+export type EmbedMatchCallResult = { results: EmbedMatchResult[]; nativeMs: number }
+
+/**
  * Сырой ответ моста. `emb0`/`emb1` — слоты, по одному на бокс (не больше двух, см.
  * `MAX_CROPS` в `throttle.ts` и `МАКСИМУМ_КРОПОВ` в `CarVisionEmbedPlugin.kt`), поэтому
  * ключи адресуются динамически, а не перечислены полями.
@@ -71,7 +79,7 @@ const плагинЭмбеддинга = VisionCameraProxy.initFrameProcessorPlu
  * Эмбеддинг и top-K для уже отобранных троттлингом боксов (см. `shouldClassify` в
  * `throttle.ts`). Длина `matches` проверяется жёстко по тому же принципу, что в `detect`.
  */
-export function embedAndMatch(frame: Frame, boxes: Box[], pad: number, topK: number): EmbedMatchResult[] {
+export function embedAndMatch(frame: Frame, boxes: Box[], pad: number, topK: number): EmbedMatchCallResult {
   'worklet'
   if (плагинЭмбеддинга == null) {
     throw new Error('плагин carvisionEmbedAndMatch не зарегистрирован')
@@ -105,7 +113,7 @@ export function embedAndMatch(frame: Frame, boxes: Box[], pad: number, topK: num
     }
     результаты.push({ embedding: эмбеддинг, matches })
   }
-  return результаты
+  return { results: результаты, nativeMs: сырое.nativeNs / 1e6 }
 }
 
 type RawMatchResult = {
@@ -115,6 +123,9 @@ type RawMatchResult = {
 }
 
 const плагинСовпадений = VisionCameraProxy.initFrameProcessorPlugin('carvisionMatchEmbedding', {})
+
+/** `nativeMs` — время нативной стороны на весь вызов `matchEmbedding` (Task 10). */
+export type MatchCallResult = { matches: Match[]; nativeMs: number }
 
 /**
  * top-K для вектора, который JS уже держит у себя.
@@ -127,7 +138,7 @@ const плагинСовпадений = VisionCameraProxy.initFrameProcessorPlu
  * как `Map<String, Any>` с числовыми ключами. Копия делается лишь тогда, когда окно не
  * покрывает буфер целиком — иначе на нативную сторону уехали бы лишние числа.
  */
-export function matchEmbedding(frame: Frame, embedding: Float32Array, topK: number): Match[] {
+export function matchEmbedding(frame: Frame, embedding: Float32Array, topK: number): MatchCallResult {
   'worklet'
   if (плагинСовпадений == null) {
     throw new Error('плагин carvisionMatchEmbedding не зарегистрирован')
@@ -150,5 +161,5 @@ export function matchEmbedding(frame: Frame, embedding: Float32Array, topK: numb
   for (let к = 0; к < сырое.count; к++) {
     результат.push({ classIdx: числа[к * 2]!, sim: числа[к * 2 + 1]! })
   }
-  return результат
+  return { matches: результат, nativeMs: сырое.nativeNs / 1e6 }
 }
