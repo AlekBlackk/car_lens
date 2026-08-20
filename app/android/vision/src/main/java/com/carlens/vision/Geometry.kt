@@ -75,6 +75,32 @@ object Rotation {
             else -> upright.height - 1f - yUpright
         }
 
+    /**
+     * Обе координаты сенсора за один нормализованный поворот — точка входа горячего
+     * цикла `FrameConvert`.
+     *
+     * `sensorX`/`sensorY`, вызванные порознь, нормализуют угол дважды на каждый пиксель:
+     * на кадре 416×416 это 346 тысяч лишних делений по модулю за один letterbox.
+     * Результат уходит в переданный `out`, а не в новый `FloatArray` — своя аллокация на
+     * каждый из 173 тысяч пикселей кадра свела бы на нет отказ от промежуточного битмапа
+     * (тот же принцип, что у `цвет` в `FrameConvert`).
+     */
+    fun toSensorInto(xUpright: Float, yUpright: Float, upright: UprightSize, degrees: Int, out: FloatArray) {
+        val угол = нормализовать(degrees)
+        out[0] = when (угол) {
+            0 -> xUpright
+            90 -> yUpright
+            180 -> upright.width - 1f - xUpright
+            else -> upright.height - 1f - yUpright
+        }
+        out[1] = when (угол) {
+            0 -> yUpright
+            90 -> upright.width - 1f - xUpright
+            180 -> upright.height - 1f - yUpright
+            else -> xUpright
+        }
+    }
+
     fun sensorY(xUpright: Float, yUpright: Float, upright: UprightSize, degrees: Int): Float =
         when (нормализовать(degrees)) {
             0 -> yUpright

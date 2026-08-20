@@ -31,13 +31,14 @@ object FrameConvert {
         val выпрямленный = frame.upright
         val отображение = Letterbox.forFrame(выпрямленный, spec.size)
         val цвет = FloatArray(3)
+        val буфер = FloatArray(2)
         for (строка in 0 until spec.size) {
             for (столбец in 0 until spec.size) {
                 val xВыпрямленный = (столбец + 0.5f - отображение.padX) / отображение.scale - 0.5f
                 val yВыпрямленный = (строка + 0.5f - отображение.padY) / отображение.scale - 0.5f
                 записать(
                     frame, выпрямленный, spec, dst,
-                    строка, столбец, xВыпрямленный, yВыпрямленный, padValue, цвет,
+                    строка, столбец, xВыпрямленный, yВыпрямленный, padValue, цвет, буфер,
                 )
             }
         }
@@ -59,13 +60,14 @@ object FrameConvert {
         val область = Boxes.pad(boxUpright, выпрямленный.width, выпрямленный.height, pad)
         require(область.w > 0f && область.h > 0f) { "пустой бокс: ${область.w}×${область.h}" }
         val цвет = FloatArray(3)
+        val буфер = FloatArray(2)
         for (строка in 0 until spec.size) {
             for (столбец in 0 until spec.size) {
                 val xВыпрямленный = область.x + (столбец + 0.5f) * область.w / spec.size - 0.5f
                 val yВыпрямленный = область.y + (строка + 0.5f) * область.h / spec.size - 0.5f
                 записать(
                     frame, выпрямленный, spec, dst,
-                    строка, столбец, xВыпрямленный, yВыпрямленный, БЕЗ_ПОЛЯ, цвет,
+                    строка, столбец, xВыпрямленный, yВыпрямленный, БЕЗ_ПОЛЯ, цвет, буфер,
                 )
             }
         }
@@ -82,6 +84,7 @@ object FrameConvert {
         yВыпрямленный: Float,
         padValue: Int,
         цвет: FloatArray,
+        сенсор: FloatArray,
     ) {
         val внеКадра = xВыпрямленный < 0f || yВыпрямленный < 0f ||
             xВыпрямленный > выпрямленный.width - 1f || yВыпрямленный > выпрямленный.height - 1f
@@ -93,11 +96,10 @@ object FrameConvert {
             записатьПиксель(spec, dst, строка, столбец, серый, серый, серый)
             return
         }
-        val xБуфера =
-            Rotation.sensorX(xВыпрямленный, yВыпрямленный, выпрямленный, frame.rotationDegrees)
-        val yБуфера =
-            Rotation.sensorY(xВыпрямленный, yВыпрямленный, выпрямленный, frame.rotationDegrees)
-        frame.sampleRgb(xБуфера, yБуфера, цвет)
+        // Один вызов вместо sensorX+sensorY порознь: угол поворота — константа кадра, и
+        // нормализовать его дважды на каждый из 173 тысяч пикселей незачем.
+        Rotation.toSensorInto(xВыпрямленный, yВыпрямленный, выпрямленный, frame.rotationDegrees, сенсор)
+        frame.sampleRgb(сенсор[0], сенсор[1], цвет)
         записатьПиксель(spec, dst, строка, столбец, цвет[0], цвет[1], цвет[2])
     }
 

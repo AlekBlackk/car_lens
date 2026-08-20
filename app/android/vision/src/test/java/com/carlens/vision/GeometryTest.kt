@@ -121,6 +121,45 @@ class GeometryTest {
     }
 
     @Test
+    fun `toSensorInto пишет обе координаты за один нормализованный поворот`() {
+        // Горячий цикл FrameConvert раньше звал sensorX и sensorY порознь, и каждая
+        // нормализовала угол заново — 173 тысячи пикселей кадра означают 173 тысячи
+        // лишних делений по модулю. toSensorInto нормализует один раз и пишет обе
+        // координаты, поэтому обязан давать те же числа, что и порознь звавшиеся
+        // sensorX/sensorY, на каждом из четырёх углов.
+        val выпрямленный = UprightSize(480, 640)
+        val out = FloatArray(2)
+        for (угол in listOf(0, 90, 180, 270)) {
+            Rotation.toSensorInto(37.5f, 112.25f, выпрямленный, угол, out)
+            assertEquals(
+                "угол $угол: x",
+                Rotation.sensorX(37.5f, 112.25f, выпрямленный, угол), out[0], 1e-6f,
+            )
+            assertEquals(
+                "угол $угол: y",
+                Rotation.sensorY(37.5f, 112.25f, выпрямленный, угол), out[1], 1e-6f,
+            )
+        }
+    }
+
+    @Test
+    fun `toSensorInto нормализует не кратный 360 угол`() {
+        val выпрямленный = UprightSize(480, 640)
+        val out = FloatArray(2)
+        Rotation.toSensorInto(37.5f, 112.25f, выпрямленный, degrees = 450, out = out)
+        assertEquals(Rotation.sensorX(37.5f, 112.25f, выпрямленный, 90), out[0], 1e-6f)
+        assertEquals(Rotation.sensorY(37.5f, 112.25f, выпрямленный, 90), out[1], 1e-6f)
+    }
+
+    @Test
+    fun `toSensorInto роняет поворот не кратный 90`() {
+        val отказ = assertThrows(IllegalArgumentException::class.java) {
+            Rotation.toSensorInto(0f, 0f, UprightSize(480, 640), degrees = 45, out = FloatArray(2))
+        }
+        assertTrue(отказ.message!!.contains("45"))
+    }
+
+    @Test
     fun `поворот на 90 и 270 меняет стороны местами`() {
         assertEquals(UprightSize(1920, 1080), Rotation.upright(1080, 1920, 90))
         assertEquals(UprightSize(1920, 1080), Rotation.upright(1080, 1920, 270))
