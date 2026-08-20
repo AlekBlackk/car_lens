@@ -1,6 +1,7 @@
 package com.carlens.app
 
 import android.app.Application
+import com.carlens.vision.CarVisionDetectPlugin
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -11,6 +12,7 @@ import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
+import com.mrousavy.camera.frameprocessors.FrameProcessorPluginRegistry
 
 class MainApplication : Application(), ReactApplication {
 
@@ -39,6 +41,12 @@ class MainApplication : Application(), ReactApplication {
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
       // При включённой New Architecture нужно дополнительно загрузить нативную точку входа.
       load()
+    }
+    // Регистрация до создания любого Frame Processor'а: JS ищет плагин по имени
+    // "carvisionDetect" через `VisionCameraProxy.initFrameProcessorPlugin`, и до этой
+    // регистрации поиск вернёт `undefined` (см. `app/src/vision/plugins.ts`).
+    FrameProcessorPluginRegistry.addFrameProcessorPlugin("carvisionDetect") { proxy, _ ->
+      CarVisionDetectPlugin(proxy, applicationContext)
     }
   }
 }
