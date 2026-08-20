@@ -2,8 +2,6 @@ package com.carlens.vision
 
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.gpu.CompatibilityList
-import org.tensorflow.lite.gpu.GpuDelegate
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -85,7 +83,7 @@ internal class Detector(
     allowGpu: Boolean = true,
 ) : AutoCloseable {
 
-    private var делегат: GpuDelegate? = null
+    private val поднятый: Delegates.Поднятый
     private val интерпретатор: Interpreter
     val delegateMode: DelegateMode
 
@@ -99,10 +97,9 @@ internal class Detector(
     private val единицы: Float
 
     init {
-        val (созданный, режим, созданныйДелегат) = поднять(model, allowGpu)
-        интерпретатор = созданный
-        delegateMode = режим
-        делегат = созданныйДелегат
+        поднятый = Delegates.поднять(model, allowGpu, cpuThreads = ЧИСЛО_ПОТОКОВ)
+        интерпретатор = поднятый.interpreter
+        delegateMode = поднятый.mode
 
         val вход = интерпретатор.getInputTensor(0)
         check(вход.dataType() == DataType.FLOAT32) {
@@ -183,32 +180,7 @@ internal class Detector(
         return DetectorDecode.boxes(сырыеВыходы, contract, каналов, якорей, единицы, отображение)
     }
 
-    override fun close() {
-        интерпретатор.close()
-        делегат?.close()
-        делегат = null
-    }
-
-    private fun поднять(
-        model: ByteBuffer,
-        allowGpu: Boolean,
-    ): Triple<Interpreter, DelegateMode, GpuDelegate?> {
-        val список = CompatibilityList()
-        if (allowGpu && список.use { it.isDelegateSupportedOnThisDevice }) {
-            val делегатGpu = GpuDelegate()
-            val результат = runCatching {
-                Interpreter(model, Interpreter.Options().addDelegate(делегатGpu))
-            }
-            результат.getOrNull()?.let { return Triple(it, DelegateMode.GPU, делегатGpu) }
-            делегатGpu.close()
-        }
-        // Отказ GPU не фатален: CPU-путь даёт те же числа, только медленнее. Молчать о
-        // подмене нельзя — она объясняет и время кадра, и разряд батареи. Сюда же
-        // приходит запрошенный CPU: путь один, и замер меряет ровно то, что поедет.
-        model.rewind()
-        val параметры = Interpreter.Options().setNumThreads(ЧИСЛО_ПОТОКОВ)
-        return Triple(Interpreter(model, параметры), DelegateMode.CPU, null)
-    }
+    override fun close() = поднятый.close()
 
     private companion object {
         const val ЧИСЛО_ПОТОКОВ = 4

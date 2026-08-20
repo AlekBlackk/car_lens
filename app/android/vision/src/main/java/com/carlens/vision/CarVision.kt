@@ -61,7 +61,18 @@ class CarVision private constructor(
         centroidsPerClass = index.header.centroidsPerClass,
     )
 
+    /** Делегат детектора. Имя без уточнения — исторический публичный контракт демо. */
     val delegateMode: DelegateMode get() = detector.delegateMode
+
+    /**
+     * Делегат классификатора: всегда CPU, `AssetSpec.allowGpu` его не касается.
+     *
+     * GPU-делегат на квантованном графе классификатора уронил паритет уровня A до
+     * косинуса 0.964 против требуемых 0.9999 — см. `Classifier`. Свойство оставлено
+     * ради симметрии с `delegateMode` и потому что `LatencyTest` печатает оба: молча
+     * убрать его значило бы прятать в отчёте вехи то, что путей исполнения два.
+     */
+    val classifierDelegateMode: DelegateMode get() = classifier.delegateMode
 
     val classes: List<CatalogClass> get() = index.classes
 
@@ -219,7 +230,6 @@ class CarVision private constructor(
                 model = прямойБуфер(прочитать(assets, манифест, spec, "classifier")),
                 spec = манифест.classifierSpec(),
                 expectedEmbeddingDim = индекс.header.embeddingDim,
-                options = org.tensorflow.lite.Interpreter.Options().setNumThreads(2),
             )
             val детектор = runCatching {
                 Detector(

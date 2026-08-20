@@ -92,7 +92,10 @@ class LatencyTest {
             }
         }
         println("УСТРОЙСТВО=${Build.MANUFACTURER} ${Build.MODEL} android=${Build.VERSION.RELEASE}")
-        println("ДЕЛЕГАТ=${зрение.delegateMode} классов=${зрение.indexInfo.numClasses}")
+        println(
+            "ДЕЛЕГАТ детектор=${зрение.delegateMode} классификатор=${зрение.classifierDelegateMode} " +
+                "классов=${зрение.indexInfo.numClasses}",
+        )
         печать("препроцессинг", препроцессинг)
         печать("детектор", детектор)
         печать("классификатор", классификатор)

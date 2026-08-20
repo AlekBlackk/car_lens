@@ -18,10 +18,17 @@ internal class Classifier(
     model: ByteBuffer,
     spec: TensorSpec,
     expectedEmbeddingDim: Int,
-    options: Interpreter.Options,
 ) : AutoCloseable {
 
-    private val интерпретатор = Interpreter(model, options)
+    // GPU принудительно выключен, а не читается из AssetSpec.allowGpu: замер на S23 Ultra
+    // дал реальное ускорение (123 → 77 мс), но косинус паритета уровня A упал до 0.964
+    // против требуемых 0.9999 (тест эталона, кадр 0). GPU-делегат на квантованном INT8-
+    // графе где-то теряет точность — вероятно, часть операций считается в пониженной
+    // точности вместо квантованной арифметики. Веха проверяет именно совпадение с
+    // питоновским эталоном, поэтому скорость здесь не аргумент.
+    private val поднятый = Delegates.поднять(model, allowGpu = false, cpuThreads = ЧИСЛО_ПОТОКОВ)
+    private val интерпретатор = поднятый.interpreter
+    val delegateMode: DelegateMode = поднятый.mode
     private val вход = интерпретатор.getInputTensor(0)
     private val выход = интерпретатор.getOutputTensor(0)
 
@@ -125,5 +132,9 @@ internal class Classifier(
         return результат
     }
 
-    override fun close() = интерпретатор.close()
+    override fun close() = поднятый.close()
+
+    private companion object {
+        const val ЧИСЛО_ПОТОКОВ = 2
+    }
 }
