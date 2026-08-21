@@ -61,6 +61,19 @@ android {
         }
     }
     buildFeatures { buildConfig = true }
+
+    // Релизный вариант подписан отладочным ключом намеренно. Это не путь в магазин, а
+    // единственный способ снять с телефона осмысленные числа и вообще пользоваться
+    // приложением руками: отладочный APK несёт `android:debuggable=true`, ART держит
+    // процесс в отладочном режиме и режет JIT, отчего детектор на этом же телефоне даёт
+    // 237 мс на кадр против 47-92 мс в релизе (bench/latency.md, M-1.5). Тот же приём и
+    // по той же причине уже применён в `:vision` через `carlens.testRelease`.
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+        }
+    }
     sourceSets { getByName("main").assets.srcDir(rootProject.file("models")) }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
