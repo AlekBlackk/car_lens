@@ -10,6 +10,7 @@ import {
 import { useSharedValue, Worklets } from 'react-native-worklets-core'
 import { НакопительЦеныМоста, bridgeClock, type СтадияМоста } from './src/vision/latency'
 import { detect, embedAndMatch, matchEmbedding, type Box } from './src/vision/plugins'
+import { checkSlotContract } from './src/vision/slotContract'
 import { shouldClassify } from './src/vision/throttle'
 import { mapBoxToView } from './src/vision/viewMapping'
 
@@ -73,6 +74,9 @@ export default function App(): React.JSX.Element {
   // Угол телефона переживает клонирование worklet-замыкания только как SharedValue:
   // обычное состояние React в воркет не доезжает.
   const deviceDegrees = useSharedValue(0)
+  // Самопроверка контракта слотов гоняется один раз за запуск: она делает два лишних
+  // вызова моста, и в горячем пути ей делать нечего.
+  const slotContractChecked = useSharedValue(false)
   // Угол, в котором показывает превью. При выключенном автоповороте он остаётся
   // портретным, пока телефон крутят, а при включённом — следует за экраном. Боксы
   // рисуются поверх превью, поэтому наружу они обязаны выходить именно в этой системе.
@@ -142,6 +146,15 @@ export default function App(): React.JSX.Element {
   // а `часыМоста`/`сообщитьОбОшибке` — `undefined`, из-за чего падал первый же вызов, а
   // за ним и `catch`, которому нечем было сообщить об ошибке. Локальные переменные
   // внутри тела воркета кириллицу переживают — ломается только захват.
+  const reportSlotContract = useMemo(
+    () =>
+      Worklets.createRunOnJS((ок: boolean, отчёт: string) => {
+        // eslint-disable-next-line no-console
+        console.log(`КОНТРАКТ_СЛОТОВ ${ок ? 'OK' : 'ПРОВАЛ'} ${отчёт}`)
+      }),
+    [],
+  )
+
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet'
@@ -154,6 +167,12 @@ export default function App(): React.JSX.Element {
         // не измерение, а шум (находка I3 финального ревью M-1.6). Троттлинг ниже
         // по-прежнему на `Date.now()` — там счёт на десятки миллисекунд, и цена
         // квантования не имеет значения.
+        if (!slotContractChecked.value) {
+          slotContractChecked.value = true
+          const итог = checkSlotContract(frame, CLASSIFY_PAD, deviceDegrees.value, previewDegrees.value)
+          reportSlotContract(итог.ок, итог.отчёт)
+        }
+
         const tДетектДо = bridgeClock()
         const результат = detect(frame, MAX_DET, deviceDegrees.value, previewDegrees.value)
         markBridgeCost('detect', tДетектДо, bridgeClock(), результат.nativeMs)
@@ -204,7 +223,7 @@ export default function App(): React.JSX.Element {
         return
       }
     },
-    [publishDetection, publishClassification, markBridgeCost, lastClassifyAt, reportErrorFromWorklet, deviceDegrees, previewDegrees],
+    [publishDetection, publishClassification, markBridgeCost, lastClassifyAt, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract],
   )
 
   // Пользовательская вертикаль при горизонтальном хвате идёт вдоль ширины экрана, при

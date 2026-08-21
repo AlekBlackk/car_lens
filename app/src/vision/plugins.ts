@@ -77,7 +77,17 @@ export type EmbedMatchResult = { embedding: Float32Array; matches: Match[] }
  * его один раз (`RawEmbedResult.nativeNs`), Task 10 (замер цены моста) читает именно это
  * поле.
  */
-export type EmbedMatchCallResult = { results: EmbedMatchResult[]; nativeMs: number }
+export type EmbedMatchCallResult = {
+  results: EmbedMatchResult[]
+  nativeMs: number
+  /**
+   * Разные ли буферы у слотов этого вызова. Признак прямой — сравнение `ArrayBuffer` по
+   * ссылке, — и потому не зависит от содержимого кадра: сравнивать вместо этого сами
+   * эмбеддинги нельзя, на однородной сцене два разных кропа дают численно одинаковый
+   * вектор законно. Читается самопроверкой контракта §4.8 (`slotContract.ts`).
+   */
+  slotsDistinct: boolean
+}
 
 /**
  * Сырой ответ моста. `emb0`/`emb1` — слоты, по одному на бокс (не больше двух, см.
@@ -140,8 +150,10 @@ export function embedAndMatch(
     )
   }
   const результаты: EmbedMatchResult[] = []
+  const слоты: ArrayBuffer[] = []
   for (let номер = 0; номер < сырое.count; номер++) {
     const слот = сырое[`emb${номер}`] as ArrayBuffer
+    слоты.push(слот)
     // Копия обязательна: слот переиспользуется нативной стороной на следующий вызов
     // плагина (см. комментарий в `CarVisionEmbedPlugin.kt` про контракт времени жизни
     // слотов) — обёртка без копии протухла бы уже к следующему кадру, если результат
@@ -157,7 +169,15 @@ export function embedAndMatch(
     }
     результаты.push({ embedding: эмбеддинг, matches })
   }
-  return { results: результаты, nativeMs: сырое.nativeNs / 1e6 }
+  let slotsDistinct = true
+  for (let первый = 0; первый < слоты.length; первый++) {
+    for (let второй = первый + 1; второй < слоты.length; второй++) {
+      if (слоты[первый] === слоты[второй]) {
+        slotsDistinct = false
+      }
+    }
+  }
+  return { results: результаты, nativeMs: сырое.nativeNs / 1e6, slotsDistinct }
 }
 
 type RawMatchResult = {
