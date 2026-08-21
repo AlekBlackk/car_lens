@@ -16,10 +16,12 @@ import {
   ПУСТОЕ_СОСТОЯНИЕ,
   type МостКонвейера,
   type ПодписьТрека,
+  type СобытиеКлассификации,
   type СостояниеКонвейера,
 } from './src/vision/pipeline'
 import { detect, embedAndMatch, matchEmbedding, type Box } from './src/vision/plugins'
 import { checkSlotContract } from './src/vision/slotContract'
+import { StabilityCollector } from './src/vision/stability'
 import { mapBoxToView } from './src/vision/viewMapping'
 
 const MAX_DET = 4
@@ -134,6 +136,18 @@ export default function App(): React.JSX.Element {
     [накопительЦеныМоста],
   )
 
+  // Накопитель устойчивости подписи (Task 10 M-1.6). Живёт рядом с накопителем цены моста
+  // и по той же причине: копит словари произвольного размера, чего SharedValue не умеет.
+  // События приходят из конвейера кадра — по одному на каждую состоявшуюся классификацию.
+  const накопительСтабильности = useMemo(() => new StabilityCollector(), [])
+  const markStability = useMemo(
+    () =>
+      Worklets.createRunOnJS((события: СобытиеКлассификации[]) =>
+        накопительСтабильности.добавить(события),
+      ),
+    [накопительСтабильности],
+  )
+
   useEffect(() => {
     if (!hasPermission) {
       requestPermission().catch(() => {
@@ -237,6 +251,9 @@ export default function App(): React.JSX.Element {
           мост,
         )
         pipelineState.value = шаг.состояние
+        // Пустой массив через границу не гоняется: вызов `createRunOnJS` сам по себе не
+        // бесплатен, а кадров без классификации по §6.2 большинство.
+        if (шаг.события.length > 0) markStability(шаг.события)
         publishOverlay(шаг.подписи, результат.frameWidth, результат.frameHeight)
       } catch (отказ) {
         // Ранний выход на этом кадре: дорисовывать рамки по неполным данным опаснее,
@@ -247,7 +264,7 @@ export default function App(): React.JSX.Element {
         return
       }
     },
-    [publishOverlay, markBridgeCost, pipelineState, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract],
+    [publishOverlay, markBridgeCost, markStability, pipelineState, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract],
   )
 
   // Пользовательская вертикаль при горизонтальном хвате идёт вдоль ширины экрана, при
