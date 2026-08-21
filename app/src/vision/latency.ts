@@ -78,6 +78,17 @@ export class НакопительЦеныМоста {
     matchEmbedding: [],
   }
 
+  /**
+   * Само нативное время стадии, отдельным рядом от цены моста. Нужно для санитарной
+   * сверки §8 приёмки: цена моста без величины, на фоне которой она меряется, ничего не
+   * говорит, а разница «отладочная сборка против релизной» видна только по этому ряду.
+   */
+  private readonly нативные: Record<СтадияМоста, number[]> = {
+    detect: [],
+    embedAndMatch: [],
+    matchEmbedding: [],
+  }
+
   private readonly напечатано: Record<СтадияМоста, boolean> = {
     detect: false,
     embedAndMatch: false,
@@ -94,13 +105,16 @@ export class НакопительЦеныМоста {
     }
     const список = this.замеры[стадия]
     список.push(tПосле - tДо - nativeMs)
+    this.нативные[стадия].push(nativeMs)
     if (список.length >= РАЗМЕР_ВЫБОРКИ && !this.напечатано[стадия]) {
       this.напечатано[стадия] = true
       // Единственный канал снятия чисел с устройства (Step 5 брифа Task 10):
       // `adb logcat -d -s ReactNativeJS:I | grep ЦЕНА_МОСТА`.
       // eslint-disable-next-line no-console
+      const нативные = this.нативные[стадия]
       console.log(
-        `ЦЕНА_МОСТА ${стадия} p50=${percentile(список, 50).toFixed(3)} p95=${percentile(список, 95).toFixed(3)}`,
+        `ЦЕНА_МОСТА ${стадия} p50=${percentile(список, 50).toFixed(3)} p95=${percentile(список, 95).toFixed(3)} ` +
+          `nativeMs_p50=${percentile(нативные, 50).toFixed(1)} nativeMs_p95=${percentile(нативные, 95).toFixed(1)}`,
       )
     }
   }
