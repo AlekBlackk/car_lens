@@ -17,6 +17,7 @@ const ФАЙЛЫ_С_ВОРКЛЕТАМИ = [
   'src/vision/plugins.ts',
   'src/vision/throttle.ts',
   'src/vision/latency.ts',
+  'src/vision/thresholds.ts',
 ]
 
 /** Печатный ASCII: коды 0x20..0x7E. Регулярка тут не используется намеренно — экранирование
