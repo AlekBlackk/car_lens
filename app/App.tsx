@@ -8,13 +8,37 @@ import {
   type Orientation,
 } from 'react-native-vision-camera'
 import { useSharedValue, Worklets } from 'react-native-worklets-core'
+import { type Решение } from './src/vision/decide'
+import { classLabel } from './src/vision/labels'
 import { НакопительЦеныМоста, bridgeClock, type СтадияМоста } from './src/vision/latency'
+import {
+  stepPipeline,
+  ПУСТОЕ_СОСТОЯНИЕ,
+  type МостКонвейера,
+  type ПодписьТрека,
+  type СостояниеКонвейера,
+} from './src/vision/pipeline'
 import { detect, embedAndMatch, matchEmbedding, type Box } from './src/vision/plugins'
 import { checkSlotContract } from './src/vision/slotContract'
-import { shouldClassify } from './src/vision/throttle'
 import { mapBoxToView } from './src/vision/viewMapping'
 
 const MAX_DET = 4
+
+/**
+ * Множитель `frame.timestamp` → миллисекунды. Единица выяснена по исходникам
+ * VisionCamera 4.6.4, а не угадана: `FrameHostObject.cpp` отдаёт значение
+ * `Frame.getTimestamp()` без преобразования, приводя его к `double`, а `Frame.java`
+ * возвращает `imageProxy.getImageInfo().getTimestamp()` — то есть штамп CameraX, который
+ * документирован в наносекундах. Отсюда 1e-6.
+ *
+ * Этими часами конвейер мерит и троттлинг, и смерть трека, поэтому `Date.now()` тут не
+ * используется: прыжок стенных часов (NTP, смена зоны) разом убил бы половину треков
+ * (см. комментарий в `throttle.ts`).
+ *
+ * Имя латиницей: константу захватывает воркет, а ключи `__closure` с не-ASCII символами
+ * до worklet-рантайма не доезжают (см. `workletClosure.test.ts`).
+ */
+const TIME_SCALE_MS = 1e-6
 
 /**
  * Физический угол телефона в градусах. Живёт здесь, а не в нативной части, потому что
@@ -35,24 +59,28 @@ const УГЛЫ_УСТРОЙСТВА: Record<Orientation, number> = {
 const CLASSIFY_PAD = 0.08
 const CLASSIFY_TOP_K = 5
 
-type Детекция = { боксы: Box[]; frameWidth: number; frameHeight: number }
+/**
+ * Всё, что экрану нужно для отрисовки одного кадра: подписи треков плюс разрешение кадра,
+ * в котором посчитаны их боксы. Размер лежит рядом с подписями, а не отдельным состоянием,
+ * намеренно: два состояния обновлялись бы двумя рендерами, и в промежутке боксы одного
+ * разрешения рисовались бы по системе координат другого.
+ */
+type КадрРазметки = { подписи: ПодписьТрека[]; frameWidth: number; frameHeight: number }
 
 /**
- * Топ-1 совпадение последнего классифицированного бокса. Чисто отладочный показ:
- * §13.3 дизайна прямо говорит, что итоговая подпись считается по EMA, которой в этой
- * вехе ещё нет — здесь просто «последнее, что вернул мост».
- *
- * `сверкаClassIdx` и `сверкаDelta` — тот же топ-1, но полученный вторым путём, плагином
- * `carvisionMatchEmbedding` на скопированном эмбеддинге. Существуют ради приёмки задачи 8:
- * два пути к одному и тому же kNN обязаны согласоваться, и увидеть это надо на устройстве,
- * а не в логе.
+ * Текст подписи по решению §6.4. Отметка «не откалибровано» стоит, пока таблица калибровки
+ * не размечена (`tuned: false`, §13.5): без неё плейсхолдер незаметно доживает до релиза и
+ * выдаётся пользователю за измеренный процент.
  */
-type Классификация = {
-  classIdx: number
-  sim: number
-  сверкаClassIdx: number
-  сверкаDelta: number
-} | null
+const текстПодписи = (решение: Решение): string => {
+  if (решение.вид === 'определяю') return 'Определяю…'
+  if (решение.вид === 'ближе') return 'Подойдите ближе'
+  if (решение.вид === 'неизвестно') return 'Не узнаю'
+  if (решение.вид === 'бренд') return classLabel(решение.classIdx)?.brand ?? 'Не узнаю'
+  const имя = classLabel(решение.classIdx)?.display ?? `класс ${решение.classIdx}`
+  const процент = Math.round(решение.уверенность * 100)
+  return решение.откалибровано ? `${имя} · ${процент}%` : `${имя} · ${процент}% (не откалибровано)`
+}
 
 export default function App(): React.JSX.Element {
   const { hasPermission, requestPermission } = useCameraPermission()
@@ -60,17 +88,20 @@ export default function App(): React.JSX.Element {
   // физической ориентации телефона и не влияет на Frame Processors (заметки задачи 1,
   // §5) — конвейер сам вычисляет угол кадра из `frame.orientation`.
   const device = useCameraDevice('back')
-  const [детекция, установитьДетекцию] = useState<Детекция>({ боксы: [], frameWidth: 0, frameHeight: 0 })
-  const [классификация, установитьКлассификацию] = useState<Классификация>(null)
+  const [разметка, установитьРазметку] = useState<КадрРазметки>({
+    подписи: [],
+    frameWidth: 0,
+    frameHeight: 0,
+  })
   const [размерПревью, установитьРазмерПревью] = useState({ width: 0, height: 0 })
   // Ошибка моста: worklet исполняется вне React-дерева, ErrorBoundary там не работает,
   // поэтому исключение из detect/embedAndMatch/matchEmbedding долетает до JS-потока
   // только через runOnJS и оседает здесь баннером.
   const [ошибкаМоста, установитьОшибкуМоста] = useState<string | null>(null)
-  // Момент последней классификации живёт на стороне worklet-контекста между вызовами
-  // frame processor'а: обычный `useRef`/модульная переменная не пережили бы клонирование
-  // замыкания worklet'а, а `useSharedValue` из react-native-worklets-core — переживает.
-  const lastClassifyAt = useSharedValue(0)
+  // Состояние конвейера (треки, их EMA и топ-1) переживает кадры только как SharedValue:
+  // обычный `useRef` или модульная переменная не пережили бы клонирование замыкания
+  // worklet'а, а `useSharedValue` из react-native-worklets-core — переживает.
+  const pipelineState = useSharedValue<СостояниеКонвейера>(ПУСТОЕ_СОСТОЯНИЕ)
   // Угол телефона переживает клонирование worklet-замыкания только как SharedValue:
   // обычное состояние React в воркет не доезжает.
   const deviceDegrees = useSharedValue(0)
@@ -113,19 +144,10 @@ export default function App(): React.JSX.Element {
 
   // Мемоизировано: `useFrameProcessor` пересоздаёт worklet-контекст заново при каждой
   // смене зависимости, а немемоизированная функция меняла бы ссылку на каждый рендер.
-  const publishDetection = useMemo(
+  const publishOverlay = useMemo(
     () =>
-      Worklets.createRunOnJS((боксы: Box[], frameWidth: number, frameHeight: number) =>
-        установитьДетекцию({ боксы, frameWidth, frameHeight }),
-      ),
-    [],
-  )
-
-  const publishClassification = useMemo(
-    () =>
-      Worklets.createRunOnJS(
-        (classIdx: number, sim: number, сверкаClassIdx: number, сверкаDelta: number) =>
-          установитьКлассификацию({ classIdx, sim, сверкаClassIdx, сверкаDelta }),
+      Worklets.createRunOnJS((подписи: ПодписьТрека[], frameWidth: number, frameHeight: number) =>
+        установитьРазметку({ подписи, frameWidth, frameHeight }),
       ),
     [],
   )
@@ -142,10 +164,10 @@ export default function App(): React.JSX.Element {
   // Всё, что этот worklet захватывает из внешней области видимости, названо латиницей
   // намеренно: `react-native-worklets-core` 1.5.0 теряет ключи `__closure` с не-ASCII
   // символами, и на устройстве такой захват приезжает `undefined`. Проверено пробой
-  // `typeof` внутри воркета на SM-S918B: `detect` и `shouldClassify` доехали функциями,
-  // а `часыМоста`/`сообщитьОбОшибке` — `undefined`, из-за чего падал первый же вызов, а
-  // за ним и `catch`, которому нечем было сообщить об ошибке. Локальные переменные
-  // внутри тела воркета кириллицу переживают — ломается только захват.
+  // `typeof` внутри воркета на SM-S918B: латиничные захваты вроде `detect` доехали
+  // функциями, а `часыМоста`/`сообщитьОбОшибке` — `undefined`, из-за чего падал первый же
+  // вызов, а за ним и `catch`, которому нечем было сообщить об ошибке. Локальные
+  // переменные внутри тела воркета кириллицу переживают — ломается только захват.
   const reportSlotContract = useMemo(
     () =>
       Worklets.createRunOnJS((ок: boolean, отчёт: string) => {
@@ -164,9 +186,7 @@ export default function App(): React.JSX.Element {
         // `react-native-worklets-core` (декоратор кладёт его в рантайм воркета сам,
         // см. комментарий в `latency.ts`), а не `Date.now()`: цена перехода границы
         // ожидается в микросекундах, и миллисекундное разрешение `Date.now()` там —
-        // не измерение, а шум (находка I3 финального ревью M-1.6). Троттлинг ниже
-        // по-прежнему на `Date.now()` — там счёт на десятки миллисекунд, и цена
-        // квантования не имеет значения.
+        // не измерение, а шум (находка I3 финального ревью M-1.6).
         if (!slotContractChecked.value) {
           slotContractChecked.value = true
           const итог = checkSlotContract(frame, CLASSIFY_PAD, deviceDegrees.value, previewDegrees.value)
@@ -176,54 +196,58 @@ export default function App(): React.JSX.Element {
         const tДетектДо = bridgeClock()
         const результат = detect(frame, MAX_DET, deviceDegrees.value, previewDegrees.value)
         markBridgeCost('detect', tДетектДо, bridgeClock(), результат.nativeMs)
-        publishDetection(результат.boxes, результат.frameWidth, результат.frameHeight)
 
-        // Троттлинг — на JS-стороне (§6.2 спеки): не чаще ~8 Гц и не больше двух кропов
-        // за кадр, иначе классификатор молотил бы на каждом кадре впустую.
-        const сейчас = Date.now()
-        const дляКлассификации = shouldClassify(сейчас, lastClassifyAt.value, результат.boxes)
-        if (дляКлассификации.length > 0) {
-          lastClassifyAt.value = сейчас
-          const tEmbedДо = bridgeClock()
-          const { results: результатыКлассификации, nativeMs: embedNativeMs } = embedAndMatch(
-            frame,
-            дляКлассификации,
-            CLASSIFY_PAD,
-            CLASSIFY_TOP_K,
-            deviceDegrees.value,
-            previewDegrees.value,
-          )
-          markBridgeCost('embedAndMatch', tEmbedДо, bridgeClock(), embedNativeMs)
-          const первый = результатыКлассификации[0]
-          const топ1 = первый?.matches[0]
-          if (первый != null && топ1 != null) {
-            // Третий путь границы на том же векторе. EMA в этой вехе нет (§13.3), поэтому
-            // вызов существует ради сверки: `matchEmbedding` обязан вернуть ровно то, что
-            // `embedAndMatch` уже посчитал внутри себя.
+        // Часы конвейера — timestamp кадра, а не стенные часы: троттлинг и смерть трека
+        // обязаны мерить одной монотонной линейкой (см. `TIME_SCALE_MS` и `throttle.ts`).
+        const nowMs = frame.timestamp * TIME_SCALE_MS
+
+        // Мост конвейера собирается здесь, потому что только здесь есть `frame`: сам
+        // `stepPipeline` о `Frame` не знает ничего и потому гоняется в Node на фейке.
+        // Замер цены моста остаётся на этой стороне по той же причине — в чистом модуле
+        // ему делать нечего.
+        const мост: МостКонвейера = {
+          embed(боксы: Box[]) {
+            'worklet'
+            const tEmbedДо = bridgeClock()
+            const ответ = embedAndMatch(
+              frame, боксы, CLASSIFY_PAD, CLASSIFY_TOP_K, deviceDegrees.value, previewDegrees.value,
+            )
+            markBridgeCost('embedAndMatch', tEmbedДо, bridgeClock(), ответ.nativeMs)
+            return ответ.results
+          },
+          matchEma(вектор: Float32Array) {
+            'worklet'
             const tMatchДо = bridgeClock()
-            const { matches: сверкаMatches, nativeMs: matchNativeMs } = matchEmbedding(
-              frame,
-              первый.embedding,
-              CLASSIFY_TOP_K,
-            )
-            markBridgeCost('matchEmbedding', tMatchДо, bridgeClock(), matchNativeMs)
-            const сверка = сверкаMatches[0]
-            publishClassification(
-              топ1.classIdx,
-              топ1.sim,
-              сверка == null ? -1 : сверка.classIdx,
-              сверка == null ? Number.NaN : Math.abs(сверка.sim - топ1.sim),
-            )
-          }
+            // `frame` первым аргументом — фактическая сигнатура `matchEmbedding`: плагин
+            // зовётся на кадре, хотя ищет по чужому вектору.
+            const ответ = matchEmbedding(frame, вектор, CLASSIFY_TOP_K)
+            markBridgeCost('matchEmbedding', tMatchДо, bridgeClock(), ответ.nativeMs)
+            return ответ.matches
+          },
         }
+
+        const шаг = stepPipeline(
+          pipelineState.value,
+          {
+            боксы: результат.boxes,
+            nowMs,
+            ширинаКадра: результат.frameWidth,
+            высотаКадра: результат.frameHeight,
+          },
+          мост,
+        )
+        pipelineState.value = шаг.состояние
+        publishOverlay(шаг.подписи, результат.frameWidth, результат.frameHeight)
       } catch (отказ) {
         // Ранний выход на этом кадре: дорисовывать рамки по неполным данным опаснее,
-        // чем пропустить кадр целиком.
+        // чем пропустить кадр целиком. Сюда же приходит `BridgeContractError` из
+        // конвейера — состояние в этом случае не записано, поэтому следующий кадр
+        // считается от прежних треков, а не от половинчатых.
         reportErrorFromWorklet(String(отказ))
         return
       }
     },
-    [publishDetection, publishClassification, markBridgeCost, lastClassifyAt, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract],
+    [publishOverlay, markBridgeCost, pipelineState, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract],
   )
 
   // Пользовательская вертикаль при горизонтальном хвате идёт вдоль ширины экрана, при
@@ -272,11 +296,24 @@ export default function App(): React.JSX.Element {
     )
   }
 
+  // Порядок строк — по id трека, а не по порядку в состоянии конвейера: там треки
+  // переставляются при смерти и рождении, и строки прыгали бы местами на живом кадре.
+  const подписи = разметка.подписи.slice().sort((первая, вторая) => первая.id - вторая.id)
+
+  // Стража на размер кадра обязательна: `mapBoxToView` на пустом кадре бросает, а до
+  // первого результата конвейера разметка ровно такая.
   const рамки =
-    размерПревью.width > 0 && размерПревью.height > 0 && детекция.frameWidth > 0 && детекция.frameHeight > 0
-      ? детекция.боксы.map((бокс) =>
-          mapBoxToView(бокс, детекция.frameWidth, детекция.frameHeight, размерПревью.width, размерПревью.height),
-        )
+    размерПревью.width > 0 && размерПревью.height > 0 && разметка.frameWidth > 0 && разметка.frameHeight > 0
+      ? подписи.map((подпись) => ({
+          id: подпись.id,
+          рамка: mapBoxToView(
+            подпись.бокс,
+            разметка.frameWidth,
+            разметка.frameHeight,
+            размерПревью.width,
+            размерПревью.height,
+          ),
+        }))
       : []
 
   return (
@@ -303,13 +340,18 @@ export default function App(): React.JSX.Element {
           <Text style={styles.текстОшибки}>{ошибкаМоста}</Text>
         </View>
       )}
-      {рамки.map((рамка, индекс) => (
+      {рамки.map((запись) => (
         <View
-          key={индекс}
+          key={запись.id}
           pointerEvents="none"
           style={[
             styles.рамка,
-            { left: рамка.left, top: рамка.top, width: рамка.width, height: рамка.height },
+            {
+              left: запись.рамка.left,
+              top: запись.рамка.top,
+              width: запись.рамка.width,
+              height: запись.рамка.height,
+            },
           ]}
         />
       ))}
@@ -329,17 +371,19 @@ export default function App(): React.JSX.Element {
             transform: [{ rotate: `${-уголПодписей}deg` }, { translateY: сдвигПодписей }],
           }}
         >
-        <Text style={styles.текст}>Боксы: {детекция.боксы.length}</Text>
-        {классификация != null && (
-          <>
-            <Text style={styles.текст}>
-              Класс {классификация.classIdx} · sim {классификация.sim.toFixed(2)}
+        {/*
+          Подпись живёт здесь, а не у рамки: блок доворачивается на угол устройства, и
+          только в нём текст стоит вертикально при любом хвате. Строка на трек, текст
+          считается по EMA трека решением §6.4 — не по последнему ответу моста.
+        */}
+        {подписи.length === 0 ? (
+          <Text style={styles.текст}>Определяю…</Text>
+        ) : (
+          подписи.map((подпись) => (
+            <Text key={подпись.id} style={styles.текст}>
+              {текстПодписи(подпись.решение)}
             </Text>
-            <Text style={styles.текст}>
-              сверка: класс {классификация.сверкаClassIdx} · Δ{' '}
-              {классификация.сверкаDelta.toExponential(1)}
-            </Text>
-          </>
+          ))
         )}
         </View>
       </View>
