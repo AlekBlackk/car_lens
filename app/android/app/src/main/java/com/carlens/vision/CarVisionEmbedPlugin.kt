@@ -52,7 +52,8 @@ class CarVisionEmbedPlugin(
         require(плоские.size % 5 == 0) { "боксы: ${плоские.size} чисел, не кратно 5" }
         val pad = (params?.get("pad") as? Number)?.toFloat() ?: 0.08f
         val topK = (params?.get("topK") as? Number)?.toInt() ?: 5
-        val уголКадра = frame.orientation.уголВыпрямления()
+        val уголГравитации = frame.orientation.уголВыпрямления(уголУстройстваИзПараметров(params))
+        val уголЭкрана = frame.orientation.уголВыпрямления(0)
 
         val боксы = (0 until плоские.size / 5).take(МАКСИМУМ_КРОПОВ).map { номер ->
             val сдвиг = номер * 5
@@ -63,11 +64,19 @@ class CarVisionEmbedPlugin(
         }
 
         return CarVisionHolder.подЗамком(context) { зрение ->
+            // Боксы приехали из JS в координатах экрана — там их и рисовали. Кроп же
+            // берётся из кадра, выпрямленного по гравитации, значит их надо вернуть в ту
+            // систему, из которой детектор их и получил. Без этого шага кроп уезжает
+            // мимо машины ровно на угол поворота телефона, причём тихо: подписи просто
+            // становятся хуже.
+            val кадрЭкрана = Rotation.upright(frame.image.width, frame.image.height, уголЭкрана)
+            val кГравитации = Rotation.betweenUpright(уголЭкрана, уголГравитации)
+            val боксыКропа = боксы.map { Rotation.rotateBox(it, кадрЭкрана, кГравитации) }
             // Обратного поворота здесь нет по той же причине, что прямого нет в плагине
             // детекции: боксы пришли в координатах вывода, а `embedAndMatch` с тем же
             // `уголКадра` работает в той же системе координат. Любой доворот тут увёл бы
             // кроп мимо машины, причём тихо — подписи стали бы просто хуже.
-            val результаты = зрение.embedAndMatch(frame.image, уголКадра, боксы, pad, topK)
+            val результаты = зрение.embedAndMatch(frame.image, уголГравитации, боксыКропа, pad, topK)
             val фактическийTopK = результаты.firstOrNull()?.matches?.size ?: 0
             val (совпадения, числаСовпадений) =
                 floatSharedArray(proxy, результаты.size * фактическийTopK * 2)

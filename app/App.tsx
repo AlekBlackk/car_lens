@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native'
-import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera'
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  useFrameProcessor,
+  type Orientation,
+} from 'react-native-vision-camera'
 import { useSharedValue, Worklets } from 'react-native-worklets-core'
 import { НакопительЦеныМоста, bridgeClock, type СтадияМоста } from './src/vision/latency'
 import { detect, embedAndMatch, matchEmbedding, type Box } from './src/vision/plugins'
@@ -8,6 +14,20 @@ import { shouldClassify } from './src/vision/throttle'
 import { mapBoxToView } from './src/vision/viewMapping'
 
 const MAX_DET = 4
+
+/**
+ * Физический угол телефона в градусах. Живёт здесь, а не в нативной части, потому что
+ * источник угла — сам `Camera`: при `outputOrientation="device"` он слушает акселерометр
+ * и рапортует поворот даже при выключенном системном автоповороте. `frame.orientation`
+ * на нативной стороне поворот телефона не отражает вовсе — проверено на устройстве, он
+ * остаётся `LANDSCAPE_RIGHT` и в портрете, и в горизонте.
+ */
+const УГЛЫ_УСТРОЙСТВА: Record<Orientation, number> = {
+  portrait: 0,
+  'landscape-left': 90,
+  'portrait-upside-down': 180,
+  'landscape-right': 270,
+}
 const CLASSIFY_PAD = 0.08
 const CLASSIFY_TOP_K = 5
 
@@ -47,6 +67,9 @@ export default function App(): React.JSX.Element {
   // frame processor'а: обычный `useRef`/модульная переменная не пережили бы клонирование
   // замыкания worklet'а, а `useSharedValue` из react-native-worklets-core — переживает.
   const lastClassifyAt = useSharedValue(0)
+  // Угол телефона переживает клонирование worklet-замыкания только как SharedValue:
+  // обычное состояние React в воркет не доезжает.
+  const deviceDegrees = useSharedValue(0)
 
   // Накопитель цены моста (Task 10 M-1.6): живёт на JS-стороне, а не в worklet-контексте —
   // копит массивы произвольной длины по трём стадиям, что `useSharedValue` не умеет.
@@ -117,7 +140,7 @@ export default function App(): React.JSX.Element {
         // по-прежнему на `Date.now()` — там счёт на десятки миллисекунд, и цена
         // квантования не имеет значения.
         const tДетектДо = bridgeClock()
-        const результат = detect(frame, MAX_DET)
+        const результат = detect(frame, MAX_DET, deviceDegrees.value)
         markBridgeCost('detect', tДетектДо, bridgeClock(), результат.nativeMs)
         publishDetection(результат.boxes, результат.frameWidth, результат.frameHeight)
 
@@ -133,6 +156,7 @@ export default function App(): React.JSX.Element {
             дляКлассификации,
             CLASSIFY_PAD,
             CLASSIFY_TOP_K,
+            deviceDegrees.value,
           )
           markBridgeCost('embedAndMatch', tEmbedДо, bridgeClock(), embedNativeMs)
           const первый = результатыКлассификации[0]
@@ -164,7 +188,7 @@ export default function App(): React.JSX.Element {
         return
       }
     },
-    [publishDetection, publishClassification, markBridgeCost, lastClassifyAt, reportErrorFromWorklet],
+    [publishDetection, publishClassification, markBridgeCost, lastClassifyAt, reportErrorFromWorklet, deviceDegrees],
   )
 
   const наРазметке = (событие: LayoutChangeEvent): void => {
@@ -197,7 +221,16 @@ export default function App(): React.JSX.Element {
 
   return (
     <View style={styles.экран} onLayout={наРазметке}>
-      <Camera style={StyleSheet.absoluteFill} device={device} isActive={true} frameProcessor={frameProcessor} />
+      <Camera
+        style={StyleSheet.absoluteFill}
+        device={device}
+        isActive={true}
+        frameProcessor={frameProcessor}
+        outputOrientation="device"
+        onOutputOrientationChanged={(ориентация) => {
+          deviceDegrees.value = УГЛЫ_УСТРОЙСТВА[ориентация]
+        }}
+      />
       {ошибкаМоста != null && (
         <View style={styles.баннерОшибки} pointerEvents="none">
           <Text style={styles.текстОшибки}>{ошибкаМоста}</Text>

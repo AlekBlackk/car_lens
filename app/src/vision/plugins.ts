@@ -28,12 +28,15 @@ type RawDetectResult = {
 const detectPlugin = VisionCameraProxy.initFrameProcessorPlugin('carvisionDetect', {})
 
 /** Длины проверяются жёстко: рассинхрон Kotlin и TS иначе выглядит как плохая модель. */
-export function detect(frame: Frame, maxDet: number): DetectResult {
+export function detect(frame: Frame, maxDet: number, deviceDegrees: number): DetectResult {
   'worklet'
   if (detectPlugin == null) {
     throw new Error('плагин carvisionDetect не зарегистрирован')
   }
-  const сырое = detectPlugin.call(frame, { maxDet }) as unknown as RawDetectResult
+  // `deviceDegrees` — физический угол телефона. Без него кадр выпрямляется только
+  // относительно вывода, и детектор находит машину ровно в одном положении устройства:
+  // `frame.orientation` поворот телефона не отражает (проверено на SM-S918B).
+  const сырое = detectPlugin.call(frame, { maxDet, deviceDegrees }) as unknown as RawDetectResult
   const числа = new Float32Array(сырое.boxes)
   if (числа.length !== сырое.count * 5) {
     throw new Error(`боксы: ${числа.length} чисел против ${сырое.count * 5} по count`)
@@ -95,7 +98,13 @@ const embedPlugin = VisionCameraProxy.initFrameProcessorPlugin('carvisionEmbedAn
  * `throttle.ts`). Длина `matches` проверяется жёстко по тому же принципу, что в `detect`,
  * но по `matchCount`, а не по запрошенному `topK` — см. комментарий у `RawEmbedResult`.
  */
-export function embedAndMatch(frame: Frame, boxes: Box[], pad: number, topK: number): EmbedMatchCallResult {
+export function embedAndMatch(
+  frame: Frame,
+  boxes: Box[],
+  pad: number,
+  topK: number,
+  deviceDegrees: number,
+): EmbedMatchCallResult {
   'worklet'
   if (embedPlugin == null) {
     throw new Error('плагин carvisionEmbedAndMatch не зарегистрирован')
@@ -104,7 +113,11 @@ export function embedAndMatch(frame: Frame, boxes: Box[], pad: number, topK: num
   boxes.forEach((бокс) => {
     плоские.push(бокс.x, бокс.y, бокс.w, бокс.h, бокс.conf)
   })
-  const сырое = embedPlugin.call(frame, { boxes: плоские, pad, topK }) as unknown as RawEmbedResult
+  // Тот же угол устройства, что и у `detect`: кроп обязан жить в той же системе
+  // координат, что и боксы, иначе классификатор режет мимо машины и делает это тихо.
+  const сырое = embedPlugin.call(
+    frame, { boxes: плоские, pad, topK, deviceDegrees },
+  ) as unknown as RawEmbedResult
   const matchCount = сырое.matchCount
   // `count` меньше запрошенного `topK` законен (в индексе может быть меньше классов),
   // больше — нет: это означало бы, что нативная сторона считает `topK` не тем, что
