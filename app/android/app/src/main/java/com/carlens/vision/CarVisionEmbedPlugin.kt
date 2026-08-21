@@ -52,8 +52,8 @@ class CarVisionEmbedPlugin(
         require(плоские.size % 5 == 0) { "боксы: ${плоские.size} чисел, не кратно 5" }
         val pad = (params?.get("pad") as? Number)?.toFloat() ?: 0.08f
         val topK = (params?.get("topK") as? Number)?.toInt() ?: 5
-        val уголГравитации = frame.orientation.уголВыпрямления(уголУстройстваИзПараметров(params))
-        val уголЭкрана = frame.orientation.уголВыпрямления(0)
+        val уголГравитации = frame.orientation.уголВыпрямления(уголИзПараметров(params, "deviceDegrees"))
+        val уголЭкрана = frame.orientation.уголВыпрямления(уголИзПараметров(params, "previewDegrees"))
 
         val боксы = (0 until плоские.size / 5).take(МАКСИМУМ_КРОПОВ).map { номер ->
             val сдвиг = номер * 5

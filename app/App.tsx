@@ -70,6 +70,10 @@ export default function App(): React.JSX.Element {
   // Угол телефона переживает клонирование worklet-замыкания только как SharedValue:
   // обычное состояние React в воркет не доезжает.
   const deviceDegrees = useSharedValue(0)
+  // Угол, в котором показывает превью. При выключенном автоповороте он остаётся
+  // портретным, пока телефон крутят, а при включённом — следует за экраном. Боксы
+  // рисуются поверх превью, поэтому наружу они обязаны выходить именно в этой системе.
+  const previewDegrees = useSharedValue(0)
 
   // Накопитель цены моста (Task 10 M-1.6): живёт на JS-стороне, а не в worklet-контексте —
   // копит массивы произвольной длины по трём стадиям, что `useSharedValue` не умеет.
@@ -140,7 +144,7 @@ export default function App(): React.JSX.Element {
         // по-прежнему на `Date.now()` — там счёт на десятки миллисекунд, и цена
         // квантования не имеет значения.
         const tДетектДо = bridgeClock()
-        const результат = detect(frame, MAX_DET, deviceDegrees.value)
+        const результат = detect(frame, MAX_DET, deviceDegrees.value, previewDegrees.value)
         markBridgeCost('detect', tДетектДо, bridgeClock(), результат.nativeMs)
         publishDetection(результат.boxes, результат.frameWidth, результат.frameHeight)
 
@@ -157,6 +161,7 @@ export default function App(): React.JSX.Element {
             CLASSIFY_PAD,
             CLASSIFY_TOP_K,
             deviceDegrees.value,
+            previewDegrees.value,
           )
           markBridgeCost('embedAndMatch', tEmbedДо, bridgeClock(), embedNativeMs)
           const первый = результатыКлассификации[0]
@@ -188,7 +193,7 @@ export default function App(): React.JSX.Element {
         return
       }
     },
-    [publishDetection, publishClassification, markBridgeCost, lastClassifyAt, reportErrorFromWorklet, deviceDegrees],
+    [publishDetection, publishClassification, markBridgeCost, lastClassifyAt, reportErrorFromWorklet, deviceDegrees, previewDegrees],
   )
 
   const наРазметке = (событие: LayoutChangeEvent): void => {
@@ -229,6 +234,9 @@ export default function App(): React.JSX.Element {
         outputOrientation="device"
         onOutputOrientationChanged={(ориентация) => {
           deviceDegrees.value = УГЛЫ_УСТРОЙСТВА[ориентация]
+        }}
+        onPreviewOrientationChanged={(ориентация) => {
+          previewDegrees.value = УГЛЫ_УСТРОЙСТВА[ориентация]
         }}
       />
       {ошибкаМоста != null && (

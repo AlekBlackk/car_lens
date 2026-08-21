@@ -28,7 +28,12 @@ type RawDetectResult = {
 const detectPlugin = VisionCameraProxy.initFrameProcessorPlugin('carvisionDetect', {})
 
 /** Длины проверяются жёстко: рассинхрон Kotlin и TS иначе выглядит как плохая модель. */
-export function detect(frame: Frame, maxDet: number, deviceDegrees: number): DetectResult {
+export function detect(
+  frame: Frame,
+  maxDet: number,
+  deviceDegrees: number,
+  previewDegrees: number,
+): DetectResult {
   'worklet'
   if (detectPlugin == null) {
     throw new Error('плагин carvisionDetect не зарегистрирован')
@@ -36,7 +41,9 @@ export function detect(frame: Frame, maxDet: number, deviceDegrees: number): Det
   // `deviceDegrees` — физический угол телефона. Без него кадр выпрямляется только
   // относительно вывода, и детектор находит машину ровно в одном положении устройства:
   // `frame.orientation` поворот телефона не отражает (проверено на SM-S918B).
-  const сырое = detectPlugin.call(frame, { maxDet, deviceDegrees }) as unknown as RawDetectResult
+  const сырое = detectPlugin.call(
+    frame, { maxDet, deviceDegrees, previewDegrees },
+  ) as unknown as RawDetectResult
   const числа = new Float32Array(сырое.boxes)
   if (числа.length !== сырое.count * 5) {
     throw new Error(`боксы: ${числа.length} чисел против ${сырое.count * 5} по count`)
@@ -104,6 +111,7 @@ export function embedAndMatch(
   pad: number,
   topK: number,
   deviceDegrees: number,
+  previewDegrees: number,
 ): EmbedMatchCallResult {
   'worklet'
   if (embedPlugin == null) {
@@ -116,7 +124,7 @@ export function embedAndMatch(
   // Тот же угол устройства, что и у `detect`: кроп обязан жить в той же системе
   // координат, что и боксы, иначе классификатор режет мимо машины и делает это тихо.
   const сырое = embedPlugin.call(
-    frame, { boxes: плоские, pad, topK, deviceDegrees },
+    frame, { boxes: плоские, pad, topK, deviceDegrees, previewDegrees },
   ) as unknown as RawEmbedResult
   const matchCount = сырое.matchCount
   // `count` меньше запрошенного `topK` законен (в индексе может быть меньше классов),

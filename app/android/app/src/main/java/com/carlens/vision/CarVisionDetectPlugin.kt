@@ -51,10 +51,17 @@ internal fun Orientation.toDegrees(): Int =
 internal fun Orientation.уголВыпрямления(уголУстройства: Int): Int =
     (((360 - toDegrees()) + уголУстройства) % 360 + 360) % 360
 
-/** Угол устройства из параметров вызова: 0, если JS его не прислал. */
-internal fun уголУстройстваИзПараметров(params: Map<String, Any>?): Int {
-    val сырой = (params?.get("deviceDegrees") as? Number)?.toInt() ?: 0
-    require(сырой % 90 == 0) { "угол устройства $сырой не кратен 90" }
+/**
+ * Угол из параметров вызова: 0, если JS его не прислал.
+ *
+ * Углов два и путать их нельзя. `deviceDegrees` — физический поворот телефона, им
+ * выпрямляется кадр для моделей. `previewDegrees` — поворот, в котором показывает
+ * превью, в его системе рисуются рамки. При выключенном автоповороте они расходятся:
+ * телефон в горизонте, а превью осталось портретным.
+ */
+internal fun уголИзПараметров(params: Map<String, Any>?, ключ: String): Int {
+    val сырой = (params?.get(ключ) as? Number)?.toInt() ?: 0
+    require(сырой % 90 == 0) { "угол $ключ = $сырой не кратен 90" }
     return ((сырой % 360) + 360) % 360
 }
 
@@ -76,8 +83,8 @@ class CarVisionDetectPlugin(
         val начало = SystemClock.elapsedRealtimeNanos()
         require(!frame.isMirrored) { "фронтальная камера не поддерживается" }
         val maxDet = (params?.get("maxDet") as? Number)?.toInt() ?: 4
-        val уголГравитации = frame.orientation.уголВыпрямления(уголУстройстваИзПараметров(params))
-        val уголЭкрана = frame.orientation.уголВыпрямления(0)
+        val уголГравитации = frame.orientation.уголВыпрямления(уголИзПараметров(params, "deviceDegrees"))
+        val уголЭкрана = frame.orientation.уголВыпрямления(уголИзПараметров(params, "previewDegrees"))
 
         return CarVisionHolder.подЗамком(context) { зрение ->
             val боксыГравитации = зрение.detect(frame.image, уголГравитации)
