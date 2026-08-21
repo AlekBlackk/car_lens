@@ -111,7 +111,7 @@ type RawEmbedResult = {
 const embedPlugin = VisionCameraProxy.initFrameProcessorPlugin('carvisionEmbedAndMatch', {})
 
 /**
- * Эмбеддинг и top-K для уже отобранных троттлингом боксов (см. `shouldClassify` в
+ * Эмбеддинг и top-K для уже отобранных троттлингом боксов (см. `pickForClassify` в
  * `throttle.ts`). Длина `matches` проверяется жёстко по тому же принципу, что в `detect`,
  * но по `matchCount`, а не по запрошенному `topK` — см. комментарий у `RawEmbedResult`.
  */

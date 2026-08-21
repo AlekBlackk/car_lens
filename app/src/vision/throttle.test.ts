@@ -1,22 +1,62 @@
 import { describe, expect, test } from 'vitest'
-import { CLASSIFY_INTERVAL_MS, MAX_CROPS, shouldClassify } from './throttle'
+import type { Box } from './plugins'
+import { CLASSIFY_INTERVAL_MS, MAX_CROPS, pickForClassify } from './throttle'
 
-const бокс = (conf: number) => ({ x: 0, y: 0, w: 10, h: 10, conf })
+const бокс = (conf: number, сторона = 300): Box => ({ x: 0, y: 0, w: сторона, h: сторона, conf })
+const кандидат = (id: number, conf: number, классифицированВ: number, сторона = 300) => ({
+  id,
+  бокс: бокс(conf, сторона),
+  классифицированВ,
+})
 
-describe('shouldClassify', () => {
-  test('до истечения интервала не классифицирует', () => {
-    expect(shouldClassify(1000, 1000 - CLASSIFY_INTERVAL_MS + 1, [бокс(0.9)])).toEqual([])
+describe('pickForClassify', () => {
+  test('пустой список треков ничего не выбирает', () => {
+    expect(pickForClassify([], 1000, 120)).toEqual([])
   })
 
-  test('после интервала берёт не больше MAX_CROPS по убыванию conf', () => {
-    const выбранные = shouldClassify(
-      1000, 1000 - CLASSIFY_INTERVAL_MS, [бокс(0.5), бокс(0.9), бокс(0.7)],
-    )
-    expect(выбранные).toHaveLength(MAX_CROPS)
-    expect(выбранные.map((б) => б.conf)).toEqual([0.9, 0.7])
+  test('трек, классифицированный только что, пропускается', () => {
+    const треки = [кандидат(1, 0.9, 1000 - CLASSIFY_INTERVAL_MS + 1)]
+    expect(pickForClassify(треки, 1000, 120)).toEqual([])
   })
 
-  test('пустой список боксов не классифицирует', () => {
-    expect(shouldClassify(1000, 0, [])).toEqual([])
+  test('трек ровно на границе интервала классифицируется', () => {
+    const треки = [кандидат(1, 0.9, 1000 - CLASSIFY_INTERVAL_MS)]
+    expect(pickForClassify(треки, 1000, 120)).toHaveLength(1)
+  })
+
+  test('троттлинг раздельный по трекам', () => {
+    const треки = [кандидат(1, 0.9, 1000), кандидат(2, 0.8, 0)]
+    const выбранные = pickForClassify(треки, 1000, 120)
+    expect(выбранные.map((к) => к.id)).toEqual([2])
+  })
+
+  test('не больше MAX_CROPS за кадр', () => {
+    const треки = [кандидат(1, 0.9, 0), кандидат(2, 0.8, 0), кандидат(3, 0.7, 0), кандидат(4, 0.6, 0)]
+    expect(pickForClassify(треки, 1000, 120)).toHaveLength(MAX_CROPS)
+  })
+
+  test('порядок отбора — по убыванию conf, затем по id', () => {
+    const треки = [кандидат(3, 0.7, 0), кандидат(1, 0.9, 0), кандидат(2, 0.9, 0)]
+    expect(pickForClassify(треки, 1000, 120).map((к) => к.id)).toEqual([1, 2])
+  })
+
+  test('мелкий бокс не классифицируется вовсе', () => {
+    const треки = [кандидат(1, 0.99, 0, 119)]
+    expect(pickForClassify(треки, 1000, 120)).toEqual([])
+  })
+
+  test('бокс ровно на пороге короткой стороны классифицируется', () => {
+    expect(pickForClassify([кандидат(1, 0.99, 0, 120)], 1000, 120)).toHaveLength(1)
+  })
+
+  test('короткая сторона считается по меньшей из сторон', () => {
+    const узкий = { id: 1, бокс: { x: 0, y: 0, w: 400, h: 100, conf: 0.9 }, классифицированВ: 0 }
+    expect(pickForClassify([узкий], 1000, 120)).toEqual([])
+  })
+
+  test('вход не мутируется', () => {
+    const треки = [кандидат(3, 0.7, 0), кандидат(1, 0.9, 0)]
+    pickForClassify(треки, 1000, 120)
+    expect(треки.map((к) => к.id)).toEqual([3, 1])
   })
 })
