@@ -6,7 +6,7 @@
     "android": "react-native run-android",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint src"
+    "lint": "eslint src App.tsx"
   },
   "dependencies": {
     "react": "18.3.1",
