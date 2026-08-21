@@ -74,6 +74,10 @@ export default function App(): React.JSX.Element {
   // портретным, пока телефон крутят, а при включённом — следует за экраном. Боксы
   // рисуются поверх превью, поэтому наружу они обязаны выходить именно в этой системе.
   const previewDegrees = useSharedValue(0)
+  // Тот же угол устройства, но состоянием React, а не SharedValue: им доворачиваются
+  // подписи. Окно приложения залочено в портрет, поэтому при горизонтальном хвате текст
+  // без доворота лежал бы на боку — единственное, что теряется от фиксации окна.
+  const [уголПодписей, установитьУголПодписей] = useState(0)
 
   // Накопитель цены моста (Task 10 M-1.6): живёт на JS-стороне, а не в worklet-контексте —
   // копит массивы произвольной длины по трём стадиям, что `useSharedValue` не умеет.
@@ -234,13 +238,17 @@ export default function App(): React.JSX.Element {
         outputOrientation="device"
         onOutputOrientationChanged={(ориентация) => {
           deviceDegrees.value = УГЛЫ_УСТРОЙСТВА[ориентация]
+          установитьУголПодписей(УГЛЫ_УСТРОЙСТВА[ориентация])
         }}
         onPreviewOrientationChanged={(ориентация) => {
           previewDegrees.value = УГЛЫ_УСТРОЙСТВА[ориентация]
         }}
       />
       {ошибкаМоста != null && (
-        <View style={styles.баннерОшибки} pointerEvents="none">
+        <View
+          style={[styles.баннерОшибки, { transform: [{ rotate: `${-уголПодписей}deg` }] }]}
+          pointerEvents="none"
+        >
           <Text style={styles.текстОшибки}>{ошибкаМоста}</Text>
         </View>
       )}
@@ -254,7 +262,7 @@ export default function App(): React.JSX.Element {
           ]}
         />
       ))}
-      <View style={styles.оверлей}>
+      <View style={[styles.оверлей, { transform: [{ rotate: `${-уголПодписей}deg` }] }]}>
         <Text style={styles.текст}>Боксы: {детекция.боксы.length}</Text>
         {классификация != null && (
           <>
