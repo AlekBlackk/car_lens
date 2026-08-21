@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      INTERNET живёт только здесь. §9 спеки перечисляет разрешения MVP явно: «только
+      CAMERA. Никаких READ_MEDIA_IMAGES, ACCESS_FINE_LOCATION, INTERNET». Единственный
+      потребитель разрешения — Metro dev server, а он существует только в отладочной
+      сборке. Раньше строка стояла в main и уезжала в релиз.
+
+      Ресурс networkSecurityConfig подменяется manifest merger'ом: сам атрибут объявлен в
+      main, а `debug/res/xml/network_security_config.xml` перекрывает файл по имени.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+</manifest>

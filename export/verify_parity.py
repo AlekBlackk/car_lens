@@ -119,7 +119,13 @@ def _parse_args() -> argparse.Namespace:
     парсер.add_argument("--checkpoint", type=Path, required=True)
     парсер.add_argument("--splits", nargs="+", default=["val", "test"])
     парсер.add_argument("--limit", type=int, default=0, help="0 — сплит целиком")
-    парсер.add_argument("--device", default="cuda")
+    # По умолчанию CPU, а не CUDA. Torch включает TF32 для свёрток сам, мантисса TF32 —
+    # десять бит, и погрешность самой базы выходит порядка 1e-3 при пороге 1e-3. Замерено
+    # на этом проекте, сплит `val`, один и тот же экспорт, менялся только флаг:
+    # `cpu` — 6.2e-06, `cuda` с NVIDIA_TF32_OVERRIDE=0 — 8.1e-04, `cuda` по умолчанию —
+    # 3.8e-03. То есть на CUDA приёмка падает на исправном графе. `--device cuda` остаётся
+    # доступным явным выбором того, кто про TF32 знает.
+    парсер.add_argument("--device", default="cpu")
     return парсер.parse_args()
 
 
