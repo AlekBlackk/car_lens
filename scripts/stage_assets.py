@@ -43,6 +43,8 @@ from export.provenance import check_provenance
     "detector": "detector_fp32.tflite",
     "index": "catalog_index.bin",
     "meta": "catalog_meta.json",
+    "thresholds": "thresholds.json",
+    "calibration": "calibration.json",
 }
 # Имя манифеста — контракт с Gradle: таск сборки читает файл под этим именем и без
 # него роняет сборку (§10 дизайна), поэтому переименование здесь ломает `:demo`.
@@ -65,6 +67,46 @@ def sha256_of_file(path: Path) -> str:
         for кусок in iter(lambda: файл.read(1 << 20), b""):
             хеш.update(кусок)
     return хеш.hexdigest()
+
+
+# Плейсхолдеры §13.5 и §13.6. Пишутся здесь, а не руками, по той же причине, по которой
+# здесь считаются хеши моделей: единственный каталог ассетов сборки должен собираться
+# одной командой целиком. `tune_thresholds.py` и `export_calibration.py` появятся к M3 и
+# заменят эти два вызова; флаг `tuned: false` до тех пор обязывает приложение показывать
+# отметку «не откалибровано» (§13.5).
+ПЛЕЙСХОЛДЕР_ПОРОГОВ: dict[str, Any] = {
+    "version": 1,
+    "tuned": False,
+    "sim_min": 0.42,
+    "margin_min": 0.05,
+    "min_observations": 3,
+    "min_short_side_px": 120,
+    "tuned_on": {"val_n": 0, "neg_n": 0, "achieved_tpr": 0.0, "achieved_fpr": 0.0},
+}
+
+# Две точки — минимум, при котором интерполяция вообще определена. Прямая от порога
+# отказа до единицы: это заведомо не изотоническая регрессия, и `tuned: false` говорит
+# об этом честно.
+ПЛЕЙСХОЛДЕР_КАЛИБРОВКИ: dict[str, Any] = {
+    "version": 1,
+    "method": "isotonic_piecewise_linear",
+    "tuned": False,
+    "knots": [[0.42, 0.05], [1.0, 0.98]],
+    "clip": [0.01, 0.98],
+}
+
+
+def write_placeholders(out: Path) -> dict[str, Path]:
+    """Написать `thresholds.json` и `calibration.json` в каталог ассетов сборки."""
+    пути: dict[str, Path] = {}
+    for ключ, документ in (
+        ("thresholds", ПЛЕЙСХОЛДЕР_ПОРОГОВ),
+        ("calibration", ПЛЕЙСХОЛДЕР_КАЛИБРОВКИ),
+    ):
+        путь = out / ИМЕНА[ключ]
+        путь.write_text(json.dumps(документ, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        пути[ключ] = путь
+    return пути
 
 
 def _контракт(detector_report: Mapping[str, Any]) -> dict[str, Any]:
@@ -197,7 +239,11 @@ def _каталог_индекса(run: Path, index_dir: str | None) -> Path:
 
 
 def stage(run: Path, detector: Path, out: Path, *, index_dir: str | None = None) -> Path:
-    """Разложить четыре файла прогона в `out` и написать рядом манифест. Вернуть его путь.
+    """Разложить файлы прогона в `out` и написать рядом манифест. Вернуть его путь.
+
+    Четыре файла копируются из прогона, ещё два — `thresholds.json` и `calibration.json`
+    (§13.5, §13.6) — пишутся плейсхолдерами на месте: копировать их неоткуда, пока нет
+    негативов и калибровочной таблицы.
 
     Ждёт раскладку прогона обучения: `run/export/` с `classifier_int8.tflite` и
     `export_report.json`, каталог индекса с `catalog_index.bin` и `catalog_meta.json`,
@@ -260,6 +306,7 @@ def stage(run: Path, detector: Path, out: Path, *, index_dir: str | None = None)
     цели = {ключ: out / имя for ключ, имя in ИМЕНА.items()}
     for ключ, источник in источники.items():
         shutil.copy2(источник, цели[ключ])
+    write_placeholders(out)
 
     # Размеры и хеши считаются по копиям, а не по источникам: манифест описывает то, что
     # уедет на устройство, и оборванное копирование обязано разойтись с ним, а не совпасть.

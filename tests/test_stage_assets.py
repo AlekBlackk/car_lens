@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from scripts.stage_assets import ManifestError, build_manifest, stage
+from scripts.stage_assets import ИМЕНА, ManifestError, build_manifest, stage
 
 ЧЕКПОИНТ_SHA = "aa" * 32
 
@@ -55,14 +55,10 @@ from scripts.stage_assets import ManifestError, build_manifest, stage
 
 
 def _файлы(tmp_path: Path) -> dict[str, Path]:
-    имена = {
-        "classifier": "classifier_int8.tflite",
-        "detector": "detector_fp32.tflite",
-        "index": "catalog_index.bin",
-        "meta": "catalog_meta.json",
-    }
+    # Имена берутся из самого модуля, а не переписываются здесь: манифест описывает все
+    # ключи `ИМЕНА`, и локальная копия словаря разошлась бы с ним на первом же добавлении.
     пути: dict[str, Path] = {}
-    for ключ, имя in имена.items():
+    for ключ, имя in ИМЕНА.items():
         путь = tmp_path / имя
         путь.write_bytes(имя.encode("utf-8"))
         пути[ключ] = путь
@@ -94,7 +90,7 @@ def test_манифест_несёт_четыре_группы(tmp_path: Path) -
 
 def test_каждый_файл_описан_размером_и_хешем(tmp_path: Path) -> None:
     манифест = _собрать(tmp_path)
-    assert set(манифест["files"]) == {"classifier", "detector", "index", "meta"}
+    assert set(манифест["files"]) == set(ИМЕНА)
     for запись in манифест["files"].values():
         assert set(запись) == {"name", "size", "sha256"}
         assert len(запись["sha256"]) == 64
@@ -146,18 +142,20 @@ def _разложить_прогон(tmp_path: Path, *, мета: dict[str, Any]
     return прогон, детектор
 
 
-def test_stage_кладёт_четыре_файла_и_манифест(tmp_path: Path) -> None:
+def test_stage_кладёт_модели_плейсхолдеры_и_манифест(tmp_path: Path) -> None:
     прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
     куда = tmp_path / "models"
 
     манифест = stage(прогон, детектор, куда)
 
     assert sorted(путь.name for путь in куда.iterdir()) == [
+        "calibration.json",
         "catalog_index.bin",
         "catalog_meta.json",
         "classifier_int8.tflite",
         "detector_fp32.tflite",
         "models_manifest.json",
+        "thresholds.json",
     ]
     записанный = json.loads(манифест.read_text(encoding="utf-8"))
     assert записанный["detector"]["imgsz"] == 416
@@ -271,3 +269,34 @@ def test_stage_не_создаёт_каталог_при_неполном_кон
         stage(прогон, детектор, куда)
 
     assert not куда.exists()
+
+
+def test_stage_пишет_плейсхолдеры_порогов(tmp_path: Path) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    выход = tmp_path / "models"
+
+    stage(прогон, детектор, выход)
+
+    пороги = json.loads((выход / "thresholds.json").read_text(encoding="utf-8"))
+    assert пороги["tuned"] is False
+    assert пороги["sim_min"] == 0.42
+    assert пороги["margin_min"] == 0.05
+    assert пороги["min_observations"] == 3
+    assert пороги["min_short_side_px"] == 120
+
+    калибровка = json.loads((выход / "calibration.json").read_text(encoding="utf-8"))
+    assert калибровка["tuned"] is False
+    assert len(калибровка["knots"]) >= 2
+    assert калибровка["clip"] == [0.01, 0.98]
+
+
+def test_манифест_описывает_плейсхолдеры(tmp_path: Path) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    выход = tmp_path / "models"
+
+    путь = stage(прогон, детектор, выход)
+
+    файлы = json.loads(путь.read_text(encoding="utf-8"))["files"]
+    assert файлы["thresholds"]["name"] == "thresholds.json"
+    assert файлы["calibration"]["name"] == "calibration.json"
+    assert файлы["thresholds"]["size"] == (выход / "thresholds.json").stat().st_size

@@ -12,7 +12,7 @@ plugins {
 // в APK, что раскладывались», а не на вопрос про tampering — эталон лежит в том же
 // артефакте, что и проверяемый файл. Тот же механизм, что в `:demo`.
 val манифестМоделей = rootProject.file("models/models_manifest.json")
-val ключиМоделей = listOf("classifier", "detector", "index", "meta")
+val ключиМоделей = listOf("classifier", "detector", "index", "meta", "thresholds", "calibration")
 val сообщениеОбОтсутствии =
     "нет models/models_manifest.json — разложи модели:\n" +
         "uv run python -m scripts.stage_assets --run <каталог прогона> " +
