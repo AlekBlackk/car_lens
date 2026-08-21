@@ -68,6 +68,13 @@ describe('замыкания воркетов', () => {
     expect(ключиЗамыканий('App.tsx').length).toBeGreaterThan(0)
   })
 
+  test.each(ФАЙЛЫ_С_ВОРКЛЕТАМИ)('%s: в замыкании нет babel-хелперов', (файл) => {
+    // Хелперы транспайлера (`_toConsumableArray` от spread, `_createForOfIteratorHelper`
+    // от for-of) — обычные функции: worklet-рантайм отказывается их переносить и роняет
+    // кадр. Все наши имена пишутся без ведущего подчёркивания, поэтому признак точный.
+    expect(ключиЗамыканий(файл).filter((имя) => имя.startsWith('_'))).toEqual([])
+  })
+
   test('кириллический ключ ловится — проверка не тавтология', () => {
     expect(толькоASCII('detectPlugin')).toBe(true)
     expect(толькоASCII('плагинДетекции')).toBe(false)

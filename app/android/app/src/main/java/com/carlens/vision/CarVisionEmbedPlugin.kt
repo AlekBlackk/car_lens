@@ -19,7 +19,7 @@ import com.mrousavy.camera.frameprocessors.VisionCameraProxy
  * одну память. Тот же класс ошибки на Kotlin-уровне ловит тест
  * `два_бокса_дают_разные_эмбеддинги` из M-1.5.
  *
- * `frame.orientation.toDegrees()` — та же функция, что использует `CarVisionDetectPlugin`
+ * `frame.orientation.уголВыпрямления()` — та же функция, что использует `CarVisionDetectPlugin`
  * (объявлена там `internal`, поэтому доступна и здесь без импорта: оба файла в одном
  * пакете `com.carlens.vision`). Второй копии этого маппинга здесь нет намеренно.
  *
@@ -52,7 +52,7 @@ class CarVisionEmbedPlugin(
         require(плоские.size % 5 == 0) { "боксы: ${плоские.size} чисел, не кратно 5" }
         val pad = (params?.get("pad") as? Number)?.toFloat() ?: 0.08f
         val topK = (params?.get("topK") as? Number)?.toInt() ?: 5
-        val уголКадра = frame.orientation.toDegrees()
+        val уголКадра = frame.orientation.уголВыпрямления()
 
         val боксы = (0 until плоские.size / 5).take(МАКСИМУМ_КРОПОВ).map { номер ->
             val сдвиг = номер * 5
