@@ -22,6 +22,9 @@ const MAX_DET = 4
  * на нативной стороне поворот телефона не отражает вовсе — проверено на устройстве, он
  * остаётся `LANDSCAPE_RIGHT` и в портрете, и в горизонте.
  */
+/** Отступ подписей от края экрана. */
+const ОТСТУП_ПОДПИСЕЙ = 32
+
 const УГЛЫ_УСТРОЙСТВА: Record<Orientation, number> = {
   portrait: 0,
   'landscape-left': 90,
@@ -78,6 +81,10 @@ export default function App(): React.JSX.Element {
   // подписи. Окно приложения залочено в портрет, поэтому при горизонтальном хвате текст
   // без доворота лежал бы на боку — единственное, что теряется от фиксации окна.
   const [уголПодписей, установитьУголПодписей] = useState(0)
+  // Высота блока подписей нужна, чтобы прижать его к краю ровно, а не на глаз: сдвиг
+  // считается от центра экрана, и без реальной высоты блок либо не дойдёт до края, либо
+  // уедет за него.
+  const [высотаПодписей, установитьВысотуПодписей] = useState(0)
 
   // Накопитель цены моста (Task 10 M-1.6): живёт на JS-стороне, а не в worklet-контексте —
   // копит массивы произвольной длины по трём стадиям, что `useSharedValue` не умеет.
@@ -200,6 +207,15 @@ export default function App(): React.JSX.Element {
     [publishDetection, publishClassification, markBridgeCost, lastClassifyAt, reportErrorFromWorklet, deviceDegrees, previewDegrees],
   )
 
+  // Пользовательская вертикаль при горизонтальном хвате идёт вдоль ширины экрана, при
+  // вертикальном — вдоль высоты. Сдвиг ведёт блок из центра экрана к нижнему краю.
+  const вертикальПользователя =
+    уголПодписей === 90 || уголПодписей === 270 ? размерПревью.width : размерПревью.height
+  const сдвигПодписей = Math.max(
+    0,
+    вертикальПользователя / 2 - ОТСТУП_ПОДПИСЕЙ - высотаПодписей / 2,
+  )
+
   const наРазметке = (событие: LayoutChangeEvent): void => {
     const { width, height } = событие.nativeEvent.layout
     установитьРазмерПревью({ width, height })
@@ -262,7 +278,22 @@ export default function App(): React.JSX.Element {
           ]}
         />
       ))}
-      <View style={[styles.оверлей, { transform: [{ rotate: `${-уголПодписей}deg` }] }]}>
+      {/*
+        Подписи стоят у нижнего края с точки зрения того, кто держит телефон. Прижать их
+        стилями контейнера нельзя: `transform` крутит блок вокруг его центра уже после
+        раскладки, и прижатый к краю блок после поворота уезжает к середине экрана —
+        ровно это и было видно на устройстве. Поэтому блок центрируется, а потом
+        сдвигается `translateY` — он применяется после `rotate`, то есть вдоль
+        пользовательской вертикали, а не экранной.
+      */}
+      <View style={styles.оверлей} pointerEvents="none">
+        <View
+          onLayout={(событие) => установитьВысотуПодписей(событие.nativeEvent.layout.height)}
+          style={{
+            alignItems: 'center',
+            transform: [{ rotate: `${-уголПодписей}deg` }, { translateY: сдвигПодписей }],
+          }}
+        >
         <Text style={styles.текст}>Боксы: {детекция.боксы.length}</Text>
         {классификация != null && (
           <>
@@ -275,6 +306,7 @@ export default function App(): React.JSX.Element {
             </Text>
           </>
         )}
+        </View>
       </View>
     </View>
   )
@@ -282,7 +314,7 @@ export default function App(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   экран: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
-  оверлей: { position: 'absolute', bottom: 32, alignItems: 'center' },
+  оверлей: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   текст: { color: '#fff', fontSize: 18 },
   рамка: { position: 'absolute', borderWidth: 2, borderColor: '#00ff00' },
   баннерОшибки: {
