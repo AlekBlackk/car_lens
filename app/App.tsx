@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native'
 import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera'
 import { useSharedValue, Worklets } from 'react-native-worklets-core'
-import { НакопительЦеныМоста, часыМоста, type СтадияМоста } from './src/vision/latency'
+import { НакопительЦеныМоста, bridgeClock, type СтадияМоста } from './src/vision/latency'
 import { detect, embedAndMatch, matchEmbedding, type Box } from './src/vision/plugins'
 import { shouldClassify } from './src/vision/throttle'
 import { mapBoxToView } from './src/vision/viewMapping'
@@ -46,14 +46,14 @@ export default function App(): React.JSX.Element {
   // Момент последней классификации живёт на стороне worklet-контекста между вызовами
   // frame processor'а: обычный `useRef`/модульная переменная не пережили бы клонирование
   // замыкания worklet'а, а `useSharedValue` из react-native-worklets-core — переживает.
-  const последняяКлассификация = useSharedValue(0)
+  const lastClassifyAt = useSharedValue(0)
 
   // Накопитель цены моста (Task 10 M-1.6): живёт на JS-стороне, а не в worklet-контексте —
   // копит массивы произвольной длины по трём стадиям, что `useSharedValue` не умеет.
   // `useMemo`, а не `useRef`: инстанс нужен один раз и не должен создаваться заново на
   // каждый рендер, как и остальные мемоизированные мосты в этом компоненте.
   const накопительЦеныМоста = useMemo(() => new НакопительЦеныМоста(), [])
-  const отметитьЦенуМоста = useMemo(
+  const markBridgeCost = useMemo(
     () =>
       Worklets.createRunOnJS((стадия: СтадияМоста, tДо: number, tПосле: number, nativeMs: number) =>
         накопительЦеныМоста.добавить(стадия, tДо, tПосле, nativeMs),
@@ -71,7 +71,7 @@ export default function App(): React.JSX.Element {
 
   // Мемоизировано: `useFrameProcessor` пересоздаёт worklet-контекст заново при каждой
   // смене зависимости, а немемоизированная функция меняла бы ссылку на каждый рендер.
-  const обновитьДетекцию = useMemo(
+  const publishDetection = useMemo(
     () =>
       Worklets.createRunOnJS((боксы: Box[], frameWidth: number, frameHeight: number) =>
         установитьДетекцию({ боксы, frameWidth, frameHeight }),
@@ -79,7 +79,7 @@ export default function App(): React.JSX.Element {
     [],
   )
 
-  const обновитьКлассификацию = useMemo(
+  const publishClassification = useMemo(
     () =>
       Worklets.createRunOnJS(
         (classIdx: number, sim: number, сверкаClassIdx: number, сверкаDelta: number) =>
@@ -95,54 +95,61 @@ export default function App(): React.JSX.Element {
     установитьОшибкуМоста((прежняя) => (прежняя === текст ? прежняя : текст))
   }, [])
 
-  const сообщитьОбОшибке = useMemo(() => Worklets.createRunOnJS(reportBridgeError), [reportBridgeError])
+  const reportErrorFromWorklet = useMemo(() => Worklets.createRunOnJS(reportBridgeError), [reportBridgeError])
 
+  // Всё, что этот worklet захватывает из внешней области видимости, названо латиницей
+  // намеренно: `react-native-worklets-core` 1.5.0 теряет ключи `__closure` с не-ASCII
+  // символами, и на устройстве такой захват приезжает `undefined`. Проверено пробой
+  // `typeof` внутри воркета на SM-S918B: `detect` и `shouldClassify` доехали функциями,
+  // а `часыМоста`/`сообщитьОбОшибке` — `undefined`, из-за чего падал первый же вызов, а
+  // за ним и `catch`, которому нечем было сообщить об ошибке. Локальные переменные
+  // внутри тела воркета кириллицу переживают — ломается только захват.
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet'
       try {
         // Замер цены моста (Task 10 M-1.6): `t_до`/`t_после` вокруг каждого из трёх
-        // вызовов границы native↔JS через `часыМоста()` — `performance.now()` из
+        // вызовов границы native↔JS через `bridgeClock()` — `performance.now()` из
         // `react-native-worklets-core` (декоратор кладёт его в рантайм воркета сам,
         // см. комментарий в `latency.ts`), а не `Date.now()`: цена перехода границы
         // ожидается в микросекундах, и миллисекундное разрешение `Date.now()` там —
         // не измерение, а шум (находка I3 финального ревью M-1.6). Троттлинг ниже
         // по-прежнему на `Date.now()` — там счёт на десятки миллисекунд, и цена
         // квантования не имеет значения.
-        const tДетектДо = часыМоста()
+        const tДетектДо = bridgeClock()
         const результат = detect(frame, MAX_DET)
-        отметитьЦенуМоста('detect', tДетектДо, часыМоста(), результат.nativeMs)
-        обновитьДетекцию(результат.boxes, результат.frameWidth, результат.frameHeight)
+        markBridgeCost('detect', tДетектДо, bridgeClock(), результат.nativeMs)
+        publishDetection(результат.boxes, результат.frameWidth, результат.frameHeight)
 
         // Троттлинг — на JS-стороне (§6.2 спеки): не чаще ~8 Гц и не больше двух кропов
         // за кадр, иначе классификатор молотил бы на каждом кадре впустую.
         const сейчас = Date.now()
-        const дляКлассификации = shouldClassify(сейчас, последняяКлассификация.value, результат.boxes)
+        const дляКлассификации = shouldClassify(сейчас, lastClassifyAt.value, результат.boxes)
         if (дляКлассификации.length > 0) {
-          последняяКлассификация.value = сейчас
-          const tEmbedДо = часыМоста()
+          lastClassifyAt.value = сейчас
+          const tEmbedДо = bridgeClock()
           const { results: результатыКлассификации, nativeMs: embedNativeMs } = embedAndMatch(
             frame,
             дляКлассификации,
             CLASSIFY_PAD,
             CLASSIFY_TOP_K,
           )
-          отметитьЦенуМоста('embedAndMatch', tEmbedДо, часыМоста(), embedNativeMs)
+          markBridgeCost('embedAndMatch', tEmbedДо, bridgeClock(), embedNativeMs)
           const первый = результатыКлассификации[0]
           const топ1 = первый?.matches[0]
           if (первый != null && топ1 != null) {
             // Третий путь границы на том же векторе. EMA в этой вехе нет (§13.3), поэтому
             // вызов существует ради сверки: `matchEmbedding` обязан вернуть ровно то, что
             // `embedAndMatch` уже посчитал внутри себя.
-            const tMatchДо = часыМоста()
+            const tMatchДо = bridgeClock()
             const { matches: сверкаMatches, nativeMs: matchNativeMs } = matchEmbedding(
               frame,
               первый.embedding,
               CLASSIFY_TOP_K,
             )
-            отметитьЦенуМоста('matchEmbedding', tMatchДо, часыМоста(), matchNativeMs)
+            markBridgeCost('matchEmbedding', tMatchДо, bridgeClock(), matchNativeMs)
             const сверка = сверкаMatches[0]
-            обновитьКлассификацию(
+            publishClassification(
               топ1.classIdx,
               топ1.sim,
               сверка == null ? -1 : сверка.classIdx,
@@ -153,11 +160,11 @@ export default function App(): React.JSX.Element {
       } catch (отказ) {
         // Ранний выход на этом кадре: дорисовывать рамки по неполным данным опаснее,
         // чем пропустить кадр целиком.
-        сообщитьОбОшибке(String(отказ))
+        reportErrorFromWorklet(String(отказ))
         return
       }
     },
-    [обновитьДетекцию, обновитьКлассификацию, отметитьЦенуМоста, последняяКлассификация, сообщитьОбОшибке],
+    [publishDetection, publishClassification, markBridgeCost, lastClassifyAt, reportErrorFromWorklet],
   )
 
   const наРазметке = (событие: LayoutChangeEvent): void => {

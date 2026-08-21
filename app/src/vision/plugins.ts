@@ -17,15 +17,23 @@ type RawDetectResult = {
   boxes: ArrayBuffer
 }
 
-const плагинДетекции = VisionCameraProxy.initFrameProcessorPlugin('carvisionDetect', {})
+/*
+ * Латиница в именах трёх хэндлов — требование `react-native-worklets-core` 1.5.0, а не
+ * стиль: имя модульной переменной становится ключом `__closure` воркета, и ключи с
+ * не-ASCII символами не доезжают до worklet-рантайма — на устройстве захват приходит
+ * `undefined`. Симптом был именно такой: плагины регистрировались
+ * (`FrameProcessorPluginRegistry: "carvisionDetect" found!` в logcat), а воркет падал на
+ * `плагин carvisionDetect не зарегистрирован`.
+ */
+const detectPlugin = VisionCameraProxy.initFrameProcessorPlugin('carvisionDetect', {})
 
 /** Длины проверяются жёстко: рассинхрон Kotlin и TS иначе выглядит как плохая модель. */
 export function detect(frame: Frame, maxDet: number): DetectResult {
   'worklet'
-  if (плагинДетекции == null) {
+  if (detectPlugin == null) {
     throw new Error('плагин carvisionDetect не зарегистрирован')
   }
-  const сырое = плагинДетекции.call(frame, { maxDet }) as unknown as RawDetectResult
+  const сырое = detectPlugin.call(frame, { maxDet }) as unknown as RawDetectResult
   const числа = new Float32Array(сырое.boxes)
   if (числа.length !== сырое.count * 5) {
     throw new Error(`боксы: ${числа.length} чисел против ${сырое.count * 5} по count`)
@@ -80,7 +88,7 @@ type RawEmbedResult = {
   [ключСлота: string]: unknown
 }
 
-const плагинЭмбеддинга = VisionCameraProxy.initFrameProcessorPlugin('carvisionEmbedAndMatch', {})
+const embedPlugin = VisionCameraProxy.initFrameProcessorPlugin('carvisionEmbedAndMatch', {})
 
 /**
  * Эмбеддинг и top-K для уже отобранных троттлингом боксов (см. `shouldClassify` в
@@ -89,14 +97,14 @@ const плагинЭмбеддинга = VisionCameraProxy.initFrameProcessorPlu
  */
 export function embedAndMatch(frame: Frame, boxes: Box[], pad: number, topK: number): EmbedMatchCallResult {
   'worklet'
-  if (плагинЭмбеддинга == null) {
+  if (embedPlugin == null) {
     throw new Error('плагин carvisionEmbedAndMatch не зарегистрирован')
   }
   const плоские: number[] = []
   boxes.forEach((бокс) => {
     плоские.push(бокс.x, бокс.y, бокс.w, бокс.h, бокс.conf)
   })
-  const сырое = плагинЭмбеддинга.call(frame, { boxes: плоские, pad, topK }) as unknown as RawEmbedResult
+  const сырое = embedPlugin.call(frame, { boxes: плоские, pad, topK }) as unknown as RawEmbedResult
   const matchCount = сырое.matchCount
   // `count` меньше запрошенного `topK` законен (в индексе может быть меньше классов),
   // больше — нет: это означало бы, что нативная сторона считает `topK` не тем, что
@@ -137,7 +145,7 @@ type RawMatchResult = {
   matches: ArrayBuffer
 }
 
-const плагинСовпадений = VisionCameraProxy.initFrameProcessorPlugin('carvisionMatchEmbedding', {})
+const matchPlugin = VisionCameraProxy.initFrameProcessorPlugin('carvisionMatchEmbedding', {})
 
 /** `nativeMs` — время нативной стороны на весь вызов `matchEmbedding` (Task 10). */
 export type MatchCallResult = { matches: Match[]; nativeMs: number }
@@ -155,14 +163,14 @@ export type MatchCallResult = { matches: Match[]; nativeMs: number }
  */
 export function matchEmbedding(frame: Frame, embedding: Float32Array, topK: number): MatchCallResult {
   'worklet'
-  if (плагинСовпадений == null) {
+  if (matchPlugin == null) {
     throw new Error('плагин carvisionMatchEmbedding не зарегистрирован')
   }
   const целиком = embedding.byteOffset === 0 && embedding.buffer.byteLength === embedding.length * 4
   // `.buffer` типизирован как `ArrayBufferLike` из-за `SharedArrayBuffer`, которого в
   // Hermes нет: сузить до `ArrayBuffer` безопасно, другого варианта тут не бывает.
   const буфер = (целиком ? embedding.buffer : embedding.slice().buffer) as ArrayBuffer
-  const сырое = плагинСовпадений.call(frame, { embedding: буфер, topK }) as unknown as RawMatchResult
+  const сырое = matchPlugin.call(frame, { embedding: буфер, topK }) as unknown as RawMatchResult
   const числа = new Float32Array(сырое.matches)
   if (числа.length !== сырое.count * 2) {
     throw new Error(`совпадения: ${числа.length} чисел против ${сырое.count * 2} по count*2`)

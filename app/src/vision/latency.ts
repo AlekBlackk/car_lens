@@ -5,8 +5,19 @@
  * JS/worklet-стороне. Task 10 M-1.6.
  */
 
-/** Минимальный тип часов: без него `часыМоста` пришлось бы типизировать `performance` как `any`. */
-type ЧасыВысокогоРазрешения = { now: () => number }
+/**
+ * `performance` в worklet-рантайме объявлен здесь, а не взят из `globalThis`, и это
+ * требование устройства, а не вкусовщина. `react-native-worklets-core` 1.5.0 на каждое
+ * обращение к объекту `globalThis` изнутри воркета заводит глобальную JNI-ссылку и не
+ * освобождает её: на SM-S918B при 28-30 кадрах/с таблица ссылок (max=51200) переполнялась
+ * примерно за секунду и процесс падал с
+ * `JNI ERROR (app bug): global reference table overflow`. Бисекция на устройстве: пустой
+ * воркет — жив; `detect()` каждый кадр — жив; `Date.now()` голым идентификатором — жив;
+ * `performance.now()` голым идентификатором — жив; любое обращение вида
+ * `globalThis.performance` или `globalThis['Date']` — падение. Голый идентификатор
+ * резолвится без обращения к объекту глобали и течи не даёт.
+ */
+declare const performance: { now: () => number } | undefined
 
 /**
  * Часы для замера цены моста. `Date.now()` квантуется до 1 мс в Hermes, а сама цена
@@ -17,14 +28,19 @@ type ЧасыВысокогоРазрешения = { now: () => number }
  * `react-native-worklets-core` 1.5.0 сам кладёт `performance.now()` в глобальный объект
  * каждого worklet-рантайма — `WKTJsiPerformanceDecorator.h` в его исходниках, обёртка над
  * `std::chrono::steady_clock` с наносекундным внутренним разрешением, отданная в JS как
- * дробные миллисекунды. Источник — не Hermes и не полифилл в этом репозитории, поэтому
- * прежний комментарий («не гарантирован без отдельного полифилла») ошибался: часы уже есть,
- * просто не там, где их искали. `Date.now()` — фолбэк на случай окружения, где `performance`
- * не задекорирован (например юнит-тест вне worklet-рантайма).
+ * дробные миллисекунды. `Date.now()` — фолбэк на случай окружения, где `performance` не
+ * задекорирован (например юнит-тест вне worklet-рантайма).
+ *
+ * Директива `'worklet'` обязательна: функция захватывается замыканием frame processor'а, а
+ * `react-native-worklets-core` 1.5.0 отказывается переносить в worklet-рантайм обычную
+ * JS-функцию («Regular javascript function 'bridgeClock' cannot be shared», проверено на
+ * SM-S918B). Юнит-тесты вне worklet-рантайма директиву игнорируют.
  */
-export function часыМоста(): number {
-  const глобальные = globalThis as unknown as { performance?: ЧасыВысокогоРазрешения }
-  return typeof глобальные.performance?.now === 'function' ? глобальные.performance.now() : Date.now()
+export function bridgeClock(): number {
+  'worklet'
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now()
 }
 
 /**
@@ -68,7 +84,7 @@ export class НакопительЦеныМоста {
     matchEmbedding: false,
   }
 
-  /** `tДо`/`tПосле` — `часыМоста()` непосредственно вокруг вызова плагина в worklet'е. */
+  /** `tДо`/`tПосле` — `bridgeClock()` непосредственно вокруг вызова плагина в worklet'е. */
   добавить(стадия: СтадияМоста, tДо: number, tПосле: number, nativeMs: number): void {
     // Ранний выход после печати: без него массив стадии рос бы неограниченно на длинной
     // сессии — `напечатано` раньше блокировал только повторную печать, не рост массива
