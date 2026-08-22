@@ -8,6 +8,7 @@ import {
   parseCatalogInfo,
   sameBrand,
 } from './labels'
+import { AssetError } from './thresholds'
 
 const каталог = {
   format_version: 1,
@@ -96,6 +97,6 @@ describe('информация о каталоге', () => {
   })
 
   test('битая версия каталога — AssetError', () => {
-    expect(() => parseCatalogInfo({ format_version: 'один', classes: [] })).toThrow()
+    expect(() => parseCatalogInfo({ format_version: 'один', classes: [] })).toThrow(AssetError)
   })
 })

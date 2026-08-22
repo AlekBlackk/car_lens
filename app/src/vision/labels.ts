@@ -84,6 +84,9 @@ const целое = (значение: unknown, поле: string): number => {
 export function parseCatalogInfo(документ: unknown): ИнфоКаталога {
   const поля = документ as Record<string, unknown>
   const классы = поля.classes
+  // Пустой массив здесь допустим, в отличие от `parseCatalog`: версия каталога читается и у
+  // пустого. Модуль это переживает лишь потому, что `CATALOG` объявлен выше и на пустом
+  // каталоге падает первым — переставлять два объявления нельзя.
   if (!Array.isArray(классы)) {
     throw new AssetError('classes: каталог не является массивом')
   }
@@ -97,6 +100,7 @@ export function parseCatalogInfo(документ: unknown): ИнфоКатал�
 
 const CATALOG_INFO: ИнфоКаталога = parseCatalogInfo(сыройКаталог)
 
+/** Общий объект, а не копия: правка его полей отравила бы digest всем последующим вызовам. */
 export function catalogInfo(): ИнфоКаталога {
   return CATALOG_INFO
 }
@@ -111,7 +115,12 @@ export function catalogDigest(): string {
   return `${CATALOG_INFO.formatVersion}:${CATALOG_INFO.weightsSha.slice(0, 12)}:${CATALOG_INFO.классов}`
 }
 
-/** Весь каталог для списка выбора в «это неверно». Без `'worklet'`: нужен только JS-стороне. */
+/**
+ * Весь каталог для списка выбора в «это неверно». Без `'worklet'`: нужен только JS-стороне.
+ * Отдаётся живой `CATALOG`, из которого воркет `classLabel` читает подписи: `readonly`
+ * запрещает мутацию только на уровне типов, поэтому не сортировать и не переставлять на
+ * месте — сортировку списка делать в копию.
+ */
 export function allClasses(): readonly Класс[] {
   return CATALOG
 }
