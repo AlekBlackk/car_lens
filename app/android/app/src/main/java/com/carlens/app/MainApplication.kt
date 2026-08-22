@@ -1,6 +1,7 @@
 package com.carlens.app
 
 import android.app.Application
+import com.carlens.app.storage.CarlensStoragePackage
 import com.carlens.vision.CarVisionDetectPlugin
 import com.carlens.vision.CarVisionEmbedPlugin
 import com.carlens.vision.CarVisionMatchPlugin
@@ -22,8 +23,10 @@ class MainApplication : Application(), ReactApplication {
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> =
             PackageList(this).packages.apply {
-              // Пакеты, которые автолинковка не подхватывает сама, добавляются здесь
-              // вручную, например: add(MyReactNativePackage())
+              // Автолинковка видит только пакеты из node_modules — локальный модуль
+              // приложения приходится добавлять руками. Отдаёт JS ключ шифрования
+              // хранилища (§9: история в MMKV с шифрованием).
+              add(CarlensStoragePackage())
             }
 
         override fun getJSMainModuleName(): String = "index"
