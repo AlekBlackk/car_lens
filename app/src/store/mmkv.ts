@@ -9,6 +9,10 @@ type ОтветМоста = { ключ: string; сброшен: boolean }
  * `AndroidKeyStore` через нативный модуль `CarlensStorage` (см. `StorageKey.kt`), а не
  * генерируется здесь: JS-случайность пришлось бы где-то хранить, и хранить её было бы
  * негде, кроме того же диска.
+ *
+ * Ключ доезжает целиком, а защищает не целиком: `encryptionKey` у MMKV ограничен 16
+ * байтами (`react-native-mmkv/src/Types.ts:55`), лишнее библиотека молча отбрасывает —
+ * фактическая стойкость 96 бит, расчёт и причина в KDoc `StorageKey.kt`.
  */
 export async function создатьХранилище(): Promise<{ хранилище: Хранилище; сброшен: boolean }> {
   const мост = NativeModules.CarlensStorage as { initStorage(): Promise<ОтветМоста> } | undefined
