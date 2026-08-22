@@ -66,3 +66,52 @@ export function sameBrand(первый: number, второй: number): boolean {
   if (один == null || другой == null) return false
   return один.brand === другой.brand
 }
+
+export type ИнфоКаталога = {
+  formatVersion: number
+  generatedAt: string
+  weightsSha: string
+  классов: number
+}
+
+const целое = (значение: unknown, поле: string): number => {
+  if (typeof значение !== 'number' || !Number.isInteger(значение)) {
+    throw new AssetError(`${поле}: ожидалось целое, пришло ${JSON.stringify(значение)}`)
+  }
+  return значение
+}
+
+export function parseCatalogInfo(документ: unknown): ИнфоКаталога {
+  const поля = документ as Record<string, unknown>
+  const классы = поля.classes
+  if (!Array.isArray(классы)) {
+    throw new AssetError('classes: каталог не является массивом')
+  }
+  return {
+    formatVersion: целое(поля.format_version, 'format_version'),
+    generatedAt: строка(поля.generated_at, 'generated_at'),
+    weightsSha: строка(поля.model_weights_sha256, 'model_weights_sha256'),
+    классов: классы.length,
+  }
+}
+
+const CATALOG_INFO: ИнфоКаталога = parseCatalogInfo(сыройКаталог)
+
+export function catalogInfo(): ИнфоКаталога {
+  return CATALOG_INFO
+}
+
+/**
+ * Метка версии каталога для записей истории и очереди отзывов. Три поля, а не одно:
+ * `format_version` меняется при смене формата, sha весов — при переобучении, число
+ * классов — при расширении каталога (§10 спеки, M6: 150 → 600 → 1500). Любое из трёх
+ * меняет смысл `classIdx`, и любого одного было бы мало.
+ */
+export function catalogDigest(): string {
+  return `${CATALOG_INFO.formatVersion}:${CATALOG_INFO.weightsSha.slice(0, 12)}:${CATALOG_INFO.классов}`
+}
+
+/** Весь каталог для списка выбора в «это неверно». Без `'worklet'`: нужен только JS-стороне. */
+export function allClasses(): readonly Класс[] {
+  return CATALOG
+}

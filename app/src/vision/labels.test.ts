@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'vitest'
-import { classLabel, parseCatalog, sameBrand } from './labels'
+import {
+  allClasses,
+  catalogDigest,
+  catalogInfo,
+  classLabel,
+  parseCatalog,
+  parseCatalogInfo,
+  sameBrand,
+} from './labels'
 
 const каталог = {
   format_version: 1,
@@ -51,5 +59,43 @@ describe('sameBrand', () => {
 
   test('класс совпадает сам с собой', () => {
     expect(sameBrand(0, 0)).toBe(true)
+  })
+})
+
+describe('информация о каталоге', () => {
+  test('разбирает три поля версии', () => {
+    const инфо = parseCatalogInfo({
+      format_version: 1,
+      generated_at: '2026-08-17T19:42:43Z',
+      model_weights_sha256: 'abcdef0123456789abcdef',
+      classes: [{ display: 'Audi A5', brand: 'Audi' }],
+    })
+    expect(инфо).toEqual({
+      formatVersion: 1,
+      generatedAt: '2026-08-17T19:42:43Z',
+      weightsSha: 'abcdef0123456789abcdef',
+      классов: 1,
+    })
+  })
+
+  test('digest склеен из трёх полей и берёт 12 символов sha', () => {
+    const инфо = catalogInfo()
+    expect(catalogDigest()).toBe(
+      `${инфо.formatVersion}:${инфо.weightsSha.slice(0, 12)}:${инфо.классов}`,
+    )
+  })
+
+  test('digest не пустой и не содержит пробелов', () => {
+    expect(catalogDigest().length).toBeGreaterThan(5)
+    expect(catalogDigest()).not.toMatch(/\s/)
+  })
+
+  test('allClasses отдаёт весь каталог', () => {
+    expect(allClasses().length).toBe(catalogInfo().классов)
+    expect(allClasses()[0]!.display.length).toBeGreaterThan(0)
+  })
+
+  test('битая версия каталога — AssetError', () => {
+    expect(() => parseCatalogInfo({ format_version: 'один', classes: [] })).toThrow()
   })
 })
