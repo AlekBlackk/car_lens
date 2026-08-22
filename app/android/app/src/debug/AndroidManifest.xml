@@ -6,9 +6,19 @@
       потребитель разрешения — Metro dev server, а он существует только в отладочной
       сборке. Раньше строка стояла в main и уезжала в релиз.
 
-      Ресурс networkSecurityConfig подменяется manifest merger'ом: сам атрибут объявлен в
-      main, а `debug/res/xml/network_security_config.xml` перекрывает файл по имени.
+      Про networkSecurityConfig здесь ничего не объявлено, и это не упущение: работают два
+      разных механизма. Атрибут `android:networkSecurityConfig` объявлен один раз в main и
+      достаётся отладочному варианту от manifest merger'а. Сам же XML-ресурс подменяет
+      resource merger — по приоритету source set, где debug старше main, — и в отладочную
+      сборку попадает `debug/res/xml/network_security_config.xml`.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+      ACCESS_NETWORK_STATE тоже вычеркнут в main (§9 про релиз), а сюда возвращён затем,
+      чтобы отладочный вариант остался ровно тем, чем был: разрешение приходит с
+      транзитивной зависимостью, и что из инструментов отладки его читает — на устройстве
+      не проверено. §9 ограничивает релиз, а не отладку, поэтому здесь ничего не отнимаем.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
 </manifest>
