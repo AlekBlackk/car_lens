@@ -1,3 +1,6 @@
+import java.security.KeyStore
+import java.security.MessageDigest
+
 // Минимальный RN-модуль: собирает JS-бандл (`../..` — корень `app/`, где лежит
 // `package.json`) и React Native-рантайм в APK. Значения по умолчанию (root, entryFile,
 // hermesEnabled/newArchEnabled из `gradle.properties`) совпадают с раскладкой этого
@@ -61,6 +64,35 @@ android {
         }
     }
     buildFeatures { buildConfig = true }
+
+    // Отпечаток сертификата, которым подписана сборка, вшивается в BuildConfig и
+    // сверяется на старте (`SigningIdentity.kt`).
+    //
+    // Чем это НЕ является: защитой от подмены моделей. Перепаковщик правит и модель, и
+    // это поле, подписывает своим ключом — сверка сойдётся. Приложение не может быть
+    // корнем доверия для самого себя, для настоящего анти-tampering нужен внешний якорь
+    // (аттестация, Play Integrity), а его в MVP нет и не планируется: §9 спеки — всё
+    // on-device, сети нет вовсе.
+    //
+    // Чем является: контролем сборочной конфигурации. Ловит рассинхрон между тем, чем
+    // сборка подписывалась, и тем, что стоит на устройстве.
+    //
+    // Пустая строка (нет keystore на машине сборки) означает «проверка выключена»:
+    // отсутствие отладочного ключа не должно ронять конфигурацию Gradle.
+    val отпечатокПодписи: String =
+        runCatching {
+            val подпись = signingConfigs.getByName("debug")
+            val файл = подпись.storeFile ?: return@runCatching ""
+            if (!файл.exists()) return@runCatching ""
+            val хранилище = KeyStore.getInstance("JKS")
+            файл.inputStream().use { хранилище.load(it, подпись.storePassword?.toCharArray()) }
+            val алиас = подпись.keyAlias ?: хранилище.aliases().nextElement()
+            val сертификат = хранилище.getCertificate(алиас) ?: return@runCatching ""
+            MessageDigest.getInstance("SHA-256")
+                .digest(сертификат.encoded)
+                .joinToString("") { байт -> "%02x".format(байт) }
+        }.getOrDefault("")
+    defaultConfig.buildConfigField("String", "SIGNING_CERT_SHA256", "\"$отпечатокПодписи\"")
 
     // Релизный вариант подписан отладочным ключом намеренно. Это не путь в магазин, а
     // единственный способ снять с телефона осмысленные числа и вообще пользоваться

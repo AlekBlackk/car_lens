@@ -39,6 +39,10 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Раньше SoLoader и регистрации плагинов: сверка дешёвая, а расхождение сборочной
+    // конфигурации с установленной лучше видеть сразу. Что эта проверка даёт и чего не
+    // даёт — в `SigningIdentity.kt`, коротко: это контроль конфигурации, не анти-tampering.
+    SigningIdentity.проверить(this)
     SoLoader.init(this, OpenSourceMergedSoMapping)
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
       // При включённой New Architecture нужно дополнительно загрузить нативную точку входа.
