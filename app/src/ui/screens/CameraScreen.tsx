@@ -11,7 +11,7 @@
  * в историю id — размонтирование обнулило бы всё это на каждый заход в «Историю».
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native'
+import { LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native'
 import {
   Camera,
   useCameraDevice,
@@ -37,7 +37,7 @@ import { detect, embedAndMatch, matchEmbedding, type Box } from '../../vision/pl
 import { checkSlotContract } from '../../vision/slotContract'
 import { StabilityCollector } from '../../vision/stability'
 import { применитьПорог } from '../../vision/userThreshold'
-import { mapBoxToView } from '../../vision/viewMapping'
+import { mapBoxToView, type ViewRect } from '../../vision/viewMapping'
 
 const MAX_DET = 4
 
@@ -147,8 +147,16 @@ function записатьРаспознанное(
   }
 }
 
+/** Положение рамки в координатах превью. Считается один раз на оба варианта отрисовки. */
+const стильРамки = (рамка: ViewRect) => ({
+  left: рамка.left,
+  top: рамка.top,
+  width: рамка.width,
+  height: рамка.height,
+})
+
 export default function CameraScreen(свойства: СвойстваКамеры): React.JSX.Element {
-  const { заморожено, активна } = свойства
+  const { заморожено, активна, наЗаморозку, наТапПоТреку } = свойства
   const { hasPermission, requestPermission } = useCameraPermission()
   // `outputOrientation` не указан явно: значение по умолчанию `'device'` уже следует
   // физической ориентации телефона и не влияет на Frame Processors (заметки задачи 1,
@@ -439,6 +447,23 @@ export default function CameraScreen(свойства: СвойстваКаме�
           previewDegrees.value = УГЛЫ_УСТРОЙСТВА[ориентация]
         }}
       />
+      {/*
+        Честное затемнение вместо надежды на застывший кадр: `isActive={false}` освобождает
+        поверхность превью, и оно гаснет само. Показывать чёрный экран молча значило бы
+        выдавать погасшее превью за замороженный кадр.
+
+        Ни одного байта кадра при этом никуда не копируется: ни `takeSnapshot`, ни
+        `takePhoto`, ни записи в файл — §9 запрещает это прямым текстом, а `takeSnapshot()`
+        пишет в кэш приложения.
+      */}
+      {заморожено && (
+        <View style={styles.затемнение} pointerEvents="none">
+          {/* Доворот тот же, что у подписей: без него надпись лежала бы на боку в горизонте. */}
+          <Text style={[styles.текст, { transform: [{ rotate: `${-уголПодписей}deg` }] }]}>
+            Кадр заморожен
+          </Text>
+        </View>
+      )}
       {ошибкаМоста != null && (
         <View
           style={[styles.баннерОшибки, { transform: [{ rotate: `${-уголПодписей}deg` }] }]}
@@ -447,21 +472,26 @@ export default function CameraScreen(свойства: СвойстваКаме�
           <Text style={styles.текстОшибки}>{ошибкаМоста}</Text>
         </View>
       )}
-      {рамки.map((запись) => (
-        <View
-          key={запись.id}
-          pointerEvents="none"
-          style={[
-            styles.рамка,
-            {
-              left: запись.рамка.left,
-              top: запись.рамка.top,
-              width: запись.рамка.width,
-              height: запись.рамка.height,
-            },
-          ]}
-        />
-      ))}
+      {/*
+        На живом кадре рамки непроницаемы: попасть пальцем в рамку, которая переставляется
+        восемь раз в секунду, нельзя. На замороженном они становятся кнопками — `View` не
+        имеет `onPress` вовсе, нажатия принимают только `Pressable`/`Touchable`.
+      */}
+      {рамки.map((запись) =>
+        заморожено ? (
+          <Pressable
+            key={запись.id}
+            style={[styles.рамка, styles.рамкаНажимаемая, стильРамки(запись.рамка)]}
+            onPress={() => наТапПоТреку(запись.id)}
+          />
+        ) : (
+          <View
+            key={запись.id}
+            pointerEvents="none"
+            style={[styles.рамка, стильРамки(запись.рамка)]}
+          />
+        ),
+      )}
       {/*
         Подписи стоят у нижнего края с точки зрения того, кто держит телефон. Прижать их
         стилями контейнера нельзя: `transform` крутит блок вокруг его центра уже после
@@ -470,14 +500,33 @@ export default function CameraScreen(свойства: СвойстваКаме�
         сдвигается `translateY` — он применяется после `rotate`, то есть вдоль
         пользовательской вертикали, а не экранной.
       */}
-      <View style={styles.оверлей} pointerEvents="none">
+      {/*
+        `box-none`, а не `none`: сам слой нажатий не принимает, но кнопка заморозки внутри
+        него — принимает. При `none` не отвечали бы и потомки.
+      */}
+      <View style={styles.оверлей} pointerEvents="box-none">
         <View
+          // Тоже `box-none`: блок занимает середину экрана, и без этого он перехватывал бы
+          // нажатия у рамок, оказавшихся под ним на замороженном кадре. Цель — только кнопка.
+          pointerEvents="box-none"
           onLayout={(событие) => установитьВысотуПодписей(событие.nativeEvent.layout.height)}
           style={{
             alignItems: 'center',
             transform: [{ rotate: `${-уголПодписей}deg` }, { translateY: сдвигПодписей }],
           }}
         >
+        {/*
+          Кнопка стоит в том же довёрнутом блоке, что и подписи, и по той же причине: при
+          горизонтальном хвате текст на ней иначе лежал бы на боку. Блок меряется целиком,
+          поэтому нижний край подписей от появления кнопки не двигается — она вырастает
+          вверх.
+
+          Отдельным абсолютным слоем её ставить нельзя: в портрете она села бы ровно на
+          баннер ошибки моста, который прибит к верхнему краю экрана.
+        */}
+        <Pressable style={styles.кнопкаЗаморозки} onPress={() => наЗаморозку(!заморожено)}>
+          <Text style={styles.текстКнопки}>{заморожено ? 'Продолжить' : 'Заморозить'}</Text>
+        </Pressable>
         {/*
           Подпись живёт здесь, а не у рамки: блок доворачивается на угол устройства, и
           только в нём текст стоит вертикально при любом хвате. Строка на трек, текст
@@ -503,6 +552,17 @@ const styles = StyleSheet.create({
   оверлей: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   текст: { color: '#fff', fontSize: 18 },
   рамка: { position: 'absolute', borderWidth: 2, borderColor: '#00ff00' },
+  /** Нажимаемая рамка отличается от обычной видимо: иначе о ней знает только тот, кто её писал. */
+  рамкаНажимаемая: { borderColor: '#ffd400', borderWidth: 3 },
+  затемнение: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0, 0, 0, 0.55)' },
+  кнопкаЗаморозки: {
+    marginBottom: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  текстКнопки: { color: '#fff', fontSize: 17 },
   баннерОшибки: {
     position: 'absolute',
     top: 32,
