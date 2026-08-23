@@ -12,14 +12,22 @@
  * гасится флагом `активна` — заход в «Историю» не должен стоить пользователю всех треков.
  */
 import React, { useEffect, useRef, useState } from 'react'
-import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native'
+import { BackHandler, StyleSheet, Text, View } from 'react-native'
+import { очиститьОчередь } from './src/store/feedback'
 import { добавить, записатьИсторию, прочитатьИсторию, type ЗаписьИстории } from './src/store/history'
 import { создатьХранилище } from './src/store/mmkv'
-import { НАСТРОЙКИ_ПО_УМОЛЧАНИЮ, прочитатьНастройки } from './src/store/settings'
+import {
+  НАСТРОЙКИ_ПО_УМОЛЧАНИЮ,
+  записатьНастройки,
+  прочитатьНастройки,
+  type Настройки,
+} from './src/store/settings'
 import type { Хранилище } from './src/store/storage'
-import { НАЧАЛЬНАЯ_НАВИГАЦИЯ, pop, push, верхний, type Экран } from './src/ui/navigation'
+import { НАЧАЛЬНАЯ_НАВИГАЦИЯ, pop, push, верхний } from './src/ui/navigation'
 import CameraScreen from './src/ui/screens/CameraScreen'
 import DetailsScreen from './src/ui/screens/DetailsScreen'
+import HistoryScreen from './src/ui/screens/HistoryScreen'
+import SettingsScreen from './src/ui/screens/SettingsScreen'
 import type { ПодписьТрека } from './src/vision/pipeline'
 
 /**
@@ -31,14 +39,6 @@ type СостояниеЗапуска =
   | { вид: 'загрузка' }
   | { вид: 'готово'; хранилище: Хранилище; сброшен: boolean }
   | { вид: 'отказ'; текст: string }
-
-/** Заголовки экранов-заглушек. «История» и «Настройки» приезжают задачей 15. */
-const ЗАГОЛОВКИ: Record<Экран['вид'], string> = {
-  камера: 'Камера',
-  детали: 'Детали',
-  история: 'История',
-  настройки: 'Настройки',
-}
 
 export default function App(): React.JSX.Element {
   const [запуск, установитьЗапуск] = useState<СостояниеЗапуска>({ вид: 'загрузка' })
@@ -120,6 +120,20 @@ export default function App(): React.JSX.Element {
     if (состояние !== null) установитьНавигацию(состояние)
   }
 
+  /**
+   * Единственный писатель настроек: экран отдаёт новый объект, диск и очередь отзывов —
+   * забота корня. Очередь чистится ровно на переходе «включено → выключено» (§8): иначе
+   * «выключено» означало бы «уже собранное продолжает лежать», а пользователь понимает под
+   * этим другое.
+   */
+  const сменитьНастройки = (новые: Настройки): void => {
+    if (настройки.сборОбратнойСвязи && !новые.сборОбратнойСвязи) {
+      очиститьОчередь(запуск.хранилище)
+    }
+    установитьНастройки(новые)
+    записатьНастройки(запуск.хранилище, новые)
+  }
+
   return (
     <View style={styles.экран}>
       <CameraScreen
@@ -147,16 +161,18 @@ export default function App(): React.JSX.Element {
           />
         </View>
       )}
-      {(экран.вид === 'история' || экран.вид === 'настройки') && (
-        <View style={[StyleSheet.absoluteFill, styles.поверхКамеры]}>
-          {/*
-            Заглушка до задачи 15: навигация, аппаратная кнопка «назад» и гашение камеры
-            проверяются уже сейчас, а содержимое экранов приезжает своей задачей.
-          */}
-          <Text style={styles.текст}>{ЗАГОЛОВКИ[экран.вид]}</Text>
-          <Pressable onPress={назад}>
-            <Text style={styles.кнопка}>Назад</Text>
-          </Pressable>
+      {экран.вид === 'история' && (
+        <View style={[StyleSheet.absoluteFill, styles.слойЭкрана]}>
+          <HistoryScreen история={история} сброшена={запуск.сброшен} наЗакрытие={назад} />
+        </View>
+      )}
+      {экран.вид === 'настройки' && (
+        <View style={[StyleSheet.absoluteFill, styles.слойЭкрана]}>
+          <SettingsScreen
+            настройки={настройки}
+            наИзменение={сменитьНастройки}
+            наЗакрытие={назад}
+          />
         </View>
       )}
     </View>
@@ -165,11 +181,6 @@ export default function App(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   экран: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
-  поверхКамеры: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#000',
-  },
   /** Экран со своей раскладкой: центрировать его нельзя, он сам занимает слой целиком. */
   слойЭкрана: { backgroundColor: '#000' },
   текст: { color: '#fff', fontSize: 18 },
