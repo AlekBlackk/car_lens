@@ -5,6 +5,7 @@ import {
   BridgeContractError,
   ПУСТОЕ_СОСТОЯНИЕ,
   stepPipeline,
+  MAX_HYPOTHESES,
   type МостКонвейера,
   type СостояниеКонвейера,
 } from './pipeline'
@@ -221,5 +222,49 @@ describe('stepPipeline', () => {
     expect(вектор[1]).toBeGreaterThan(0)
     expect(вектор[1]).toBeLessThan(1)
     expect(EMA_ALPHA).toBe(0.35)
+  })
+
+  test('трек несёт не больше MAX_HYPOTHESES гипотез и в порядке моста', () => {
+    const м = мост({
+      matchEma: (): Match[] => [
+        { classIdx: 1, sim: 0.9 },
+        { classIdx: 2, sim: 0.8 },
+        { classIdx: 3, sim: 0.7 },
+        { classIdx: 4, sim: 0.6 },
+        { classIdx: 5, sim: 0.5 },
+      ],
+    })
+    const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0)], 1000), м)
+    const топы = итог.состояние.треки[0]!.топы
+    expect(MAX_HYPOTHESES).toBe(3)
+    expect(топы).toHaveLength(MAX_HYPOTHESES)
+    expect(топы.map((матч) => матч.classIdx)).toEqual([1, 2, 3])
+    expect(итог.подписи[0]!.топы).toEqual(топы)
+  })
+
+  test('решение считают две первые гипотезы: третья на него не влияет', () => {
+    const м = мост({
+      matchEma: (): Match[] => [
+        { classIdx: 11, sim: 0.9 },
+        { classIdx: 12, sim: 0.1 },
+        // Ближе к топ-1, чем позволяет marginMin: попади она в топ-2, «модель» стала бы
+        // «неизвестно». Тест на то, что решатель берёт первые две гипотезы, а не любые две.
+        { classIdx: 13, sim: 0.89 },
+      ],
+    })
+    const состояние = прогнать(4, м)
+    const итог = stepPipeline(состояние, вход([бокс(0)], 800), м)
+    const решение = итог.подписи[0]!.решение
+    expect(решение.вид).toBe('модель')
+    expect(решение.вид === 'модель' && решение.classIdx).toBe(11)
+    expect(итог.подписи[0]!.топы).toHaveLength(3)
+  })
+
+  test('одна гипотеза от моста — один элемент в топах, решение без топ-2', () => {
+    const м = мост({ matchEma: (): Match[] => [{ classIdx: 7, sim: 0.95 }] })
+    const состояние = прогнать(4, м)
+    const итог = stepPipeline(состояние, вход([бокс(0)], 800), м)
+    expect(итог.состояние.треки[0]!.топы).toHaveLength(1)
+    expect(итог.подписи[0]!.решение.вид).toBe('модель')
   })
 })
