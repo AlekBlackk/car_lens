@@ -36,7 +36,7 @@ import {
 import { detect, embedAndMatch, matchEmbedding, type Box } from '../../vision/plugins'
 import { checkSlotContract } from '../../vision/slotContract'
 import { StabilityCollector } from '../../vision/stability'
-import { применитьПорог } from '../../vision/userThreshold'
+import { ключиВидимыхРешений, применитьПорог } from '../../vision/userThreshold'
 import { mapBoxToView, type ViewRect } from '../../vision/viewMapping'
 
 const MAX_DET = 4
@@ -223,15 +223,9 @@ export default function CameraScreen(свойства: СвойстваКаме�
 
   // Накопитель устойчивости подписи (Task 10 M-1.6). Живёт рядом с накопителем цены моста
   // и по той же причине: копит словари произвольного размера, чего SharedValue не умеет.
-  // События приходят из конвейера кадра — по одному на каждую состоявшуюся классификацию.
+  // События приходят из конвейера кадра — по одному на каждую состоявшуюся классификацию,
+  // и кормит его `publishOverlay`: ключ решения должен быть тем же, что уехал на экран.
   const накопительСтабильности = useMemo(() => new StabilityCollector(), [])
-  const markStability = useMemo(
-    () =>
-      Worklets.createRunOnJS((события: СобытиеКлассификации[]) =>
-        накопительСтабильности.добавить(события),
-      ),
-    [накопительСтабильности],
-  )
 
   useEffect(() => {
     if (!hasPermission) {
@@ -246,20 +240,31 @@ export default function CameraScreen(свойства: СвойстваКаме�
   //
   // Пользовательский порог применяется здесь, на JS-стороне, а не в конвейере: он лежит в
   // настройках, а настройки в воркет не доезжают. Один вызов на подпись — и оверлей, и
-  // история, и «Детали» видят одно и то же решение.
+  // история, и «Детали», и замер `decision_churn` видят одно и то же решение.
   const publishOverlay = useMemo(
     () =>
-      Worklets.createRunOnJS((сырые: ПодписьТрека[], frameWidth: number, frameHeight: number) => {
-        const свежие = свежиеСвойства.current
-        const подписи = сырые.map((подпись) => {
-          const решение = применитьПорог(подпись.решение, свежие.настройки.порогУверенности)
-          return решение === подпись.решение ? подпись : { ...подпись, решение }
-        })
-        свежие.подписиНаЭкране.current = подписи
-        записатьРаспознанное(подписи, записанныеТреки.current, свежие.наРаспознавание)
-        установитьРазметку({ подписи, frameWidth, frameHeight })
-      }),
-    [],
+      Worklets.createRunOnJS(
+        (
+          сырые: ПодписьТрека[],
+          события: СобытиеКлассификации[],
+          frameWidth: number,
+          frameHeight: number,
+        ) => {
+          const свежие = свежиеСвойства.current
+          const подписи = сырые.map((подпись) => {
+            const решение = применитьПорог(подпись.решение, свежие.настройки.порогУверенности)
+            return решение === подпись.решение ? подпись : { ...подпись, решение }
+          })
+          свежие.подписиНаЭкране.current = подписи
+          записатьРаспознанное(подписи, записанныеТреки.current, свежие.наРаспознавание)
+          установитьРазметку({ подписи, frameWidth, frameHeight })
+          // Замер кормится ключами уже погашенных порогом подписей, а не сырыми из
+          // конвейера: `decision_churn` — доля смен того, что видел пользователь.
+          // Пустой массив накопитель проходит холостым циклом, проверять его нечем.
+          накопительСтабильности.добавить(ключиВидимыхРешений(события, подписи))
+        },
+      ),
+    [накопительСтабильности],
   )
 
   // Приёмник ошибок моста: вызывается из worklet'а через `Worklets.createRunOnJS`.
@@ -347,10 +352,11 @@ export default function CameraScreen(свойства: СвойстваКаме�
           мост,
         )
         pipelineState.value = шаг.состояние
-        // Пустой массив через границу не гоняется: вызов `createRunOnJS` сам по себе не
-        // бесплатен, а кадров без классификации по §6.2 большинство.
-        if (шаг.события.length > 0) markStability(шаг.события)
-        publishOverlay(шаг.подписи, результат.frameWidth, результат.frameHeight)
+        // Один переход границы вместо двух: события едут вместе с подписями, потому что
+        // ключ решения для замера считается уже после пользовательского порога, а порог
+        // живёт на JS-стороне. На кадрах без классификации массив пуст — по §6.2 таких
+        // кадров большинство, и пустой массив дешевле второго вызова `createRunOnJS`.
+        publishOverlay(шаг.подписи, шаг.события, результат.frameWidth, результат.frameHeight)
       } catch (отказ) {
         // Ранний выход на этом кадре: дорисовывать рамки по неполным данным опаснее,
         // чем пропустить кадр целиком. Сюда же приходит `BridgeContractError` из
@@ -360,7 +366,7 @@ export default function CameraScreen(свойства: СвойстваКаме�
         return
       }
     },
-    [publishOverlay, markBridgeCost, markStability, pipelineState, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract],
+    [publishOverlay, markBridgeCost, pipelineState, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract],
   )
 
   // Пользовательская вертикаль при горизонтальном хвате идёт вдоль ширины экрана, при
