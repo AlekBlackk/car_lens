@@ -18,31 +18,36 @@ export const CLASSIFY_INTERVAL_MS = 125
 /** §6.2: не больше двух кропов за кадр. Столько же слотов в мосту. */
 export const MAX_CROPS = 2
 
-export type КандидатТрек = { id: number; бокс: Box; классифицированВ: number }
+/**
+ * Поля ASCII не по своей нужде, а по совместимости: сюда передаются `Трек` из
+ * `pipeline.ts`, а те лежат в `SharedValue` и потому обязаны быть ASCII (см. KDoc `Трек`).
+ * Структурная типизация требует, чтобы имена совпадали.
+ */
+export type КандидатТрек = { id: number; box: Box; classifiedAt: number }
 
 export function pickForClassify(
   треки: КандидатТрек[],
   nowMs: number,
   minShortSidePx: number,
-): { id: number; бокс: Box }[] {
+): { id: number; box: Box }[] {
   'worklet'
   const годные: КандидатТрек[] = []
   for (let номер = 0; номер < треки.length; номер++) {
     const трек = треки[номер]!
-    if (nowMs - трек.классифицированВ < CLASSIFY_INTERVAL_MS) continue
-    const короткаяСторона = Math.min(трек.бокс.w, трек.бокс.h)
+    if (nowMs - трек.classifiedAt < CLASSIFY_INTERVAL_MS) continue
+    const короткаяСторона = Math.min(трек.box.w, трек.box.h)
     if (короткаяСторона < minShortSidePx) continue
     годные.push(трек)
   }
   годные.sort((первый, второй) => {
-    const разница = второй.бокс.conf - первый.бокс.conf
+    const разница = второй.box.conf - первый.box.conf
     if (разница !== 0) return разница
     return первый.id - второй.id
   })
   const сколько = Math.min(MAX_CROPS, годные.length)
-  const выбранные: { id: number; бокс: Box }[] = new Array(сколько)
+  const выбранные: { id: number; box: Box }[] = new Array(сколько)
   for (let номер = 0; номер < сколько; номер++) {
-    выбранные[номер] = { id: годные[номер]!.id, бокс: годные[номер]!.бокс }
+    выбранные[номер] = { id: годные[номер]!.id, box: годные[номер]!.box }
   }
   return выбранные
 }

@@ -17,12 +17,19 @@
 import type { Match } from './plugins'
 import { confidenceFromSim, type Калибровка, type Пороги } from './thresholds'
 
+/**
+ * Имена полей ASCII, значения — нет, и это не половинчатость. Решение уезжает на
+ * JS-сторону через `Worklets.createRunOnJS` внутри `ПодписьТрека`, а эта граница теряет
+ * ключи объектов с не-ASCII символами (см. KDoc `Трек` в `pipeline.ts`). Строковые
+ * значения границу переживают целыми — проверено на SM-S918B, `'определяю'` доезжает
+ * девятью символами, — поэтому виды решений остаются русскими словами.
+ */
 export type Решение =
-  | { вид: 'определяю' }
-  | { вид: 'ближе' }
-  | { вид: 'неизвестно' }
-  | { вид: 'бренд'; classIdx: number }
-  | { вид: 'модель'; classIdx: number; уверенность: number; откалибровано: boolean }
+  | { kind: 'определяю' }
+  | { kind: 'ближе' }
+  | { kind: 'неизвестно' }
+  | { kind: 'бренд'; classIdx: number }
+  | { kind: 'модель'; classIdx: number; confidence: number; calibrated: boolean }
 
 export type ВходРешения = {
   наблюдений: number
@@ -35,36 +42,36 @@ export type ВходРешения = {
 export function decide(вход: ВходРешения, пороги: Пороги, калибровка: Калибровка): Решение {
   'worklet'
   if (вход.наблюдений < пороги.minObservations) {
-    return { вид: 'определяю' }
+    return { kind: 'определяю' }
   }
   if (вход.короткаяСторона < пороги.minShortSidePx) {
-    return { вид: 'ближе' }
+    return { kind: 'ближе' }
   }
   const топ1 = вход.топ1
   if (топ1 == null || топ1.sim < пороги.simMin) {
-    return { вид: 'неизвестно' }
+    return { kind: 'неизвестно' }
   }
   const топ2 = вход.топ2
   if (топ2 != null && топ1.sim - топ2.sim < пороги.marginMin) {
     if (вход.брендыСовпали) {
-      return { вид: 'бренд', classIdx: топ1.classIdx }
+      return { kind: 'бренд', classIdx: топ1.classIdx }
     }
-    return { вид: 'неизвестно' }
+    return { kind: 'неизвестно' }
   }
   return {
-    вид: 'модель',
+    kind: 'модель',
     classIdx: топ1.classIdx,
-    уверенность: confidenceFromSim(топ1.sim, калибровка),
+    confidence: confidenceFromSim(топ1.sim, калибровка),
     // Достаточно одного неоткалиброванного ассета, чтобы число нельзя было показывать без
     // отметки: порог решает, что вообще показать, таблица — какое число написать рядом.
-    откалибровано: пороги.tuned && калибровка.tuned,
+    calibrated: пороги.tuned && калибровка.tuned,
   }
 }
 
 /** Ключ решения для счётчика `decision_churn` (§8 дизайна): что видит пользователь, без числа. */
 export function decisionKey(решение: Решение): string {
   'worklet'
-  if (решение.вид === 'модель') return `модель:${решение.classIdx}`
-  if (решение.вид === 'бренд') return `бренд:${решение.classIdx}`
-  return решение.вид
+  if (решение.kind === 'модель') return `модель:${решение.classIdx}`
+  if (решение.kind === 'бренд') return `бренд:${решение.classIdx}`
+  return решение.kind
 }

@@ -5,7 +5,7 @@ const событие = (id: number, мгновенный: number, ema: number, �
   id,
   top1Мгновенный: мгновенный,
   top1Ema: ema,
-  ключРешения: ключ,
+  decisionKey: ключ,
 })
 
 describe('StabilityCollector', () => {

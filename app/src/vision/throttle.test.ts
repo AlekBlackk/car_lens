@@ -3,10 +3,10 @@ import type { Box } from './plugins'
 import { CLASSIFY_INTERVAL_MS, MAX_CROPS, pickForClassify } from './throttle'
 
 const бокс = (conf: number, сторона = 300): Box => ({ x: 0, y: 0, w: сторона, h: сторона, conf })
-const кандидат = (id: number, conf: number, классифицированВ: number, сторона = 300) => ({
+const кандидат = (id: number, conf: number, classifiedAt: number, сторона = 300) => ({
   id,
-  бокс: бокс(conf, сторона),
-  классифицированВ,
+  box: бокс(conf, сторона),
+  classifiedAt,
 })
 
 describe('pickForClassify', () => {
@@ -50,7 +50,7 @@ describe('pickForClassify', () => {
   })
 
   test('короткая сторона считается по меньшей из сторон', () => {
-    const узкий = { id: 1, бокс: { x: 0, y: 0, w: 400, h: 100, conf: 0.9 }, классифицированВ: 0 }
+    const узкий = { id: 1, box: { x: 0, y: 0, w: 400, h: 100, conf: 0.9 }, classifiedAt: 0 }
     expect(pickForClassify([узкий], 1000, 120)).toEqual([])
   })
 

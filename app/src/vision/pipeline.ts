@@ -17,24 +17,31 @@ import { CALIBRATION, THRESHOLDS } from './thresholds'
 import { CLASSIFY_INTERVAL_MS, pickForClassify } from './throttle'
 import { updateTracks, type ТрекГеометрия } from './tracker'
 
+/**
+ * Имена полей — ASCII, и это не стиль, а требование границы: состояние конвейера живёт в
+ * `SharedValue`, а `react-native-worklets-core` 1.5.0 не переносит ключи с не-ASCII
+ * символами ни в воркет-рантайм, ни обратно. Ключ просто исчезает, молча. Проверено на
+ * SM-S918B; стережёт `pipeline.test.ts` («состояние переживает SharedValue»).
+ */
 export type Трек = {
   id: number
-  бокс: Box
-  наблюдений: number
-  виденВ: number
-  классифицированВ: number
+  box: Box
+  observations: number
+  seenAt: number
+  classifiedAt: number
   ema: number[] | null
-  топы: Match[]
+  tops: Match[]
 }
 
-export type СостояниеКонвейера = { треки: Трек[]; следующийId: number }
+/** Поля ASCII по той же причине, что у `Трек`: объект целиком лежит в `SharedValue`. */
+export type СостояниеКонвейера = { tracks: Трек[]; nextId: number }
 
 /**
  * Подпись трека для отрисовки. `топы` — тот же массив, что лежит в треке, той же ссылкой:
  * при классификации он переприсваивается целиком, на месте его никто не правит, поэтому
  * копия здесь означала бы новый массив каждым кадром без единого читателя.
  */
-export type ПодписьТрека = { id: number; бокс: Box; решение: Решение; топы: Match[] }
+export type ПодписьТрека = { id: number; box: Box; decision: Решение; tops: Match[] }
 
 /**
  * То, что читает счётчик стабильности: оба топ-1 одного и того же наблюдения плюс ключ
@@ -46,7 +53,7 @@ export type СобытиеКлассификации = {
   id: number
   top1Мгновенный: number
   top1Ema: number
-  ключРешения: string
+  decisionKey: string
 }
 
 export type МостКонвейера = {
@@ -61,7 +68,7 @@ export class BridgeContractError extends Error {
   }
 }
 
-export const ПУСТОЕ_СОСТОЯНИЕ: СостояниеКонвейера = { треки: [], следующийId: 1 }
+export const ПУСТОЕ_СОСТОЯНИЕ: СостояниеКонвейера = { tracks: [], nextId: 1 }
 
 /**
  * Сколько гипотез трек несёт наружу. Три — требование §6.6: столько показывает экран
@@ -100,18 +107,18 @@ export function stepPipeline(
   'worklet'
   const nowMs = вход.nowMs
 
-  const геометрия: ТрекГеометрия[] = new Array(состояние.треки.length)
-  for (let номер = 0; номер < состояние.треки.length; номер++) {
-    const трек = состояние.треки[номер]!
-    геометрия[номер] = { id: трек.id, бокс: трек.бокс, виденВ: трек.виденВ }
+  const геометрия: ТрекГеометрия[] = new Array(состояние.tracks.length)
+  for (let номер = 0; номер < состояние.tracks.length; номер++) {
+    const трек = состояние.tracks[номер]!
+    геометрия[номер] = { id: трек.id, бокс: трек.box, виденВ: трек.seenAt }
   }
-  const итогТрекера = updateTracks(геометрия, вход.боксы, nowMs, состояние.следующийId)
+  const итогТрекера = updateTracks(геометрия, вход.боксы, nowMs, состояние.nextId)
 
   // Новый массив треков: входное состояние не мутируется, поэтому «шаг не испортил вход»
   // проверяется тестом в две строки.
   const треки: Трек[] = []
-  for (let номер = 0; номер < состояние.треки.length; номер++) {
-    const прежний = состояние.треки[номер]!
+  for (let номер = 0; номер < состояние.tracks.length; номер++) {
+    const прежний = состояние.tracks[номер]!
     let мёртв = false
     for (let к = 0; к < итогТрекера.умершие.length; к++) {
       if (итогТрекера.умершие[к] === прежний.id) {
@@ -120,8 +127,8 @@ export function stepPipeline(
       }
     }
     if (мёртв) continue
-    let бокс = прежний.бокс
-    let виденВ = прежний.виденВ
+    let бокс = прежний.box
+    let виденВ = прежний.seenAt
     for (let к = 0; к < итогТрекера.сопоставленные.length; к++) {
       if (итогТрекера.сопоставленные[к]!.id === прежний.id) {
         бокс = итогТрекера.сопоставленные[к]!.бокс
@@ -131,27 +138,27 @@ export function stepPipeline(
     }
     треки.push({
       id: прежний.id,
-      бокс,
-      виденВ,
-      наблюдений: прежний.наблюдений,
-      классифицированВ: прежний.классифицированВ,
+      box: бокс,
+      seenAt: виденВ,
+      observations: прежний.observations,
+      classifiedAt: прежний.classifiedAt,
       ema: прежний.ema,
-      топы: прежний.топы,
+      tops: прежний.tops,
     })
   }
   for (let к = 0; к < итогТрекера.рождённые.length; к++) {
     const рождённый = итогТрекера.рождённые[к]!
     треки.push({
       id: рождённый.id,
-      бокс: рождённый.бокс,
-      виденВ: nowMs,
-      наблюдений: 0,
+      box: рождённый.бокс,
+      seenAt: nowMs,
+      observations: 0,
       // Родившийся трек классифицируется в том же кадре: интервал считается уже истёкшим.
       // Так, а не `0` и не `-Infinity`, потому что `nowMs` — время кадра, и оно может
       // начинаться с любого значения.
-      классифицированВ: nowMs - CLASSIFY_INTERVAL_MS,
+      classifiedAt: nowMs - CLASSIFY_INTERVAL_MS,
       ema: null,
-      топы: [],
+      tops: [],
     })
   }
 
@@ -160,7 +167,7 @@ export function stepPipeline(
 
   if (кандидаты.length > 0) {
     const боксы: Box[] = new Array(кандидаты.length)
-    for (let к = 0; к < кандидаты.length; к++) боксы[к] = кандидаты[к]!.бокс
+    for (let к = 0; к < кандидаты.length; к++) боксы[к] = кандидаты[к]!.box
     const результаты = мост.embed(боксы)
     // Проверка до единой записи в состояние: частичное применение оставило бы часть
     // треков верными, часть испорченными, и различить их потом уже нечем.
@@ -182,15 +189,15 @@ export function stepPipeline(
       const шаг = emaStep(трек.ema, результаты[к]!.embedding, EMA_ALPHA)
       if (!шаг.принят) continue
       трек.ema = шаг.вектор
-      трек.наблюдений = трек.наблюдений + 1
-      трек.классифицированВ = nowMs
-      трек.топы = мост.matchEma(toFloat32(шаг.вектор!)).slice(0, MAX_HYPOTHESES)
+      трек.observations = трек.observations + 1
+      трек.classifiedAt = nowMs
+      трек.tops = мост.matchEma(toFloat32(шаг.вектор!)).slice(0, MAX_HYPOTHESES)
       const мгновенные = результаты[к]!.matches
       события.push({
         id,
         top1Мгновенный: мгновенные.length > 0 ? мгновенные[0]!.classIdx : -1,
-        top1Ema: трек.топы.length > 0 ? трек.топы[0]!.classIdx : -1,
-        ключРешения: '',
+        top1Ema: трек.tops.length > 0 ? трек.tops[0]!.classIdx : -1,
+        decisionKey: '',
       })
     }
   }
@@ -198,12 +205,12 @@ export function stepPipeline(
   const подписи: ПодписьТрека[] = new Array(треки.length)
   for (let номер = 0; номер < треки.length; номер++) {
     const трек = треки[номер]!
-    const топ1 = трек.топы.length > 0 ? трек.топы[0]! : null
-    const топ2 = трек.топы.length > 1 ? трек.топы[1]! : null
+    const топ1 = трек.tops.length > 0 ? трек.tops[0]! : null
+    const топ2 = трек.tops.length > 1 ? трек.tops[1]! : null
     const решение = decide(
       {
-        наблюдений: трек.наблюдений,
-        короткаяСторона: Math.min(трек.бокс.w, трек.бокс.h),
+        наблюдений: трек.observations,
+        короткаяСторона: Math.min(трек.box.w, трек.box.h),
         топ1,
         топ2,
         брендыСовпали: топ1 != null && топ2 != null ? sameBrand(топ1.classIdx, топ2.classIdx) : false,
@@ -211,11 +218,11 @@ export function stepPipeline(
       THRESHOLDS,
       CALIBRATION,
     )
-    подписи[номер] = { id: трек.id, бокс: трек.бокс, решение, топы: трек.топы }
+    подписи[номер] = { id: трек.id, box: трек.box, decision: решение, tops: трек.tops }
     for (let к = 0; к < события.length; к++) {
-      if (события[к]!.id === трек.id) события[к]!.ключРешения = decisionKey(решение)
+      if (события[к]!.id === трек.id) события[к]!.decisionKey = decisionKey(решение)
     }
   }
 
-  return { состояние: { треки, следующийId: итогТрекера.следующийId }, подписи, события }
+  return { состояние: { tracks: треки, nextId: итогТрекера.следующийId }, подписи, события }
 }

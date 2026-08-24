@@ -17,9 +17,9 @@ import { confidenceFromSim, type Калибровка, type Пороги } from 
  * Ползунок умеет только ужесточать: при пороге 0 поведение ровно то, что задаёт §6.4.
  */
 export function применитьПорог(решение: Решение, порог: number): Решение {
-  if (решение.вид !== 'модель') return решение
-  if (решение.уверенность >= порог) return решение
-  return { вид: 'неизвестно' }
+  if (решение.kind !== 'модель') return решение
+  if (решение.confidence >= порог) return решение
+  return { kind: 'неизвестно' }
 }
 
 /**
@@ -42,7 +42,7 @@ export function скрытоПорогом(
   калибровка: Калибровка,
 ): boolean {
   if (порог <= 0) return false
-  if (решение.вид !== 'неизвестно') return false
+  if (решение.kind !== 'неизвестно') return false
   if (топ1 === null || топ1.sim < пороги.simMin) return false
   return confidenceFromSim(топ1.sim, калибровка) < порог
 }
@@ -72,7 +72,7 @@ export function ключиВидимыхРешений(
   return события.map((событие) => {
     const подпись = подписи.find((кандидат) => кандидат.id === событие.id)
     if (подпись === undefined) return событие
-    const ключ = decisionKey(подпись.решение)
-    return ключ === событие.ключРешения ? событие : { ...событие, ключРешения: ключ }
+    const ключ = decisionKey(подпись.decision)
+    return ключ === событие.decisionKey ? событие : { ...событие, decisionKey: ключ }
   })
 }

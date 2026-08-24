@@ -67,29 +67,29 @@ describe('stepPipeline', () => {
   test('шаг не мутирует входное состояние', () => {
     const исходное = ПУСТОЕ_СОСТОЯНИЕ
     stepPipeline(исходное, вход([бокс(0)], 1000), мост())
-    expect(исходное.треки).toHaveLength(0)
-    expect(исходное.следующийId).toBe(1)
+    expect(исходное.tracks).toHaveLength(0)
+    expect(исходное.nextId).toBe(1)
   })
 
   test('первый кадр рождает трек и сразу его классифицирует', () => {
     const м = мост()
     const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0)], 1000), м)
-    expect(итог.состояние.треки).toHaveLength(1)
-    expect(итог.состояние.треки[0]!.наблюдений).toBe(1)
+    expect(итог.состояние.tracks).toHaveLength(1)
+    expect(итог.состояние.tracks[0]!.observations).toBe(1)
     expect(м.вызовыEmbed).toHaveLength(1)
   })
 
   test('до min_observations подпись — определяю', () => {
     const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0)], 1000), мост())
-    expect(итог.подписи[0]!.решение.вид).toBe('определяю')
+    expect(итог.подписи[0]!.decision.kind).toBe('определяю')
   })
 
   test('решение считается по EMA, а не по мгновенным matches', () => {
     const состояние = прогнать(4, мост())
     const итог = stepPipeline(состояние, вход([бокс(0)], 4 * 200), мост())
-    const решение = итог.подписи[0]!.решение
-    expect(решение.вид).toBe('модель')
-    expect(решение.вид === 'модель' && решение.classIdx).toBe(11)
+    const решение = итог.подписи[0]!.decision
+    expect(решение.kind).toBe('модель')
+    expect(решение.kind === 'модель' && решение.classIdx).toBe(11)
   })
 
   test('троттлинг: два кадра подряд — одна классификация', () => {
@@ -102,7 +102,7 @@ describe('stepPipeline', () => {
   test('два трека в одном кадре классифицируются оба', () => {
     const м = мост()
     const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0), бокс(1000)], 1000), м)
-    expect(итог.состояние.треки).toHaveLength(2)
+    expect(итог.состояние.tracks).toHaveLength(2)
     expect(м.вызовыEmbed[0]).toHaveLength(2)
   })
 
@@ -110,7 +110,7 @@ describe('stepPipeline', () => {
     const м = мост()
     const боксы = [бокс(0), бокс(400), бокс(800), бокс(1200)]
     const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход(боксы, 1000), м)
-    expect(итог.состояние.треки).toHaveLength(4)
+    expect(итог.состояние.tracks).toHaveLength(4)
     expect(м.вызовыEmbed[0]!.length).toBeLessThanOrEqual(2)
   })
 
@@ -118,8 +118,8 @@ describe('stepPipeline', () => {
     const м = мост()
     const первый = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0)], 1000), м)
     const второй = stepPipeline(первый.состояние, вход([бокс(0)], 1010), м)
-    expect(второй.состояние.треки[0]!.ema).toEqual(первый.состояние.треки[0]!.ema)
-    expect(второй.состояние.треки[0]!.наблюдений).toBe(1)
+    expect(второй.состояние.tracks[0]!.ema).toEqual(первый.состояние.tracks[0]!.ema)
+    expect(второй.состояние.tracks[0]!.observations).toBe(1)
   })
 
   test('EMA не течёт между треками', () => {
@@ -136,7 +136,7 @@ describe('stepPipeline', () => {
       },
     })
     const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0), бокс(1000)], 1000), м)
-    expect(итог.состояние.треки[0]!.ema).not.toEqual(итог.состояние.треки[1]!.ema)
+    expect(итог.состояние.tracks[0]!.ema).not.toEqual(итог.состояние.tracks[1]!.ema)
   })
 
   test('трек, вернувшийся внутри LOST_MAX_MS, продолжает свою EMA', () => {
@@ -144,18 +144,18 @@ describe('stepPipeline', () => {
     const первый = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0)], 1000), м)
     const пропуск = stepPipeline(первый.состояние, вход([], 1000 + LOST_MAX_MS), м)
     const возврат = stepPipeline(пропуск.состояние, вход([бокс(0)], 1000 + LOST_MAX_MS + 10), м)
-    expect(возврат.состояние.треки[0]!.id).toBe(первый.состояние.треки[0]!.id)
-    expect(возврат.состояние.треки[0]!.наблюдений).toBeGreaterThan(1)
+    expect(возврат.состояние.tracks[0]!.id).toBe(первый.состояние.tracks[0]!.id)
+    expect(возврат.состояние.tracks[0]!.observations).toBeGreaterThan(1)
   })
 
   test('переродившийся трек начинает с нуля и снова проходит через определяю', () => {
     const м = мост()
     const первый = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0)], 1000), м)
     const смерть = stepPipeline(первый.состояние, вход([], 1000 + LOST_MAX_MS + 1), м)
-    expect(смерть.состояние.треки).toHaveLength(0)
+    expect(смерть.состояние.tracks).toHaveLength(0)
     const заново = stepPipeline(смерть.состояние, вход([бокс(0)], 2000), м)
-    expect(заново.состояние.треки[0]!.id).not.toBe(первый.состояние.треки[0]!.id)
-    expect(заново.подписи[0]!.решение.вид).toBe('определяю')
+    expect(заново.состояние.tracks[0]!.id).not.toBe(первый.состояние.tracks[0]!.id)
+    expect(заново.подписи[0]!.decision.kind).toBe('определяю')
   })
 
   test('битый эмбеддинг не увеличивает наблюдений', () => {
@@ -165,14 +165,14 @@ describe('stepPipeline', () => {
       },
     })
     const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0)], 1000), м)
-    expect(итог.состояние.треки[0]!.наблюдений).toBe(0)
-    expect(итог.состояние.треки[0]!.ema).toBeNull()
+    expect(итог.состояние.tracks[0]!.observations).toBe(0)
+    expect(итог.состояние.tracks[0]!.ema).toBeNull()
   })
 
   test('короткий ответ моста роняет кадр целиком и не трогает ни один трек', () => {
     const начальное = прогнать(3, мост())
-    const наблюденийДо = начальное.треки[0]!.наблюдений
-    const emaДо = начальное.треки[0]!.ema
+    const наблюденийДо = начальное.tracks[0]!.observations
+    const emaДо = начальное.tracks[0]!.ema
     const битый = мост({
       embed(): EmbedMatchResult[] {
         return []
@@ -181,8 +181,8 @@ describe('stepPipeline', () => {
     expect(() => stepPipeline(начальное, вход([бокс(0)], 10_000), битый)).toThrow(
       BridgeContractError,
     )
-    expect(начальное.треки[0]!.наблюдений).toBe(наблюденийДо)
-    expect(начальное.треки[0]!.ema).toBe(emaДо)
+    expect(начальное.tracks[0]!.observations).toBe(наблюденийДо)
+    expect(начальное.tracks[0]!.ema).toBe(emaДо)
   })
 
   test('события классификации несут оба топ-1 и ключ решения', () => {
@@ -191,7 +191,7 @@ describe('stepPipeline', () => {
     expect(итог.события).toHaveLength(1)
     expect(итог.события[0]!.top1Мгновенный).toBe(77)
     expect(итог.события[0]!.top1Ema).toBe(11)
-    expect(итог.события[0]!.ключРешения).toBe('модель:11')
+    expect(итог.события[0]!.decisionKey).toBe('модель:11')
   })
 
   test('кадр без классификации событий не даёт', () => {
@@ -217,7 +217,7 @@ describe('stepPipeline', () => {
       }),
     )
     const второй = stepPipeline(первый.состояние, вход([бокс(0)], 1000 + CLASSIFY_INTERVAL_MS), м)
-    const вектор = второй.состояние.треки[0]!.ema!
+    const вектор = второй.состояние.tracks[0]!.ema!
     expect(вектор[0]).toBeGreaterThan(0)
     expect(вектор[1]).toBeGreaterThan(0)
     expect(вектор[1]).toBeLessThan(1)
@@ -235,11 +235,11 @@ describe('stepPipeline', () => {
       ],
     })
     const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0)], 1000), м)
-    const топы = итог.состояние.треки[0]!.топы
+    const топы = итог.состояние.tracks[0]!.tops
     expect(MAX_HYPOTHESES).toBe(3)
     expect(топы).toHaveLength(MAX_HYPOTHESES)
     expect(топы.map((матч) => матч.classIdx)).toEqual([1, 2, 3])
-    expect(итог.подписи[0]!.топы).toEqual(топы)
+    expect(итог.подписи[0]!.tops).toEqual(топы)
   })
 
   test('решение считают две первые гипотезы: третья на него не влияет', () => {
@@ -254,17 +254,106 @@ describe('stepPipeline', () => {
     })
     const состояние = прогнать(4, м)
     const итог = stepPipeline(состояние, вход([бокс(0)], 800), м)
-    const решение = итог.подписи[0]!.решение
-    expect(решение.вид).toBe('модель')
-    expect(решение.вид === 'модель' && решение.classIdx).toBe(11)
-    expect(итог.подписи[0]!.топы).toHaveLength(3)
+    const решение = итог.подписи[0]!.decision
+    expect(решение.kind).toBe('модель')
+    expect(решение.kind === 'модель' && решение.classIdx).toBe(11)
+    expect(итог.подписи[0]!.tops).toHaveLength(3)
   })
 
   test('одна гипотеза от моста — один элемент в топах, решение без топ-2', () => {
     const м = мост({ matchEma: (): Match[] => [{ classIdx: 7, sim: 0.95 }] })
     const состояние = прогнать(4, м)
     const итог = stepPipeline(состояние, вход([бокс(0)], 800), м)
-    expect(итог.состояние.треки[0]!.топы).toHaveLength(1)
-    expect(итог.подписи[0]!.решение.вид).toBe('модель')
+    expect(итог.состояние.tracks[0]!.tops).toHaveLength(1)
+    expect(итог.подписи[0]!.decision.kind).toBe('модель')
+  })
+})
+
+/**
+ * Стража против дефекта, стоившего приёмки M-1.6 на устройстве: `SharedValue` из
+ * `react-native-worklets-core` 1.5.0 не переносит ключи объекта с не-ASCII символами —
+ * ни из JS в воркет, ни обратно. Проверено на SM-S918B: воркет записал
+ * `{ проба: 1, probe: 1 }`, на следующем кадре прочитал `проба=undefined`,
+ * `probe=number`. Состояние конвейера живёт именно в `SharedValue`, поэтому его поля
+ * обязаны быть ASCII — иначе каждый кадр начинается с пустого состояния, а
+ * `stepPipeline` падает на первом же чтении.
+ *
+ * Тест моделирует границу дословно: между кадрами состояние проходит через фильтр,
+ * выбрасывающий не-ASCII ключи. Конвейер обязан этого не заметить.
+ */
+const толькоASCIIКлючи = (значение: unknown): unknown => {
+  if (Array.isArray(значение)) return значение.map(толькоASCIIКлючи)
+  if (значение === null || typeof значение !== 'object') return значение
+  if (ArrayBuffer.isView(значение)) return значение
+  const итог: Record<string, unknown> = {}
+  for (const [ключ, поле] of Object.entries(значение as Record<string, unknown>)) {
+    let ascii = true
+    for (let позиция = 0; позиция < ключ.length; позиция++) {
+      const код = ключ.charCodeAt(позиция)
+      if (код < 0x20 || код > 0x7e) ascii = false
+    }
+    if (ascii) итог[ключ] = толькоASCIIКлючи(поле)
+  }
+  return итог
+}
+
+describe('состояние переживает SharedValue', () => {
+  test('методика: фильтр действительно выбрасывает кириллический ключ', () => {
+    expect(толькоASCIIКлючи({ ключ: 1, key: 2 })).toEqual({ key: 2 })
+  })
+
+  test('трек живёт через границу: конвейер не падает и продолжает тот же трек', () => {
+    const м = мост()
+    let состояние = ПУСТОЕ_СОСТОЯНИЕ
+    for (let кадр = 0; кадр < 4; кадр++) {
+      const шаг = stepPipeline(состояние, вход([бокс(100)], кадр * 200), м)
+      состояние = толькоASCIIКлючи(шаг.состояние) as СостояниеКонвейера
+    }
+    const треки = Object.values(состояние)[0] as unknown[]
+    expect(Array.isArray(треки)).toBe(true)
+    expect(треки).toHaveLength(1)
+  })
+
+  test('наблюдения копятся, а не обнуляются каждым кадром', () => {
+    const м = мост()
+    let состояние = ПУСТОЕ_СОСТОЯНИЕ
+    let последний = stepPipeline(состояние, вход([бокс(100)], 0), м)
+    for (let кадр = 1; кадр < 5; кадр++) {
+      состояние = толькоASCIIКлючи(последний.состояние) as СостояниеКонвейера
+      последний = stepPipeline(состояние, вход([бокс(100)], кадр * 200), м)
+    }
+    // Пять кадров с шагом 200 мс — пять классификаций: троттлинг §6.2 пропускает все.
+    expect(последний.подписи[0]!.decision.kind).not.toBe('определяю')
+  })
+})
+
+/**
+ * Та же граница, что и у состояния, но в другую сторону: подписи и события уезжают на
+ * JS-сторону через `Worklets.createRunOnJS`, и там теряются ровно те же не-ASCII ключи.
+ * Проверено на SM-S918B: объект `{ проба: 1, probe: 1, вложенный: { поле: 1 } }` приехал
+ * как `проба=undefined`, `probe=number`, `вложенный=undefined` — поддерево под
+ * кириллическим ключом пропало целиком. Строковые значения при этом целы: `'определяю'`
+ * доезжает девятью символами, поэтому кириллица в значениях `вид` остаётся.
+ */
+describe('подписи и события переживают runOnJS', () => {
+  const прогнатьОдин = () => stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(100)], 0), мост())
+
+  test('у подписи переживают рамка, решение и гипотезы', () => {
+    const итог = прогнатьОдин()
+    const подпись = (толькоASCIIКлючи(итог.подписи) as typeof итог.подписи)[0]!
+    expect(подпись.id).toBe(1)
+    expect(Object.keys(подпись).sort()).toEqual(Object.keys(итог.подписи[0]!).sort())
+  })
+
+  test('у решения переживает вид', () => {
+    const итог = прогнатьОдин()
+    const подпись = (толькоASCIIКлючи(итог.подписи) as typeof итог.подписи)[0]!
+    expect(Object.keys(подпись.decision)).toContain('kind')
+  })
+
+  test('у события переживает ключ решения', () => {
+    const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(100)], 0), мост())
+    const событие = (толькоASCIIКлючи(итог.события) as typeof итог.события)[0]!
+    expect(Object.keys(событие)).toContain('decisionKey')
   })
 })
