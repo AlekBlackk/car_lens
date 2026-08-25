@@ -9,7 +9,7 @@ import {
   type МостКонвейера,
   type СостояниеКонвейера,
 } from './pipeline'
-import { CLASSIFY_INTERVAL_MS } from './throttle'
+import { CLASSIFY_INTERVAL_MS, MAX_CROPS } from './throttle'
 import { LOST_MAX_MS } from './tracker'
 
 const бокс = (x: number, conf = 0.9, сторона = 300): Box => ({ x, y: 0, w: сторона, h: сторона, conf })
@@ -99,11 +99,21 @@ describe('stepPipeline', () => {
     expect(м.вызовыEmbed).toHaveLength(1)
   })
 
-  test('два трека в одном кадре классифицируются оба', () => {
+  test('два трека в одном кадре классифицируются по очереди, а не оба разом', () => {
+    // `MAX_CROPS = 1`: за кадр считается один кроп, поэтому второй трек ждёт следующего
+    // кадра. Проверяется именно очередь, а не «второй не считается вовсе» — потерять
+    // вторую машину эта правка не должна.
     const м = мост()
-    const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0), бокс(1000)], 1000), м)
-    expect(итог.состояние.tracks).toHaveLength(2)
-    expect(м.вызовыEmbed[0]).toHaveLength(2)
+    const первый = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0), бокс(1000)], 1000), м)
+    expect(первый.состояние.tracks).toHaveLength(2)
+    expect(м.вызовыEmbed[0]).toHaveLength(1)
+
+    const второй = stepPipeline(первый.состояние, вход([бокс(0), бокс(1000)], 1010), м)
+    expect(м.вызовыEmbed[1]).toHaveLength(1)
+    // Первым кадром посчитан один трек, вторым — другой: у обоих есть наблюдение.
+    for (const трек of второй.состояние.tracks) {
+      expect(трек.observations).toBe(1)
+    }
   })
 
   test('за кадр не больше MAX_CROPS кропов при четырёх треках', () => {
@@ -111,7 +121,7 @@ describe('stepPipeline', () => {
     const боксы = [бокс(0), бокс(400), бокс(800), бокс(1200)]
     const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход(боксы, 1000), м)
     expect(итог.состояние.tracks).toHaveLength(4)
-    expect(м.вызовыEmbed[0]!.length).toBeLessThanOrEqual(2)
+    expect(м.вызовыEmbed[0]!.length).toBeLessThanOrEqual(MAX_CROPS)
   })
 
   test('EMA переживает кадр без классификации', () => {

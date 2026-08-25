@@ -86,7 +86,27 @@ object Rotation {
      * (тот же принцип, что у `цвет` в `FrameConvert`).
      */
     fun toSensorInto(xUpright: Float, yUpright: Float, upright: UprightSize, degrees: Int, out: FloatArray) {
-        val угол = нормализовать(degrees)
+        toSensorIntoNormalized(xUpright, yUpright, upright, нормализовать(degrees), out)
+    }
+
+    /** Нормализовать угол один раз на кадр: `нормализовать` — два целочисленных деления. */
+    fun нормализованный(degrees: Int): Int = нормализовать(degrees)
+
+    /**
+     * Те же формулы, но угол приходит уже нормализованным — точка входа горячего цикла
+     * `FrameConvert`.
+     *
+     * Нормализация — константа кадра, а звалась она на каждый пиксель: на letterbox
+     * 416x416 это 346 тысяч лишних пар целочисленных делений за один вызов. Вызывающий
+     * нормализует угол сам, ровно один раз, через `нормализованный`.
+     */
+    fun toSensorIntoNormalized(
+        xUpright: Float,
+        yUpright: Float,
+        upright: UprightSize,
+        угол: Int,
+        out: FloatArray,
+    ) {
         out[0] = when (угол) {
             0 -> xUpright
             90 -> yUpright

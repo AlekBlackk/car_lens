@@ -4,6 +4,7 @@ import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.FloatBuffer
 
 enum class DelegateMode { GPU, CPU }
 
@@ -93,6 +94,17 @@ internal class Detector(
     private val пиксели: FloatArray
     private val входнойБуфер: ByteBuffer
     private val выходнойБуфер: ByteBuffer
+
+    /*
+     * Окна `FloatBuffer` над теми же прямыми буферами — ради пакетного обмена с
+     * `FloatArray`. Поэлементные `putFloat`/`getFloat` стоили полумиллиона вызовов с
+     * проверкой границ на каждый кадр (519 168 на входе 416x416x3, 298 116 на выходе);
+     * `put(FloatArray)`/`get(FloatArray)` на прямом буфере в порядке байтов платформы —
+     * один `memcpy`. Окна заводятся один раз: `asFloatBuffer()` на каждом кадре был бы
+     * аллокацией в горячем пути.
+     */
+    private val входныеЧисла: FloatBuffer
+    private val выходныеЧисла: FloatBuffer
     private val сырыеВыходы: FloatArray
     private val единицы: Float
 
@@ -157,6 +169,8 @@ internal class Detector(
         выходнойБуфер = ByteBuffer
             .allocateDirect(интерпретатор.getOutputTensor(0).numBytes())
             .order(ByteOrder.nativeOrder())
+        входныеЧисла = входнойБуфер.asFloatBuffer()
+        выходныеЧисла = выходнойБуфер.asFloatBuffer()
         сырыеВыходы = FloatArray(каналов * якорей)
     }
 
@@ -170,13 +184,13 @@ internal class Detector(
         val отображение = FrameConvert.letterbox(
             frame, спек, contract.letterboxPadValue, пиксели,
         )
-        входнойБуфер.rewind()
-        for (значение in пиксели) входнойБуфер.putFloat(значение)
+        входныеЧисла.clear()
+        входныеЧисла.put(пиксели, 0, спек.floatCount)
         входнойБуфер.rewind()
         выходнойБуфер.rewind()
         интерпретатор.run(входнойБуфер, выходнойБуфер)
-        выходнойБуфер.rewind()
-        for (индекс in сырыеВыходы.indices) сырыеВыходы[индекс] = выходнойБуфер.getFloat()
+        выходныеЧисла.clear()
+        выходныеЧисла.get(сырыеВыходы, 0, сырыеВыходы.size)
         return DetectorDecode.boxes(сырыеВыходы, contract, каналов, якорей, единицы, отображение)
     }
 

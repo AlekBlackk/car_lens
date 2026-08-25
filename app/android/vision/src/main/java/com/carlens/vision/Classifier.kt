@@ -4,6 +4,7 @@ import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.FloatBuffer
 import kotlin.math.roundToInt
 
 /**
@@ -41,6 +42,18 @@ internal class Classifier(
     private val входнойБуфер: ByteBuffer
     private val выходнойБуфер: ByteBuffer
 
+    /*
+     * Пакетный обмен с прямыми буферами, та же причина, что у `Detector`: поэлементные
+     * `putFloat`/`getFloat`/`put`/`get` — вызов с проверкой границ на каждое из 307 200
+     * значений входа 320x320x3, тогда как `put(FloatArray)`/`put(ByteArray)` на буфере в
+     * порядке байтов платформы сводятся к `memcpy`. Окна и промежуточный `ByteArray`
+     * заводятся один раз: аллокация в горячем пути видна рывками, а не замедлением.
+     */
+    private val входныеЧисла: FloatBuffer
+    private val выходныеЧисла: FloatBuffer
+    private val входныеБайты: ByteArray
+    private val выходныеБайты: ByteArray
+
     init {
         val формаВхода = вход.shape()
         require(формаВхода.size == 4 && формаВхода[0] == 1) {
@@ -71,6 +84,10 @@ internal class Classifier(
         пиксели = FloatArray(tensorSpec.floatCount)
         входнойБуфер = ByteBuffer.allocateDirect(вход.numBytes()).order(ByteOrder.nativeOrder())
         выходнойБуфер = ByteBuffer.allocateDirect(выход.numBytes()).order(ByteOrder.nativeOrder())
+        входныеЧисла = входнойБуфер.asFloatBuffer()
+        выходныеЧисла = выходнойБуфер.asFloatBuffer()
+        входныеБайты = ByteArray(вход.numBytes())
+        выходныеБайты = ByteArray(выход.numBytes())
     }
 
     /** Эмбеддинг кропа, нормализованный L2. Массив свежий: он уходит наружу. */
@@ -88,7 +105,10 @@ internal class Classifier(
     private fun записатьВход() {
         входнойБуфер.rewind()
         when (вход.dataType()) {
-            DataType.FLOAT32 -> for (значение in пиксели) входнойБуфер.putFloat(значение)
+            DataType.FLOAT32 -> {
+                входныеЧисла.clear()
+                входныеЧисла.put(пиксели, 0, tensorSpec.floatCount)
+            }
             DataType.UINT8 -> квантовать(диапазон = 0..255)
             DataType.INT8 -> квантовать(диапазон = -128..127)
             else -> throw IllegalStateException(
@@ -103,24 +123,29 @@ internal class Classifier(
         check(параметры.scale > 0f) {
             "scale входа ${параметры.scale}: квантованная граница без масштаба"
         }
-        for (значение in пиксели) {
-            val квант = (значение / параметры.scale).roundToInt() + параметры.zeroPoint
-            входнойБуфер.put(квант.coerceIn(диапазон.first, диапазон.last).toByte())
+        // Квантование остаётся поэлементным — оно и есть работа; пакетным делается только
+        // перенос в прямой буфер, где поэлементный `put` был чистыми накладными расходами.
+        for (индекс in пиксели.indices) {
+            val квант = (пиксели[индекс] / параметры.scale).roundToInt() + параметры.zeroPoint
+            входныеБайты[индекс] = квант.coerceIn(диапазон.first, диапазон.last).toByte()
         }
+        входнойБуфер.put(входныеБайты, 0, пиксели.size)
     }
 
     private fun прочитатьВыход(): FloatArray {
         выходнойБуфер.rewind()
         val результат = FloatArray(embeddingDim)
         when (выход.dataType()) {
-            DataType.FLOAT32 -> for (индекс in результат.indices) {
-                результат[индекс] = выходнойБуфер.getFloat()
+            DataType.FLOAT32 -> {
+                выходныеЧисла.clear()
+                выходныеЧисла.get(результат, 0, embeddingDim)
             }
             DataType.UINT8, DataType.INT8 -> {
                 val параметры = выход.quantizationParams()
                 val знаковый = выход.dataType() == DataType.INT8
+                выходнойБуфер.get(выходныеБайты, 0, embeddingDim)
                 for (индекс in результат.indices) {
-                    val байт = выходнойБуфер.get().toInt()
+                    val байт = выходныеБайты[индекс].toInt()
                     val квант = if (знаковый) байт else байт and 0xFF
                     результат[индекс] = (квант - параметры.zeroPoint) * параметры.scale
                 }
@@ -135,6 +160,22 @@ internal class Classifier(
     override fun close() = поднятый.close()
 
     private companion object {
-        const val ЧИСЛО_ПОТОКОВ = 2
+        /**
+         * Столько же, сколько у детектора, а не вдвое меньше.
+         *
+         * Двойка стояла здесь с M-1.5 без обоснования в коде, а стадия стоит 47 мс при
+         * бюджете §5.4 в 10 (`bench/latency.md`) и делит устройство с детектором, который
+         * считается на GPU, то есть больших ядер не занимает. Ускорение ожидается от
+         * распараллеливания графа, а не от смены математики: TFLite делит между потоками
+         * выход операции, и порядок накопления внутри одного выходного элемента от числа
+         * потоков не зависит.
+         *
+         * «Ожидается» — потому что порог приёмки тут жёсткий, а рассуждение прогоном не
+         * является: паритет уровня A требует косинуса ≥0.9999 с питоновским эталоном, и
+         * ровно на нём сорвался GPU-делегат (см. `bench/latency.md`). Правку обязан
+         * подтвердить `:vision:connectedReleaseAndroidTest` — `ParityTest` вместе с
+         * `LatencyTest`, иначе её надо откатить, а не «оставить, вроде работает».
+         */
+        const val ЧИСЛО_ПОТОКОВ = 4
     }
 }

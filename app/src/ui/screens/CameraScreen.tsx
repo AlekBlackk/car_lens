@@ -57,6 +57,38 @@ const MAX_DET = 4
  */
 const TIME_SCALE_MS = 1e-6
 
+/**
+ * Минимальный промежуток между двумя прогонами конвейера, миллисекунды кадровых часов.
+ *
+ * Без него конвейер молотит кадры спина к спине: `detect` занимает 38 мс, классификация —
+ * ещё 47 мс на кроп (`bench/latency.md`), и поток анализа вместе с GPU оказывается занят
+ * на все 100%. Видно это не как «медленно», а как рывки: телефон греется и троттлится
+ * (в том же замере детектор на CPU стоит 104 мс на холодном корпусе против 300 мс на
+ * горячем), а UI-поток голодает и перестаёт успевать за касаниями. Фиксированная
+ * каденция оставляет паузы, в которые устройство успевает и остыть, и отрисовать.
+ *
+ * 10 Гц, а не больше: классификация по §6.2 всё равно не чаще 8 Гц на трек, и на такой
+ * каденции трек становится годным к переклассификации через кадр — ровно те же ~5 Гц,
+ * что получались и раньше при 11 кадрах/с конвейера. То есть частота узнавания не
+ * падает, а перестаёт зависеть от температуры корпуса.
+ *
+ * Штатный `runAtTargetFps` из VisionCamera для этого не годится и потому не используется:
+ * он хранит время последнего вызова в `global.__frameProcessorRunAtTargetFpsMap`, то есть
+ * лезет за свойством объекта глобали изнутри воркета. `react-native-worklets-core` 1.5.0
+ * заводит на каждое такое обращение глобальную JNI-ссылку и не освобождает её — таблица
+ * (max=51200) переполняется примерно за секунду, процесс падает с
+ * `JNI ERROR (app bug): global reference table overflow`. Бисекция этой течи описана в
+ * `latency.ts`. `SharedValue` границу переживает и глобаль не трогает.
+ *
+ * Часы — `frame.timestamp`, те же, что у троттлинга классификации и смерти трека
+ * (см. `TIME_SCALE_MS` и `throttle.ts`), а не `performance.now()`, как у VisionCamera:
+ * две линейки на один конвейер — это способ получить бессмертные треки при первом же
+ * расхождении.
+ *
+ * Имя латиницей: константу захватывает воркет (см. `workletClosure.test.ts`).
+ */
+const PIPELINE_INTERVAL_MS = 100
+
 /** Отступ подписей от края экрана. */
 const ОТСТУП_ПОДПИСЕЙ = 32
 
@@ -198,6 +230,9 @@ export default function CameraScreen(свойства: СвойстваКаме�
   // Самопроверка контракта слотов гоняется один раз за запуск: она делает два лишних
   // вызова моста, и в горячем пути ей делать нечего.
   const slotContractChecked = useSharedValue(false)
+  // Время последнего прогона конвейера в кадровых часах. `SharedValue`, а не глобаль
+  // воркет-рантайма: см. `PIPELINE_INTERVAL_MS`.
+  const lastPipelineMs = useSharedValue(0)
   // Угол, в котором показывает превью. При выключенном автоповороте он остаётся
   // портретным, пока телефон крутят, а при включённом — следует за экраном. Боксы
   // рисуются поверх превью, поэтому наружу они обязаны выходить именно в этой системе.
@@ -312,6 +347,18 @@ export default function CameraScreen(свойства: СвойстваКаме�
     (frame) => {
       'worklet'
       try {
+        // Часы конвейера — timestamp кадра, а не стенные часы: троттлинг и смерть трека
+        // обязаны мерить одной монотонной линейкой (см. `TIME_SCALE_MS` и `throttle.ts`).
+        const nowMs = frame.timestamp * TIME_SCALE_MS
+
+        // Кадры сверх каденции конвейера отбрасываются до единого вызова моста — вся
+        // цена кадра живёт за этой строкой. Отрицательная разность означает, что часы
+        // кадров начались заново (пересоздание сессии камеры), и кадр пропускать нельзя:
+        // иначе конвейер замер бы до тех пор, пока новые часы не догонят старые.
+        const сИсхода = nowMs - lastPipelineMs.value
+        if (сИсхода >= 0 && сИсхода < PIPELINE_INTERVAL_MS) return
+        lastPipelineMs.value = nowMs
+
         // Замер цены моста (Task 10 M-1.6): `t_до`/`t_после` вокруг каждого из трёх
         // вызовов границы native↔JS через `bridgeClock()` — `performance.now()` из
         // `react-native-worklets-core` (декоратор кладёт его в рантайм воркета сам,
@@ -327,10 +374,6 @@ export default function CameraScreen(свойства: СвойстваКаме�
         const tДетектДо = bridgeClock()
         const результат = detect(frame, MAX_DET, deviceDegrees.value, previewDegrees.value)
         markBridgeCost('detect', tДетектДо, bridgeClock(), результат.nativeMs)
-
-        // Часы конвейера — timestamp кадра, а не стенные часы: троттлинг и смерть трека
-        // обязаны мерить одной монотонной линейкой (см. `TIME_SCALE_MS` и `throttle.ts`).
-        const nowMs = frame.timestamp * TIME_SCALE_MS
 
         // Мост конвейера собирается здесь, потому что только здесь есть `frame`: сам
         // `stepPipeline` о `Frame` не знает ничего и потому гоняется в Node на фейке.
@@ -388,7 +431,7 @@ export default function CameraScreen(свойства: СвойстваКаме�
         return
       }
     },
-    [publishOverlay, markBridgeCost, pipelineStateJson, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract],
+    [publishOverlay, markBridgeCost, pipelineStateJson, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract, lastPipelineMs],
   )
 
   // Пользовательская вертикаль при горизонтальном хвате идёт вдоль ширины экрана, при
