@@ -17,19 +17,19 @@ brands:
       rav4: {display: Toyota RAV4}
       avensis: {display: Toyota Avensis}
       auris: {display: Toyota Auris}
-      aygo: {display: Toyota Aygo, platform_group: kei_trio}
+      aygo: {display: Toyota Aygo}
   Peugeot:
     models:
       "208": {display: Peugeot 208}
       "308": {display: Peugeot 308}
       "3008": {display: Peugeot 3008}
-      "108": {display: Peugeot 108, platform_group: kei_trio}
+      "108": {display: Peugeot 108}
   Citroen:
     models:
       c3: {display: Citroën C3}
       c4: {display: Citroën C4}
       berlingo: {display: Citroën Berlingo}
-      c1: {display: Citroën C1, platform_group: kei_trio}
+      c1: {display: Citroën C1}
   Skoda:
     models:
       octavia: {display: Škoda Octavia}
@@ -192,3 +192,10 @@ brands:
     models:
       atto_3: {display: BYD Atto 3}
       seal: {display: BYD Seal}
+# Платформенные группы (§13.2): несколько model_id, различающихся только шильдиком, —
+# один класс обучения и один слот в catalog_index.bin. Различить такие машины по кропу
+# кузова нельзя, и требовать этого от сети бессмысленно.
+groups:
+  grp__kei_trio:
+    members: [toyota__aygo, peugeot__108, citroen__c1]
+    display: "Toyota Aygo / Peugeot 108 / Citroën C1"
