@@ -68,7 +68,6 @@ def test_собирает_model_id_из_марки_и_ключа(tmp_path: Path)
     модель = каталог.by_id("volkswagen__golf")
     assert модель.brand == "Volkswagen"
     assert модель.display == "Volkswagen Golf"
-    assert модель.platform_group is None
 
 
 def test_марки_отсортированы_и_уникальны(tmp_path: Path) -> None:
@@ -80,13 +79,6 @@ def test_models_of_возвращает_только_свою_марку(tmp_pat
     каталог = load_catalog(_записать(tmp_path, ВАЛИДНЫЙ_YAML))
     ids = [м.model_id for м in каталог.models_of("Volkswagen")]
     assert ids == ["volkswagen__golf", "volkswagen__passat"]
-
-
-def test_участник_помечен_идентификатором_своей_группы(tmp_path: Path) -> None:
-    """`platform_group` производно от секции `groups:`, а не читается с модели."""
-    каталог = load_catalog(_записать(tmp_path, ВАЛИДНЫЙ_YAML))
-    assert каталог.by_id("toyota__aygo").platform_group == "grp__kei_duo"
-    assert каталог.by_id("peugeot__108").platform_group == "grp__kei_duo"
 
 
 def test_by_id_на_неизвестном_идентификаторе_падает(tmp_path: Path) -> None:

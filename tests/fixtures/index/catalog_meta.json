@@ -6,16 +6,21 @@
   "centroids_per_class": 4,
   "classes": [
     {
-      "model_id": "acme__one",
+      "class_id": "acme__one",
+      "members": [
+        "acme__one"
+      ],
       "brand": "Acme",
-      "display": "Acme One",
-      "platform_group": null
+      "display": "Acme One"
     },
     {
-      "model_id": "acme__two",
-      "brand": "Acme",
-      "display": "Acme Two",
-      "platform_group": "p2"
+      "class_id": "grp__twins",
+      "members": [
+        "acme__two",
+        "beta__two"
+      ],
+      "brand": null,
+      "display": "Acme Two / Beta Two"
     }
   ]
 }

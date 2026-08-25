@@ -231,7 +231,12 @@ def main() -> None:
     каталог_вывода = аргументы.out or аргументы.checkpoint.parent / "index"
     каталог_вывода.mkdir(parents=True, exist_ok=True)
     по_индексу = {значение: ключ_ for ключ_, значение in индекс.items()}
-    модели = tuple(каталог.by_id(по_индексу[i]) for i in range(len(индекс)))
+    # Мета описывает классы, а не модели (§13.2): состав платформенной группы
+    # лежит в `members[]`, и одиночная модель — тот же тип с одним участником.
+    # Ключи `индекс` — `class_id`: это уже сверено `check_class_index` выше,
+    # поэтому поиск по `classes` не может не найтись.
+    класс_по_id = {к.class_id: к for к in каталог.classes}
+    классы = tuple(класс_по_id[по_индексу[i]] for i in range(len(индекс)))
     # Развёрнуто в if/else, а не условным выражением: `путь_модели` объявлен как
     # `Path | None`, и внутри выражения его непустоту нечем сузить — mypy в strict
     # ругался бы на `arg-type`. Ветвление то же, что и у сбора эмбеддингов выше.
@@ -241,7 +246,7 @@ def main() -> None:
         assert путь_модели is not None
         хеш_весов = sha256_of_file(путь_модели)
     мета = meta_json(
-        модели,
+        классы,
         embedding_dim=центроиды.shape[2],
         centroids_per_class=CENTROIDS_PER_CLASS,
         model_weights_sha256=хеш_весов,

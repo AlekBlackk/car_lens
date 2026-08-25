@@ -33,7 +33,7 @@ def evaluate(
     head: ArcFaceHead,
     loader: DataLoader[tuple[Tensor, int]],
     *,
-    idx_to_model_id: Mapping[int, str],
+    idx_to_class_id: Mapping[int, str],
     device: torch.device,
 ) -> Metrics:
     """Метрики закрытого множества. Модель и голова переводятся в `eval`.
@@ -65,4 +65,4 @@ def evaluate(
     finally:
         model.train(режим_модели)
         head.train(режим_головы)
-    return aggregate(предсказания, цели, idx_to_model_id=idx_to_model_id)
+    return aggregate(предсказания, цели, idx_to_class_id=idx_to_class_id)

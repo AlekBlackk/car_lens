@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from pipeline.catalog import CarModel
+from pipeline.catalog import CarClass
 from pipeline.index_format import (
     DTYPE_FLOAT32,
     HEADER_SIZE,
@@ -23,9 +23,14 @@ from pipeline.index_format import (
 
 МЕТА = b'{"format_version": 1}'
 
-МОДЕЛИ = (
-    CarModel(model_id="audi__a5", brand="Audi", display="Audi A5", platform_group=None),
-    CarModel(model_id="bmw__x5", brand="BMW", display="BMW X5", platform_group="g05"),
+КЛАССЫ = (
+    CarClass(class_id="audi__a5", members=("audi__a5",), brand="Audi", display="Audi A5"),
+    CarClass(
+        class_id="grp__coolray",
+        members=("belgee__x50", "geely__coolray"),
+        brand=None,
+        display="Geely Coolray / Belgee X50",
+    ),
 )
 
 
@@ -155,7 +160,7 @@ def test_форма_центроидов_проверяется(tmp_path: Path) 
 
 def test_мета_содержит_поля_спеки() -> None:
     байты = meta_json(
-        МОДЕЛИ,
+        КЛАССЫ,
         embedding_dim=256,
         centroids_per_class=4,
         model_weights_sha256="ab" * 32,
@@ -168,15 +173,44 @@ def test_мета_содержит_поля_спеки() -> None:
     assert мета["model_weights_sha256"] == "ab" * 32
     assert мета["generated_at"] == "2026-08-17T09:00:00Z"
     assert мета["classes"] == [
-        {"model_id": "audi__a5", "brand": "Audi", "display": "Audi A5", "platform_group": None},
-        {"model_id": "bmw__x5", "brand": "BMW", "display": "BMW X5", "platform_group": "g05"},
+        {
+            "class_id": "audi__a5",
+            "members": ["audi__a5"],
+            "brand": "Audi",
+            "display": "Audi A5",
+        },
+        {
+            "class_id": "grp__coolray",
+            "members": ["belgee__x50", "geely__coolray"],
+            "brand": None,
+            "display": "Geely Coolray / Belgee X50",
+        },
     ]
+
+
+def test_мета_не_знает_ни_model_id_ни_platform_group() -> None:
+    """Единица индексации — класс: `model_id` класса нет, состав живёт в `members`.
+
+    Поле `platform_group` описывало группу с точки зрения модели и
+    исчезло вместе с этой точкой зрения (§13.2).
+    """
+    мета = json.loads(
+        meta_json(
+            КЛАССЫ,
+            embedding_dim=256,
+            centroids_per_class=4,
+            model_weights_sha256="ab" * 32,
+            generated_at="2026-08-17T09:00:00Z",
+        )
+    )
+    assert all("model_id" not in запись for запись in мета["classes"])
+    assert all("platform_group" not in запись for запись in мета["classes"])
 
 
 def test_позиция_в_classes_есть_индекс_класса() -> None:
     """Поля idx нет намеренно (§13.2): порядок и есть нумерация."""
     байты = meta_json(
-        МОДЕЛИ,
+        КЛАССЫ,
         embedding_dim=256,
         centroids_per_class=4,
         model_weights_sha256="ab" * 32,
@@ -191,7 +225,7 @@ def test_мета_детерминирована() -> None:
 
     def собрать() -> bytes:
         return meta_json(
-            МОДЕЛИ,
+            КЛАССЫ,
             embedding_dim=256,
             centroids_per_class=4,
             model_weights_sha256="ab" * 32,

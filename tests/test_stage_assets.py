@@ -28,7 +28,12 @@ from scripts.stage_assets import ИМЕНА, ManifestError, build_manifest, stag
     "model_weights_sha256": ЧЕКПОИНТ_SHA,
     "embedding_dim": 256,
     "classes": [
-        {"model_id": "audi__a5", "brand": "Audi", "display": "Audi A5", "platform_group": None}
+        {
+            "class_id": "audi__a5",
+            "members": ["audi__a5"],
+            "brand": "Audi",
+            "display": "Audi A5",
+        }
     ],
 }
 КОНТРАКТ: dict[str, Any] = {

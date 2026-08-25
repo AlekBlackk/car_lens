@@ -42,7 +42,7 @@ def main() -> None:
 
     чекпоинт = torch.load(аргументы.checkpoint, map_location="cpu", weights_only=True)
     индекс: dict[str, int] = чекпоинт["class_index"]
-    обратный = {значение: ключ for ключ, значение in индекс.items()}
+    класс_по_индексу = {значение: ключ for ключ, значение in индекс.items()}
     конфиг = чекпоинт["config"]
     модель, _ = create_model(
         конфиг["backbone"],
@@ -77,7 +77,7 @@ def main() -> None:
         метрики = aggregate(
             top5_by_centroids(эмбеддинги, центроиды),
             [int(метка) for метка in метки],
-            idx_to_model_id=обратный,
+            idx_to_class_id=класс_по_индексу,
         )
         итоги[имя] = asdict(метрики)
         print(

@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,12 +37,16 @@ class CatalogError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class CarModel:
-    """Одна модель автомобиля."""
+    """Одна модель автомобиля.
+
+    Своей группы модель не знает: состав объявлен секцией `groups:` и
+    читается отображением `member_index`. Поле на модели дублировало бы
+    состав вторым местом хранения и рассинхронизировалось бы с ним.
+    """
 
     model_id: str
     brand: str
     display: str
-    platform_group: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,8 +128,7 @@ def load_catalog(path: Path) -> Catalog:
 
     модели = tuple(sorted(_разобрать_марки(path, марки), key=lambda m: m.model_id))
     _проверить_уникальность(path, модели)
-    классы = _собрать_классы(path, модели, сырые_группы)
-    return Catalog(models=_проставить_группы(модели, классы), classes=классы)
+    return Catalog(models=модели, classes=_собрать_классы(path, модели, сырые_группы))
 
 
 def _разобрать_марки(path: Path, марки: dict[str, Any]) -> list[CarModel]:
@@ -165,7 +168,7 @@ def _разобрать_модель(
             "состав групп объявляется секцией groups: (§13.2)"
         )
 
-    return CarModel(model_id=model_id, brand=str(марка), display=display, platform_group=None)
+    return CarModel(model_id=model_id, brand=str(марка), display=display)
 
 
 def _проверить_уникальность(path: Path, модели: tuple[CarModel, ...]) -> None:
@@ -239,24 +242,6 @@ def _проверить_участников(path: Path, группы: list[CarC
     повторы = sorted(model_id for model_id, n in счёт.items() if n > 1)
     if повторы:
         raise CatalogError(f"{path}: участник указан в группах повторно: {', '.join(повторы)}")
-
-
-def _проставить_группы(
-    модели: tuple[CarModel, ...], классы: tuple[CarClass, ...]
-) -> tuple[CarModel, ...]:
-    """Проставить моделям `platform_group` по составу классов.
-
-    Поле производно от секции `groups:` и с модели не читается: состав,
-    записанный в двух местах, рассинхронизируется. У класса из одного
-    участника группы нет — это сама модель.
-    """
-    группа = {
-        model_id: класс.class_id
-        for класс in классы
-        if len(класс.members) > 1
-        for model_id in класс.members
-    }
-    return tuple(replace(m, platform_group=группа.get(m.model_id)) for m in модели)
 
 
 def class_index(catalog: Catalog) -> dict[str, int]:

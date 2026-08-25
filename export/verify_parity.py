@@ -207,7 +207,7 @@ def main() -> None:
         аргументы.checkpoint, map_location="cpu", weights_only=True
     )
     индекс: dict[str, int] = чекпоинт["class_index"]
-    обратный = {значение: ключ for ключ, значение in индекс.items()}
+    класс_по_индексу = {значение: ключ for ключ, значение in индекс.items()}
     конфиг = чекпоинт["config"]
     модель, _ = create_model(
         конфиг["backbone"],
@@ -279,7 +279,7 @@ def main() -> None:
             топ5 = top5_by_centroids(нормированные.astype(np.float32), центроиды)
             топы[ключ] = топ5
             по_рантаймам[ключ] = aggregate(
-                топ5, [int(метка) for метка in метки], idx_to_model_id=обратный
+                топ5, [int(метка) for метка in метки], idx_to_class_id=класс_по_индексу
             )
 
         итоги["baseline"][имя] = {

@@ -145,7 +145,7 @@ def test_оценка_на_синтетическом_загрузчике(tmp_p
         модель,
         голова,
         загрузчик,
-        idx_to_model_id=ИНДЕКС_КЛАССОВ,
+        idx_to_class_id=ИНДЕКС_КЛАССОВ,
         device=torch.device("cpu"),
     )
     assert 0.0 <= метрики.top1_model <= 1.0
@@ -176,7 +176,7 @@ def test_меньше_пяти_классов_отвергается_понят�
             модель,
             голова,
             DataLoader(выборка, batch_size=2),
-            idx_to_model_id=узкий_индекс,
+            idx_to_class_id=узкий_индекс,
             device=torch.device("cpu"),
         )
 
@@ -198,10 +198,10 @@ def test_top1_model_совпадает_с_ручным_подсчётом() -> N
     картинки = torch.randn(9, 3, 64, 64)
     метки = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 0])
     загрузчик = DataLoader(TensorDataset(картинки, метки), batch_size=4)
-    idx_to_model_id = {индекс: f"марка{индекс}__модель{индекс}" for индекс in range(8)}
+    idx_to_class_id = {индекс: f"марка{индекс}__модель{индекс}" for индекс in range(8)}
 
     метрики = evaluate(
-        модель, голова, загрузчик, idx_to_model_id=idx_to_model_id, device=torch.device("cpu")
+        модель, голова, загрузчик, idx_to_class_id=idx_to_class_id, device=torch.device("cpu")
     )
 
     with torch.no_grad():
@@ -234,7 +234,7 @@ def test_режимы_модели_и_головы_восстанавливаю�
         модель,
         голова,
         загрузчик,
-        idx_to_model_id=ИНДЕКС_КЛАССОВ,
+        idx_to_class_id=ИНДЕКС_КЛАССОВ,
         device=torch.device("cpu"),
     )
 
@@ -271,7 +271,7 @@ def test_режимы_восстанавливаются_при_исключен
             модель,
             голова,
             загрузчик,
-            idx_to_model_id=ИНДЕКС_КЛАССОВ,
+            idx_to_class_id=ИНДЕКС_КЛАССОВ,
             device=torch.device("cpu"),
         )
 

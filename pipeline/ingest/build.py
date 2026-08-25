@@ -25,7 +25,7 @@ from typing import Any
 import cv2
 import pandas as pd
 
-from pipeline.catalog import Catalog, class_index
+from pipeline.catalog import Catalog, class_index, member_index
 from pipeline.clean import duplicate_indices, phash_of
 from pipeline.crop import Detector, crop_image, select_primary
 from pipeline.ingest.stanford import StanfordPhoto, year_of
@@ -87,6 +87,7 @@ def build_frame(
 ) -> BuildResult:
     """Поток фотографий → кадр данных §13.1 и статистика прогона."""
     индекс = class_index(catalog)
+    класс_модели = member_index(catalog)
     отбраковка: Counter[str] = Counter()
     несопоставленных = 0
     iou_значения: list[float] = []
@@ -111,7 +112,13 @@ def build_frame(
 
         марка, остаток = _разделить_имя(фото.class_name, catalog)
         итог = normalize(остаток, марка, catalog, aliases)
-        if итог.model_id is None or итог.model_id not in индекс:
+        # Класс ищется через состав классов §13.2, а не прямо в `class_index`:
+        # ключи там — `class_id`, и `model_id` участника платформенной группы
+        # в них не встречается. Прямой поиск отправил бы всех участников
+        # групп в несопоставленные **молча** — без исключения, только цифрой
+        # в отчёте.
+        class_id = None if итог.model_id is None else класс_модели.get(итог.model_id)
+        if итог.model_id is None or class_id is None:
             несопоставленных += 1
             continue
 
@@ -153,8 +160,10 @@ def build_frame(
                 "source": source,
                 "crop_path": относительный,
                 "brand": catalog.by_id(итог.model_id).brand,
+                # Исходный `model_id` объявления, а не `class_id`: группы
+                # пересобираются без пересборки данных (§13.1, §13.2).
                 "model_id": итог.model_id,
-                "class_idx": индекс[итог.model_id],
+                "class_idx": индекс[class_id],
                 "body_style": итог.body_style,
                 "year": year_of(фото.class_name),
                 "bbox": [

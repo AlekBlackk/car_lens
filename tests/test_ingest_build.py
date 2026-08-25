@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
-from pipeline.catalog import Catalog, load_catalog
+from pipeline.catalog import Catalog, class_index, load_catalog
 from pipeline.clean import phash_of
 from pipeline.crop import Detection
 from pipeline.ingest.build import build_frame, iou
@@ -24,6 +24,28 @@ brands:
       x5: {display: BMW X5}
 """
 
+# Группа стоит на позиции своего первого участника (`bmw__x5`), поэтому её
+# индекс — 1, а не 0 и не 2: `volkswagen__golf` — третья модель каталога, но
+# второй класс. Пара «индекс модели ≠ индекс класса» и ловит проекцию через
+# `member_index`, а не через позицию модели.
+YAML_С_ГРУППОЙ = """
+version: 1
+brands:
+  Audi:
+    models:
+      a5: {display: Audi A5}
+  BMW:
+    models:
+      x5: {display: BMW X5}
+  Volkswagen:
+    models:
+      golf: {display: Volkswagen Golf}
+groups:
+  grp__x5_golf:
+    members: [bmw__x5, volkswagen__golf]
+    display: "BMW X5 / Volkswagen Golf"
+"""
+
 
 class ФейковыйДетектор:
     """Отдаёт заранее заданные боксы, ничего не считая."""
@@ -39,6 +61,13 @@ class ФейковыйДетектор:
 def каталог(tmp_path: Path) -> Catalog:
     путь = tmp_path / "stanford.yaml"
     путь.write_text(YAML, encoding="utf-8")
+    return load_catalog(путь)
+
+
+@pytest.fixture
+def каталог_с_группой(tmp_path: Path) -> Catalog:
+    путь = tmp_path / "с_группой.yaml"
+    путь.write_text(YAML_С_ГРУППОЙ, encoding="utf-8")
     return load_catalog(путь)
 
 
@@ -150,6 +179,33 @@ def test_несопоставленный_класс_не_попадает_в_к
     итог = build_frame(фото, ФейковыйДетектор(ХОРОШИЙ_БОКС), каталог, {}, tmp_path / "crops")
     assert итог.frame.empty
     assert итог.stats.unmapped == 1
+
+
+def test_участники_группы_получают_class_idx_группы(
+    tmp_path: Path, каталог_с_группой: Catalog
+) -> None:
+    """`class_idx` — проекция `model_id` через `member_index`, а не позиция модели.
+
+    Без этой проекции участник группы не находится в `class_index` (его
+    ключи — `class_id`) и **молча** уходит в несопоставленные: исключения
+    нет, доля потерь видна только в отчёте. В `catalog/canonical.yaml`
+    так выпали бы все три участника `grp__kei_trio`.
+    """
+    фото = [
+        сделать_фото(tmp_path, "00001.jpg", "BMW X5 SUV 2012"),
+        сделать_фото(tmp_path, "00002.jpg", "Volkswagen Golf Hatchback 2012", оттенок=90),
+    ]
+    итог = build_frame(
+        фото, ФейковыйДетектор(ХОРОШИЙ_БОКС), каталог_с_группой, {}, tmp_path / "crops"
+    )
+    assert итог.stats.unmapped == 0
+    индекс_группы = class_index(каталог_с_группой)["grp__x5_golf"]
+    assert индекс_группы == 1
+    # `model_id` в кадре остаётся исходным (§13.2): группу можно пересобрать,
+    # не пересобирая данные.
+    пары = {(строка["model_id"], int(строка["class_idx"])) for _, строка in итог.frame.iterrows()}
+    assert пары == {("bmw__x5", индекс_группы), ("volkswagen__golf", индекс_группы)}
+    assert set(итог.frame["brand"]) == {"BMW", "Volkswagen"}
 
 
 def test_дубли_убраны(tmp_path: Path, каталог: Catalog) -> None:

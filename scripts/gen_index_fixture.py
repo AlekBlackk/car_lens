@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from pipeline.catalog import CarModel
+from pipeline.catalog import CarClass
 from pipeline.index_format import meta_json, write_index
 
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "index"
@@ -22,9 +22,20 @@ CLASSES = 2
 CENTROIDS_PER_CLASS = 4
 EMBEDDING_DIM = 256
 
-_MODELS = (
-    CarModel(model_id="acme__one", brand="Acme", display="Acme One", platform_group=None),
-    CarModel(model_id="acme__two", brand="Acme", display="Acme Two", platform_group="p2"),
+# Первый класс — одиночная модель, второй — разнобрендовая группа с `brand: null`.
+# Обе формы записи §13.2 нужны в одной мете: читалки на Node и на JVM разбирают
+# именно этот файл, а `brand` у группы двух марок — единственное nullable-поле
+# схемы, и без примера в фикстуре его некому проверить. Порядок классов тот же,
+# что даёт `load_catalog`: класс сортируется по минимальному `model_id`
+# участников, и `acme__one` идёт раньше `acme__two`.
+_CLASSES = (
+    CarClass(class_id="acme__one", members=("acme__one",), brand="Acme", display="Acme One"),
+    CarClass(
+        class_id="grp__twins",
+        members=("acme__two", "beta__two"),
+        brand=None,
+        display="Acme Two / Beta Two",
+    ),
 )
 
 
@@ -36,7 +47,7 @@ def build_fixture(directory: Path) -> None:
     нормы = np.linalg.norm(сырые, axis=2, keepdims=True)
     центроиды = (сырые / нормы).astype(np.float32)
     мета = meta_json(
-        _MODELS,
+        _CLASSES,
         embedding_dim=EMBEDDING_DIM,
         centroids_per_class=CENTROIDS_PER_CLASS,
         model_weights_sha256="00" * 32,

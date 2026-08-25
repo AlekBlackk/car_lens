@@ -59,6 +59,28 @@ def каталог(tmp_path: Path) -> Path:
     return файл
 
 
+def каталог_с_группой(tmp_path: Path) -> Path:
+    """Тот же каталог плюс седьмая модель, объединённая с `acura__rl` в группу.
+
+    Семь моделей и шесть классов: числа заведомо разные, поэтому голова,
+    посчитанная по моделям, отличается от посчитанной по классам одним
+    выходом. Группа встаёт на место `acura__rl` (минимальный `model_id`
+    участников), так что остальные пять индексов совпадают с `КЛАССЫ` —
+    синтетические данные годятся без переразметки.
+    """
+    сырой = yaml.safe_load(каталог(tmp_path).read_text(encoding="utf-8"))
+    сырой["brands"]["Honda"] = {"models": {"legend": {"display": "Honda Legend"}}}
+    сырой["groups"] = {
+        "grp__legend": {
+            "members": ["acura__rl", "honda__legend"],
+            "display": "Acura RL / Honda Legend",
+        }
+    }
+    файл = tmp_path / "catalog_с_группой.yaml"
+    файл.write_text(yaml.safe_dump(сырой, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return файл
+
+
 def конфиг(tmp_path: Path) -> Path:
     файл = tmp_path / "config.yaml"
     файл.write_text(
@@ -225,6 +247,58 @@ def test_смоук_прогон_пишет_чекпоинт_и_карточку
     дата_каталога = прогон.name.removeprefix("m1_2_train_")[:8]
     ожидаемая = f"{дата_каталога[:4]}-{дата_каталога[4:6]}-{дата_каталога[6:8]}"
     assert f"Дата: {ожидаемая}" in карточка, "дата карточки не совпала с именем каталога"
+
+
+def test_голова_считается_по_классам_а_не_по_моделям(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Выходов головы ArcFace столько же, сколько классов, а не моделей (§13.2).
+
+    Каталог здесь — семь моделей и шесть классов: платформенная группа
+    занимает один слот `catalog_index.bin` и один выход головы. Голова,
+    посчитанная по `len(каталог)`, дала бы седьмой выход, который никогда
+    не активируется, — и сборка индекса в M-1.3 упала бы на сверке
+    нумерации, потому что `class_index` каталога знает шесть ключей.
+
+    Заодно проверяется, чем размечен `class_index` чекпоинта: ключи —
+    `class_id`, и `model_id` участников группы в них не встречается.
+    Обратное отображение из него раскрашивает `per_class_recall`, и подписи
+    по `model_id` показывали бы одного участника вместо класса.
+    """
+    from training.train import main
+
+    данные(tmp_path)
+    monkeypatch.setenv("CARLENS_DATA_ROOT", str(tmp_path))
+
+    код = main(
+        [
+            "--config",
+            str(конфиг(tmp_path)),
+            "--catalog",
+            str(каталог_с_группой(tmp_path)),
+            "--device",
+            "cpu",
+            "--no-pretrained",
+            "--limit-batches",
+            "2",
+        ]
+    )
+    assert код == 0
+
+    прогон = sorted((tmp_path / "runs").glob("m1_2_train_*"))[0]
+    чекпоинт = torch.load(прогон / "best.pt", map_location="cpu", weights_only=False)
+    assert чекпоинт["class_index"] == {
+        "grp__legend": 0,
+        "acura__tl": 1,
+        "bmw__x5": 2,
+        "chevrolet__corvette": 3,
+        "chevrolet__express": 4,
+        "ford__f150": 5,
+    }
+    # Семь моделей в YAML — шесть выходов головы. Литерал 6, а не
+    # `len(чекпоинт["class_index"])`: сверять размер головы с той же картой,
+    # из которой он посчитан, — тавтология, тест прошёл бы и на семи выходах.
+    assert чекпоинт["head_state"]["weight"].shape[0] == 6
 
 
 def test_дата_карточки_из_метки_старта(tmp_path: Path) -> None:

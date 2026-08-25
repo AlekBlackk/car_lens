@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from pipeline.catalog import CarModel
+from pipeline.catalog import CarClass
 
 MAGIC = b"CLIX"
 FORMAT_VERSION = 1
@@ -157,20 +157,24 @@ def verify_meta(header: IndexHeader, meta_bytes: bytes) -> None:
 
 
 def meta_json(
-    models: Sequence[CarModel],
+    classes: Sequence[CarClass],
     *,
     embedding_dim: int,
     centroids_per_class: int,
     model_weights_sha256: str,
     generated_at: str,
 ) -> bytes:
-    """Собрать `catalog_meta.json` (§13.2). `models` идут в порядке индексов классов.
+    """Собрать `catalog_meta.json` (§13.2). `classes` идут в порядке индексов классов.
+
+    Запись описывает класс, а не модель: `model_id` в ней нет, состав
+    группы лежит в `members[]`, а `brand` пуст у разнобрендовой группы.
+    Поля `idx` нет намеренно — индексом класса служит позиция в массиве.
 
     Сериализация фиксирована — `ensure_ascii=False`, `indent=2`, UTF-8, как у
     `manifest.json` прогона обучения. Поменять её значит поменять sha256 в
     заголовке при том же содержимом, поэтому форма закреплена тестом.
     """
-    if not models:
+    if not classes:
         raise IndexFormatError("пустой список классов: индекс без классов не имеет смысла")
     документ = {
         "format_version": FORMAT_VERSION,
@@ -180,12 +184,12 @@ def meta_json(
         "centroids_per_class": centroids_per_class,
         "classes": [
             {
-                "model_id": модель.model_id,
-                "brand": модель.brand,
-                "display": модель.display,
-                "platform_group": модель.platform_group,
+                "class_id": класс.class_id,
+                "members": list(класс.members),
+                "brand": класс.brand,
+                "display": класс.display,
             }
-            for модель in models
+            for класс in classes
         ],
     }
     return json.dumps(документ, ensure_ascii=False, indent=2).encode("utf-8")

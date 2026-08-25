@@ -206,7 +206,7 @@ def render_report(
         "## Десять худших классов по recall на val",
         "",
     ]
-    строки += [f"- `{model_id}`: {значение:.3f}" for model_id, значение in худшие]
+    строки += [f"- `{class_id}`: {значение:.3f}" for class_id, значение in худшие]
     строки += [
         "",
         "## По эпохам",
@@ -294,7 +294,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     torch.backends.cudnn.benchmark = True  # Р-20: скорость важнее побитовой воспроизводимости
 
     индекс = class_index(load_catalog(аргументы.catalog))
-    обратный = {значение: ключ for ключ, значение in индекс.items()}
+    # Имя говорит, что лежит в значениях: `class_id`, а не `model_id`. У
+    # платформенной группы это `grp__…`, и участников группы в карте нет
+    # вовсе — она обратна `class_index`, то есть нумерует классы §13.2.
+    класс_по_индексу = {значение: ключ for ключ, значение in индекс.items()}
     устройство = torch.device(аргументы.device)
     кропы = crops_dir() / "stanford"
 
@@ -403,7 +406,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             limit_batches=аргументы.limit_batches,
         )
         метрики_val = evaluate(
-            модель, голова, проверочные["val"], idx_to_model_id=обратный, device=устройство
+            модель, голова, проверочные["val"], idx_to_class_id=класс_по_индексу, device=устройство
         )
         журнал.append(
             {
@@ -439,10 +442,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"эпоха {эпоха}: loss {loss:.4f}, lr {lr:.2e}, val top1 {метрики_val.top1_model:.4f}")
 
     метрики_val = evaluate(
-        модель, голова, проверочные["val"], idx_to_model_id=обратный, device=устройство
+        модель, голова, проверочные["val"], idx_to_class_id=класс_по_индексу, device=устройство
     )
     метрики_test = evaluate(
-        модель, голова, проверочные["test"], idx_to_model_id=обратный, device=устройство
+        модель, голова, проверочные["test"], idx_to_class_id=класс_по_индексу, device=устройство
     )
     # EMA оценивается один раз в конце прогона: на 171 классе поэпохальная оценка
     # удваивает время валидации, а числа всё равно измеряют гибрид — усреднённый
@@ -450,10 +453,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     # серия таких чисел по эпохам не добавит к ним смысла. `ema.module` — тот же
     # `CarClassifier`, голова у EMA общая с сырой: в `AveragedModel` она не заворачивалась.
     метрики_val_ema = evaluate(
-        ema.module, голова, проверочные["val"], idx_to_model_id=обратный, device=устройство
+        ema.module, голова, проверочные["val"], idx_to_class_id=класс_по_индексу, device=устройство
     )
     метрики_test_ema = evaluate(
-        ema.module, голова, проверочные["test"], idx_to_model_id=обратный, device=устройство
+        ema.module, голова, проверочные["test"], idx_to_class_id=класс_по_индексу, device=устройство
     )
     пик_vram = _пик_vram_мб(устройство)
     прошло = time.monotonic() - начало
