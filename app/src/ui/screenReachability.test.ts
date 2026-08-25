@@ -1,7 +1,7 @@
 import { parse } from '@babel/parser'
 import traverse from '@babel/traverse'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -80,6 +80,97 @@ function видыПереходов(): Set<string> {
   return найденные
 }
 
+/** Читает ли узел поле объекта `настройки` — `настройки.сборОбратнойСвязи` и подобные. */
+const читаетПолеНастроек = (узел: { type: string; object?: unknown }): boolean => {
+  if (узел.type !== 'MemberExpression') return false
+  const объект = узел.object as { type: string; name?: string }
+  return объект.type === 'Identifier' && объект.name === 'настройки'
+}
+
+/**
+ * Колбэки экранов, все вызовы которых заперты значением настройки.
+ *
+ * Дыра, найденная на приёмке §10 2026-08-25: `push({ вид: 'настройки' })` в `App.tsx` есть
+ * и безусловен, поэтому первая стража его пропускала. Заперт был вызов колбэка —
+ * `настройки.сборОбратнойСвязи ? установитьСписок(true) : наНастройки()` в `DetailsScreen`.
+ * Включив сбор жалоб, пользователь терял Настройки насовсем: ни порог сменить, ни сбор
+ * выключить, выход только через стирание данных.
+ *
+ * Считаем колбэк запертым, если каждый его вызов в экранах стоит внутри тернарника, чьё
+ * условие читает поле объекта `настройки`. Хоть один вызов вне такого тернарника — колбэк
+ * свободен, и заперт он больше не считается.
+ *
+ * Ключ — пара «экран.колбэк», а не одно имя: `наНастройки` заперт в `DetailsScreen` и
+ * свободен на `CameraScreen`, и без экрана в ключе починка выглядела бы как всё тот же
+ * дефект.
+ */
+function запертыеКолбэки(): Set<string> {
+  const заперты = new Map<string, boolean>()
+  for (const файл of исходники(join('src', 'ui', 'screens'))) {
+    const экран = basename(файл, '.tsx')
+    traverse(разобрать(файл), {
+      CallExpression(путь) {
+        const вызываемое = путь.node.callee
+        if (вызываемое.type !== 'Identifier') return
+        const имя = вызываемое.name
+        const заперт = путь.findParent((предок) => {
+          if (!предок.isConditionalExpression()) return false
+          const условие = предок.get('test')
+          let читаетНастройку = читаетПолеНастроек(условие.node)
+          // `traverse` обходит потомков, но не сам узел, а условие сплошь и рядом само и
+          // есть `настройки.сборОбратнойСвязи` — узел проверяется отдельной строкой выше.
+          условие.traverse({
+            MemberExpression(вложенное) {
+              if (читаетПолеНастроек(вложенное.node)) читаетНастройку = true
+            },
+          })
+          return читаетНастройку
+        })
+        const ключ = `${экран}.${имя}`
+        заперты.set(ключ, (заперты.get(ключ) ?? true) && заперт != null)
+      },
+    })
+  }
+  return new Set([...заперты].filter(([, заперт]) => заперт).map(([имя]) => имя))
+}
+
+/**
+ * Виды экранов, каждый переход к которым привязан в `App.tsx` к запертому колбэку.
+ *
+ * Свободный переход у вида хотя бы один — вид достижим при любых настройках, и в результат
+ * он не попадает.
+ */
+function условноДостижимые(): string[] {
+  const заперты = запертыеКолбэки()
+  const свободные = new Set<string>()
+  const подЗамком = new Set<string>()
+  traverse(разобрать('App.tsx'), {
+    CallExpression(путь) {
+      const вызываемое = путь.node.callee
+      if (вызываемое.type !== 'Identifier' || вызываемое.name !== 'push') return
+      const свойство = путь.findParent((предок) => {
+        if (!предок.isJSXAttribute()) return false
+        if (предок.node.name.type !== 'JSXIdentifier') return false
+        const элемент = предок.parentPath
+        if (!элемент.isJSXOpeningElement()) return false
+        const имяЭлемента = элемент.node.name
+        if (имяЭлемента.type !== 'JSXIdentifier') return false
+        return заперты.has(`${имяЭлемента.name}.${предок.node.name.name}`)
+      })
+      for (const аргумент of путь.node.arguments) {
+        if (аргумент.type !== 'ObjectExpression') continue
+        for (const поле of аргумент.properties) {
+          if (поле.type !== 'ObjectProperty') continue
+          if (поле.key.type !== 'Identifier' || поле.key.name !== 'вид') continue
+          if (поле.value.type !== 'StringLiteral') continue
+          ;(свойство == null ? свободные : подЗамком).add(поле.value.value)
+        }
+      }
+    },
+  })
+  return [...подЗамком].filter((вид) => !свободные.has(вид))
+}
+
 describe('достижимость экранов §6.6', () => {
   it('на каждый экран, кроме дна стека, есть переход в исходниках', () => {
     const переходы = видыПереходов()
@@ -87,7 +178,18 @@ describe('достижимость экранов §6.6', () => {
     expect(недостижимые).toEqual([])
   })
 
+  it('ни один экран не заперт значением настройки', () => {
+    expect(условноДостижимые()).toEqual([])
+  })
+
   it('виды экранов вообще нашлись — тест не проходит на пустом разборе', () => {
     expect(видыЭкранов().length).toBeGreaterThan(1)
+  })
+
+  it('анализ запертых колбэков что-то находит — иначе предыдущий тест зелен впустую', () => {
+    // `DetailsScreen.наНастройки` останется запертым и после правки: там переход живёт
+    // внутри тернарника по `настройки.сборОбратнойСвязи` и по §5.3 так и задуман. Проверка
+    // ловит поломку самого разбора, при которой множество запертых схлопнулось бы в пустое.
+    expect(запертыеКолбэки().size).toBeGreaterThan(0)
   })
 })
