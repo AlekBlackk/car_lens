@@ -61,12 +61,12 @@ export type МостКонвейера = {
   matchEma(вектор: Float32Array): Match[]
 }
 
-export class BridgeContractError extends Error {
-  constructor(сообщение: string) {
-    super(сообщение)
-    this.name = 'BridgeContractError'
-  }
-}
+/**
+ * Префикс вместо класса ошибки — по той же причине, что у `ОШИБКА_РАЗМЕРНОСТИ` в `ema.ts`:
+ * подкласс `Error`, развёрнутый babel, worklet-рантайм конструктором звать отказывается, и
+ * `new` подменил бы настоящую ошибку на «This function cannot be used as a constructor».
+ */
+export const BRIDGE_CONTRACT_ERROR = 'контракт моста'
 
 export const ПУСТОЕ_СОСТОЯНИЕ: СостояниеКонвейера = { tracks: [], nextId: 1 }
 
@@ -172,8 +172,8 @@ export function stepPipeline(
     // Проверка до единой записи в состояние: частичное применение оставило бы часть
     // треков верными, часть испорченными, и различить их потом уже нечем.
     if (результаты.length !== кандидаты.length) {
-      throw new BridgeContractError(
-        `embed вернул ${результаты.length} результатов на ${кандидаты.length} боксов`,
+      throw new Error(
+        `${BRIDGE_CONTRACT_ERROR}: embed вернул ${результаты.length} результатов на ${кандидаты.length} боксов`,
       )
     }
     for (let к = 0; к < кандидаты.length; к++) {

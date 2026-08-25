@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { EMA_ALPHA } from './ema'
 import type { Box, EmbedMatchResult, Match } from './plugins'
 import {
-  BridgeContractError,
+  BRIDGE_CONTRACT_ERROR,
   ПУСТОЕ_СОСТОЯНИЕ,
   stepPipeline,
   MAX_HYPOTHESES,
@@ -179,7 +179,7 @@ describe('stepPipeline', () => {
       },
     })
     expect(() => stepPipeline(начальное, вход([бокс(0)], 10_000), битый)).toThrow(
-      BridgeContractError,
+      BRIDGE_CONTRACT_ERROR,
     )
     expect(начальное.tracks[0]!.observations).toBe(наблюденийДо)
     expect(начальное.tracks[0]!.ema).toBe(emaДо)

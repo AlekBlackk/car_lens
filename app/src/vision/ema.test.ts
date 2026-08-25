@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { DimensionError, EMA_ALPHA, emaStep } from './ema'
+import { EMA_ALPHA, emaStep, EMBEDDING_DIM_ERROR } from './ema'
 
 const вектор = (числа: number[]) => Float32Array.from(числа)
 const норма = (числа: number[]) => Math.sqrt(числа.reduce((сумма, ч) => сумма + ч * ч, 0))
@@ -70,7 +70,7 @@ describe('emaStep', () => {
 
   test('несовпадение размерности роняет с внятной ошибкой', () => {
     const прежний = emaStep(null, вектор([1, 0, 0]), EMA_ALPHA).вектор!
-    expect(() => emaStep(прежний, вектор([1, 0]), EMA_ALPHA)).toThrow(DimensionError)
+    expect(() => emaStep(прежний, вектор([1, 0]), EMA_ALPHA)).toThrow(EMBEDDING_DIM_ERROR)
   })
 
   test('почти противоположный вектор при вырожденной сумме берёт свежий', () => {

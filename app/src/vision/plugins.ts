@@ -44,6 +44,9 @@ export function detect(
   const сырое = detectPlugin.call(
     frame, { maxDet, deviceDegrees, previewDegrees },
   ) as unknown as RawDetectResult
+  if (сырое.boxes == null) {
+    throw new Error(`${BRIDGE_SLOT_ERROR}: detect не отдал boxes при count=${сырое.count}`)
+  }
   const числа = new Float32Array(сырое.boxes)
   if (числа.length !== сырое.count * 5) {
     throw new Error(`боксы: ${числа.length} чисел против ${сырое.count * 5} по count`)
@@ -66,6 +69,13 @@ export function detect(
     nativeMs: сырое.nativeNs / 1e6,
   }
 }
+
+/**
+ * Префикс ошибки контракта слотов. Не класс: подкласс `Error`, развёрнутый babel,
+ * worklet-рантайм конструктором звать отказывается (см. `EMBEDDING_DIM_ERROR` в `ema.ts`).
+ * Имя латиницей — константа захватывается воркетом.
+ */
+export const BRIDGE_SLOT_ERROR = 'слот эмбеддинга'
 
 export type Match = { classIdx: number; sim: number }
 
@@ -143,6 +153,11 @@ export function embedAndMatch(
   if (matchCount > topK) {
     throw new Error(`совпадений на бокс ${matchCount} больше запрошенных topK=${topK}`)
   }
+  if (сырое.matches == null) {
+    throw new Error(
+      `${BRIDGE_SLOT_ERROR}: embedAndMatch не отдал matches при count=${сырое.count}`,
+    )
+  }
   const числаСовпадений = new Float32Array(сырое.matches)
   if (числаСовпадений.length !== сырое.count * matchCount * 2) {
     throw new Error(
@@ -152,7 +167,15 @@ export function embedAndMatch(
   const результаты: EmbedMatchResult[] = []
   const слоты: ArrayBuffer[] = []
   for (let номер = 0; номер < сырое.count; номер++) {
-    const слот = сырое[`emb${номер}`] as ArrayBuffer
+    const слот = сырое[`emb${номер}`] as ArrayBuffer | undefined
+    // Слот берётся по имени, а не из массива, и отсутствующее имя иначе доехало бы до
+    // `new Float32Array(undefined)` — на устройстве это «Cannot convert undefined value to
+    // object», сообщение, по которому не догадаться ни про мост, ни про номер слота.
+    if (слот == null) {
+      throw new Error(
+        `${BRIDGE_SLOT_ERROR}: emb${номер} не пришёл при count=${сырое.count}`,
+      )
+    }
     слоты.push(слот)
     // Копия обязательна: слот переиспользуется нативной стороной на следующий вызов
     // плагина (см. комментарий в `CarVisionEmbedPlugin.kt` про контракт времени жизни
@@ -212,6 +235,9 @@ export function matchEmbedding(frame: Frame, embedding: Float32Array, topK: numb
   // Hermes нет: сузить до `ArrayBuffer` безопасно, другого варианта тут не бывает.
   const буфер = (целиком ? embedding.buffer : embedding.slice().buffer) as ArrayBuffer
   const сырое = matchPlugin.call(frame, { embedding: буфер, topK }) as unknown as RawMatchResult
+  if (сырое.matches == null) {
+    throw new Error(`${BRIDGE_SLOT_ERROR}: matchEmbedding не отдал matches`)
+  }
   const числа = new Float32Array(сырое.matches)
   if (числа.length !== сырое.count * 2) {
     throw new Error(`совпадения: ${числа.length} чисел против ${сырое.count * 2} по count*2`)

@@ -64,7 +64,7 @@ describe('parseThresholds', () => {
 describe('parseCalibration', () => {
   test('разбирает корректный документ', () => {
     const итог = parseCalibration(калибровка)
-    expect(итог.узлы).toHaveLength(3)
+    expect(итог.knots).toHaveLength(3)
     expect(итог.clipLo).toBe(0.01)
     expect(итог.clipHi).toBe(0.98)
     expect(итог.tuned).toBe(false)
@@ -133,7 +133,7 @@ describe('ассеты сборки', () => {
   })
 
   test('настоящий calibration.json разбирается', () => {
-    expect(CALIBRATION.узлы.length).toBeGreaterThanOrEqual(2)
+    expect(CALIBRATION.knots.length).toBeGreaterThanOrEqual(2)
   })
 
   test('плейсхолдеры честно помечены неоткалиброванными', () => {

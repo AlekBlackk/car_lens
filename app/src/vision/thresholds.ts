@@ -27,9 +27,16 @@ export type Пороги = {
   tuned: boolean
 }
 
-/** `узлы` — пары `[sim, вероятность]`, строго возрастающие по обеим координатам. */
+/**
+ * `knots` — пары `[sim, вероятность]`, строго возрастающие по обеим координатам.
+ *
+ * Имя поля ASCII, и это требование границы, а не стиль: константа `CALIBRATION`
+ * захватывается воркетом, а ключи объектов с не-ASCII символами до worklet-рантайма не
+ * доезжают. Кириллическое `узлы` приезжало `undefined`, и `confidenceFromSim` падал на
+ * устройстве с «Cannot convert undefined value to object» — при зелёных тестах в Node.
+ */
 export type Калибровка = {
-  узлы: number[][]
+  knots: number[][]
   clipLo: number
   clipHi: number
   tuned: boolean
@@ -99,7 +106,7 @@ export function parseCalibration(документ: unknown): Калибровк�
   if (clipLo > clipHi) {
     throw new AssetError(`clip: нижняя граница ${clipLo} больше верхней ${clipHi}`)
   }
-  return { узлы, clipLo, clipHi, tuned: поля.tuned === true }
+  return { knots: узлы, clipLo, clipHi, tuned: поля.tuned === true }
 }
 
 /**
@@ -115,7 +122,7 @@ export function parseCalibration(документ: unknown): Калибровк�
  */
 export function confidenceFromSim(sim: number, калибровка: Калибровка): number {
   'worklet'
-  const узлы = калибровка.узлы
+  const узлы = калибровка.knots
   const первый = узлы[0]!
   const последний = узлы[узлы.length - 1]!
   let значение: number

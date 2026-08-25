@@ -27,7 +27,6 @@ import { catalogDigest, classLabel } from '../../vision/labels'
 import { НакопительЦеныМоста, bridgeClock, type СтадияМоста } from '../../vision/latency'
 import {
   stepPipeline,
-  ПУСТОЕ_СОСТОЯНИЕ,
   type МостКонвейера,
   type ПодписьТрека,
   type СобытиеКлассификации,
@@ -36,7 +35,8 @@ import {
 import { detect, embedAndMatch, matchEmbedding, type Box } from '../../vision/plugins'
 import { checkSlotContract } from '../../vision/slotContract'
 import { StabilityCollector } from '../../vision/stability'
-import { ключиВидимыхРешений, применитьПорог } from '../../vision/userThreshold'
+import { ключиВидимыхРешений, подписиСПорогом } from '../../vision/userThreshold'
+import { копияПодписей } from '../../vision/workletCopy'
 import { mapBoxToView, type ViewRect } from '../../vision/viewMapping'
 
 const MAX_DET = 4
@@ -172,10 +172,25 @@ export default function CameraScreen(свойства: СвойстваКаме�
   // поэтому исключение из detect/embedAndMatch/matchEmbedding долетает до JS-потока
   // только через runOnJS и оседает здесь баннером.
   const [ошибкаМоста, установитьОшибкуМоста] = useState<string | null>(null)
-  // Состояние конвейера (треки, их EMA и гипотезы) переживает кадры только как SharedValue:
-  // обычный `useRef` или модульная переменная не пережили бы клонирование замыкания
-  // worklet'а, а `useSharedValue` из react-native-worklets-core — переживает.
-  const pipelineState = useSharedValue<СостояниеКонвейера>(ПУСТОЕ_СОСТОЯНИЕ)
+  /*
+   * Состояние конвейера (треки, их EMA и гипотезы) ездит между кадрами строкой JSON, и это
+   * не блажь: оба прямых способа проверены на SM-S918B и оба негодны.
+   *
+   * Объект в `SharedValue` теряет структуру. Массив, созданный в воркете настоящим
+   * (`isArray=true length=256`), через кадр приезжает объектом с числовыми ключами и без
+   * `length` — `emaStep` падал на первом же сравнении длин; чтение вложенных полей такого
+   * объекта роняет `librnworklets` нативно, SIGSEGV по нулевому адресу.
+   *
+   * Глобал worklet-рантайма роняет процесс ещё раньше: запись составного объекта уводит
+   * `librnworklets` в бесконечную рекурсию, три кадра стека повторяются до `SEGV_ACCERR`.
+   *
+   * Строки же границу переживают целиком — проверено той же пробой, что поймала потерю
+   * ключей. Поэтому здесь строка: одна на кадр, туда и обратно.
+   *
+   * Имя латиницей: значение захватывается воркетом, а ключи `__closure` с не-ASCII
+   * символами до worklet-рантайма не доезжают. Стережёт `workletClosure.test.ts`.
+   */
+  const pipelineStateJson = useSharedValue<string>('')
   // Угол телефона переживает клонирование worklet-замыкания только как SharedValue:
   // обычное состояние React в воркет не доезжает.
   const deviceDegrees = useSharedValue(0)
@@ -251,10 +266,10 @@ export default function CameraScreen(свойства: СвойстваКаме�
           frameHeight: number,
         ) => {
           const свежие = свежиеСвойства.current
-          const подписи = сырые.map((подпись) => {
-            const решение = применитьПорог(подпись.decision, свежие.настройки.порогУверенности)
-            return решение === подпись.decision ? подпись : { ...подпись, решение }
-          })
+          // Копия снимается первым делом: аргументы `createRunOnJS` живут ровно этот вызов,
+          // и всё, что переживёт его — состояние экрана и ref «Деталей», — обязано быть
+          // снимком. См. `workletCopy.ts`.
+          const подписи = подписиСПорогом(копияПодписей(сырые), свежие.настройки.порогУверенности)
           свежие.подписиНаЭкране.current = подписи
           записатьРаспознанное(подписи, записанныеТреки.current, свежие.наРаспознавание)
           установитьРазметку({ подписи, frameWidth, frameHeight })
@@ -341,8 +356,14 @@ export default function CameraScreen(свойства: СвойстваКаме�
           },
         }
 
+        // Пустое состояние строится литералом, а не захватывается из модуля: захват с
+        // кириллическим именем `ПУСТОЕ_СОСТОЯНИЕ` до воркета не доехал бы.
+        const сырое = pipelineStateJson.value
+        const прежнее: СостояниеКонвейера =
+          сырое === '' ? { tracks: [], nextId: 1 } : JSON.parse(сырое)
+
         const шаг = stepPipeline(
-          pipelineState.value,
+          прежнее,
           {
             боксы: результат.boxes,
             nowMs,
@@ -351,7 +372,7 @@ export default function CameraScreen(свойства: СвойстваКаме�
           },
           мост,
         )
-        pipelineState.value = шаг.состояние
+        pipelineStateJson.value = JSON.stringify(шаг.состояние)
         // Один переход границы вместо двух: события едут вместе с подписями, потому что
         // ключ решения для замера считается уже после пользовательского порога, а порог
         // живёт на JS-стороне. На кадрах без классификации массив пуст — по §6.2 таких
@@ -366,7 +387,7 @@ export default function CameraScreen(свойства: СвойстваКаме�
         return
       }
     },
-    [publishOverlay, markBridgeCost, pipelineState, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract],
+    [publishOverlay, markBridgeCost, pipelineStateJson, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract],
   )
 
   // Пользовательская вертикаль при горизонтальном хвате идёт вдоль ширины экрана, при
@@ -418,7 +439,6 @@ export default function CameraScreen(свойства: СвойстваКаме�
   // Порядок строк — по id трека, а не по порядку в состоянии конвейера: там треки
   // переставляются при смерти и рождении, и строки прыгали бы местами на живом кадре.
   const подписи = разметка.подписи.slice().sort((первая, вторая) => первая.id - вторая.id)
-
   // Стража на размер кадра обязательна: `mapBoxToView` на пустом кадре бросает, а до
   // первого результата конвейера разметка ровно такая.
   const рамки =

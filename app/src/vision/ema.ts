@@ -24,12 +24,14 @@ export const EMA_ALPHA = 0.35
  */
 const MIN_NORM = 1e-6
 
-export class DimensionError extends Error {
-  constructor(сообщение: string) {
-    super(сообщение)
-    this.name = 'DimensionError'
-  }
-}
+/**
+ * Префикс вместо класса ошибки. Свой подкласс `Error` здесь был и не работал: babel
+ * разворачивает класс в функцию с `_inherits`, а worklet-рантайм отказывается звать такую
+ * функцию конструктором — `new` падал с «This function cannot be used as a constructor» и
+ * подменял собой настоящую причину. Поймано на SM-S918B: под этой маской пряталось
+ * `эмбеддинг: 256 против undefined`. Ловить по типу всё равно было некому.
+ */
+export const EMBEDDING_DIM_ERROR = 'эмбеддинг'
 
 /**
  * `принят: false` — шаг отвергнут: вектор остался прежним, и наблюдение засчитывать
@@ -42,8 +44,8 @@ export function emaStep(предыдущий: number[] | null, новый: Float
   'worklet'
   const длина = новый.length
   if (предыдущий != null && предыдущий.length !== длина) {
-    throw new DimensionError(
-      `эмбеддинг: ${длина} чисел против ${предыдущий.length}, запомненных треком`,
+    throw new Error(
+      `${EMBEDDING_DIM_ERROR}: ${длина} чисел против ${предыдущий.length}, запомненных треком`,
     )
   }
   let сумма = 0
