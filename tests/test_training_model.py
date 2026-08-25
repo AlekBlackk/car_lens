@@ -24,6 +24,19 @@ from training.model import ArcFaceHead, create_model
     5: "ford__f150",
 }
 
+# Марка приходит отдельной картой, а не из префикса `class_id`: значения здесь в
+# человеческом регистре именно поэтому — совпадение с префиксом было бы
+# случайным, а не контрактом. Проверка самих правил марки — в
+# `tests/test_training_metrics.py`, здесь карта нужна лишь для вызова `evaluate`.
+МАРКИ_КЛАССОВ: dict[int, str | None] = {
+    0: "Acura",
+    1: "Acura",
+    2: "BMW",
+    3: "Chevrolet",
+    4: "Chevrolet",
+    5: "Ford",
+}
+
 # Боевой бэкбон и второй, у которого `mean`/`std` другие: ImageNet против
 # inception-овых `(0.5, 0.5, 0.5)`. На одном бэкбоне проверка провенанса
 # невозможна — совпадение с ImageNet одинаково объясняется и чтением конфига,
@@ -146,6 +159,7 @@ def test_оценка_на_синтетическом_загрузчике(tmp_p
         голова,
         загрузчик,
         idx_to_class_id=ИНДЕКС_КЛАССОВ,
+        idx_to_brand=МАРКИ_КЛАССОВ,
         device=torch.device("cpu"),
     )
     assert 0.0 <= метрики.top1_model <= 1.0
@@ -171,12 +185,14 @@ def test_меньше_пяти_классов_отвергается_понят�
     )
     выборка = TensorDataset(torch.randn(2, 3, 64, 64), torch.tensor([0, 1]))
     узкий_индекс = {0: "acura__rl", 1: "acura__tl", 2: "bmw__x5", 3: "ford__f150"}
+    узкие_марки: dict[int, str | None] = {0: "Acura", 1: "Acura", 2: "BMW", 3: "Ford"}
     with pytest.raises(ValueError, match=r"классов меньше 5 \(4\), top-5 не определён"):
         evaluate(
             модель,
             голова,
             DataLoader(выборка, batch_size=2),
             idx_to_class_id=узкий_индекс,
+            idx_to_brand=узкие_марки,
             device=torch.device("cpu"),
         )
 
@@ -199,9 +215,15 @@ def test_top1_model_совпадает_с_ручным_подсчётом() -> N
     метки = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 0])
     загрузчик = DataLoader(TensorDataset(картинки, метки), batch_size=4)
     idx_to_class_id = {индекс: f"марка{индекс}__модель{индекс}" for индекс in range(8)}
+    idx_to_brand: dict[int, str | None] = {индекс: f"Марка{индекс}" for индекс in range(8)}
 
     метрики = evaluate(
-        модель, голова, загрузчик, idx_to_class_id=idx_to_class_id, device=torch.device("cpu")
+        модель,
+        голова,
+        загрузчик,
+        idx_to_class_id=idx_to_class_id,
+        idx_to_brand=idx_to_brand,
+        device=torch.device("cpu"),
     )
 
     with torch.no_grad():
@@ -235,6 +257,7 @@ def test_режимы_модели_и_головы_восстанавливаю�
         голова,
         загрузчик,
         idx_to_class_id=ИНДЕКС_КЛАССОВ,
+        idx_to_brand=МАРКИ_КЛАССОВ,
         device=torch.device("cpu"),
     )
 
@@ -272,6 +295,7 @@ def test_режимы_восстанавливаются_при_исключен
             голова,
             загрузчик,
             idx_to_class_id=ИНДЕКС_КЛАССОВ,
+            idx_to_brand=МАРКИ_КЛАССОВ,
             device=torch.device("cpu"),
         )
 

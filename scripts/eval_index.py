@@ -38,7 +38,14 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     аргументы = _parse_args()
     заголовок, центроиды = read_index(аргументы.index / "catalog_index.bin")
-    verify_meta(заголовок, (аргументы.index / "catalog_meta.json").read_bytes())
+    байты_меты = (аргументы.index / "catalog_meta.json").read_bytes()
+    verify_meta(заголовок, байты_меты)
+    # Марка для `top1_brand` берётся из меты, а не из префикса `class_id` и не из
+    # YAML-каталога: байты меты уже сверены с sha256 в заголовке того самого
+    # индекса, который мы и оцениваем, а позиция записи в `classes` и есть индекс
+    # класса §13.2 — сопоставлять имена с чекпоинтом не нужно вовсе.
+    мета = json.loads(байты_меты)
+    марка_по_индексу = {номер: класс["brand"] for номер, класс in enumerate(мета["classes"])}
 
     чекпоинт = torch.load(аргументы.checkpoint, map_location="cpu", weights_only=True)
     индекс: dict[str, int] = чекпоинт["class_index"]
@@ -78,6 +85,7 @@ def main() -> None:
             top5_by_centroids(эмбеддинги, центроиды),
             [int(метка) for метка in метки],
             idx_to_class_id=класс_по_индексу,
+            idx_to_brand=марка_по_индексу,
         )
         итоги[имя] = asdict(метрики)
         print(
