@@ -1,14 +1,16 @@
 """Тесты нормализации свободного текста модели (§3.3)."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from pipeline.catalog import Catalog, brand_slug, load_catalog, member_index
+from pipeline.catalog import Catalog, CatalogError, brand_slug, load_catalog, member_index
 from pipeline.normalize import (
     BODY_STYLES,
     DEFAULT_BRAND_ALIASES_PATH,
     canonical_brand,
+    load_aliases,
     load_brand_aliases,
     model_core,
     normalize,
@@ -220,6 +222,31 @@ def test_карта_марок_приводит_написание_к_катал
     assert canonical_brand(сырое, марки) == ожидание
 
 
+@pytest.mark.parametrize(
+    ("сырое", "ожидание"),
+    [
+        ("ВАЗ-2107", "Lada"),
+        ("УАЗ-2206", "UAZ"),
+        ("Мерседес-Бенц", "Mercedes-Benz"),
+        ("Ленд Ровер", "Land Rover"),
+        ("Mercedes-Benz", "Mercedes-Benz"),
+    ],
+)
+def test_дефис_в_поле_марки_разбирается_как_пробел(
+    марки: dict[str, str], сырое: str, ожидание: str
+) -> None:
+    """Дефисная форма «ВАЗ-2107» в объявлениях не реже пробельной, а промах на
+    ней тихий: слаг у неё непустой («2107»), то есть марка вернулась бы сырой и
+    `normalize` ответил бы `unknown_brand` вместо промаха карты марок.
+
+    Режет варианты `_варианты_марки`, а не `_подготовить`: та общая с разбором
+    модели, и дефис там несущий (`c-klasse`, `e-series`). Первым кандидатом
+    остаётся подготовленная строка целиком, иначе ключ, записанный в карте с
+    дефисом («мерседес-бенц»), перестал бы находиться.
+    """
+    assert canonical_brand(сырое, марки) == ожидание
+
+
 def test_марка_вне_карты_с_непустым_слагом_возвращается_как_есть(марки: dict[str, str]) -> None:
     """Иначе карту пришлось бы наполнять всеми сорока марками каталога."""
     assert canonical_brand("Volkswagen", марки) == "Volkswagen"
@@ -284,8 +311,9 @@ groups:
     display: Лада Ларгус / Renault Logan MCV
 """
 
-# Ключи — строки после подготовки §3.3, а не как в объявлении: «семёрка»
-# доезжает до карты как «семерка», потому что диакритика с «ё» снимается.
+# Ключи — строки после подготовки §3.3: «семёрка» доезжает до карты как
+# «семерка», потому что диакритика с «ё» снимается. Карту из файла готовит сам
+# `load_aliases`, а инлайновая приходит в `normalize` как есть, минуя загрузчик.
 АЛИАСЫ_РФ = {
     "жигули": "lada__2107",
     "семерка": "lada__2107",
@@ -323,6 +351,56 @@ def test_разговорное_имя_берётся_только_алиасо�
     assert итог.model_id == ожидание
     assert итог.reason == "alias"
     assert normalize(сырое, марка, каталог_рф, {}).model_id is None
+
+
+@pytest.mark.parametrize("сырое", ["Семёрка", "семерка", "СЕМЁРКА"])
+def test_ключ_карты_моделей_готовится_как_и_сырая_строка(
+    tmp_path: Path, каталог_рф: Catalog, сырое: str
+) -> None:
+    """Оба загрузчика готовят ключ одинаково, подготовкой §3.3.
+
+    Иначе «семёрка» в `aliases.yaml` стала бы мёртвой записью без всякого
+    сигнала: `_подготовить` снимает с «ё» диакритику, и строка объявления
+    доезжает до карты как «семерка», а ключ после одного `lower()` остаётся с
+    «ё» и не совпадает ни с чем. Автор карты не обязан знать про подготовку —
+    он пишет марку и модель так, как они пишутся.
+    """
+    путь = tmp_path / "aliases.yaml"
+    путь.write_text("version: 1\naliases:\n  семёрка: lada__2107\n", encoding="utf-8")
+    итог = normalize(сырое, "Lada", каталог_рф, load_aliases(путь))
+    assert итог.model_id == "lada__2107"
+    assert итог.reason == "alias"
+
+
+@pytest.mark.parametrize(
+    ("секция", "загрузчик", "имя"),
+    [
+        ("aliases", load_aliases, "aliases.yaml"),
+        ("brands", load_brand_aliases, "brand_aliases.yaml"),
+    ],
+)
+def test_ключи_совпадающие_после_подготовки_отвергаются(
+    tmp_path: Path,
+    секция: str,
+    загрузчик: Callable[[Path], dict[str, str]],
+    имя: str,
+) -> None:
+    """Пара «Хёндэ»/«Хендэ» — два ключа для YAML и один после подготовки.
+
+    Линтер на дубли ключей такую пару не поймает: схлопывает её не YAML, а
+    словарное включение загрузчика, и молча — вторая запись затирает первую.
+    Обе карты заведены под ручной рост, поэтому это падение, а не потеря, и
+    в сообщении оба исходных написания: по подготовленной форме автор свою
+    строку в файле не найдёт.
+    """
+    путь = tmp_path / имя
+    путь.write_text(
+        f"version: 1\n{секция}:\n  Хёндэ: Hyundai\n  Хендэ: Hyundai\n", encoding="utf-8"
+    )
+    with pytest.raises(CatalogError, match="Хёндэ") as ошибка:
+        загрузчик(путь)
+    assert "Хендэ" in str(ошибка.value)
+    assert имя in str(ошибка.value)
 
 
 @pytest.mark.parametrize("сырое", ["2107", "ВАЗ-2107"])
