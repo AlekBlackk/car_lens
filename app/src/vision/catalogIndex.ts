@@ -103,6 +103,11 @@ export function loadIndex(
   if (actual !== header.metaSha256) {
     throw new IndexFormatError(`sha256 меты ${actual} против ${header.metaSha256} в заголовке`)
   }
+  // Записи меты здесь не проверяются, и это осознанно: sha256 из заголовка связывает мету с
+  // бинарником, а соответствие §13.2 сторожат две настоящие читалки — `labels.ts` (роняет
+  // старт бандла с указанием поля) и `CatalogIndex.kt` (`IndexFormatException`). Третьему
+  // разборщику формата места нет: он разошёлся бы с ними. Цена приведения типа — мета
+  // старого формата даёт здесь `class_id === undefined` в типе `string`.
   const document = JSON.parse(new TextDecoder().decode(meta)) as { classes?: CatalogClass[] }
   const classes = document.classes ?? []
   if (classes.length !== header.numClasses) {

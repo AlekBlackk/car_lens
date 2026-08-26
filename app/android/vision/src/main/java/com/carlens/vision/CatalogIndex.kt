@@ -144,7 +144,9 @@ class CatalogIndex(
         private fun разобратьМету(meta: ByteArray): List<CatalogClass> = try {
             json.decodeFromString<CatalogMeta>(String(meta, Charsets.UTF_8)).classes
         } catch (ошибка: SerializationException) {
-            throw IndexFormatException("catalog_meta.json не по §13.2: ${ошибка.message}")
+            // `message` здесь nullable, и без запаски текст выродился бы в «не по §13.2: null»
+            // — сообщение без единой подсказки. `ошибка` даёт хотя бы имя класса исключения.
+            throw IndexFormatException("catalog_meta.json не по §13.2: ${ошибка.message ?: ошибка}")
         }
 
         private fun разобратьЗаголовок(bin: ByteArray): IndexHeader {
