@@ -10,9 +10,14 @@ import сыройКаталог from '../../android/models/catalog_meta.json'
 import { AssetError } from './thresholds'
 
 export type Класс = {
+  classId: string
   display: string
-  brand: string
-  platformGroup: string | null
+  brand: string | null
+  /**
+   * `member_id` участников класса — `<слаг_марки>__<слаг_модели>` из §13.2. Нужны списку
+   * выбора: у разнобрендовой группы марки нет, и найти её по марке участника больше нечем.
+   */
+  members: readonly string[]
 }
 
 const строка = (значение: unknown, поле: string): string => {
@@ -20,6 +25,20 @@ const строка = (значение: unknown, поле: string): string => {
     throw new AssetError(`${поле}: ожидалась непустая строка, пришло ${JSON.stringify(значение)}`)
   }
   return значение
+}
+
+/**
+ * `brand` разнобрендовой группы — `null` по §13.2: «Geely Coolray / Belgee X50» одной маркой
+ * не назвать. Поле при этом обязано быть в записи: пропуск означает мету другого формата.
+ */
+const марка = (значение: unknown, поле: string): string | null =>
+  значение === null ? null : строка(значение, поле)
+
+const участники = (значение: unknown, поле: string): readonly string[] => {
+  if (!Array.isArray(значение) || значение.length === 0) {
+    throw new AssetError(`${поле}: ожидался непустой массив участников класса`)
+  }
+  return значение.map((участник, номер) => строка(участник, `${поле}[${номер}]`))
 }
 
 export function parseCatalog(документ: unknown): Класс[] {
@@ -31,11 +50,11 @@ export function parseCatalog(документ: unknown): Класс[] {
   const классы: Класс[] = new Array(сырые.length)
   for (let номер = 0; номер < сырые.length; номер++) {
     const запись = сырые[номер] as Record<string, unknown>
-    const группа = запись.platform_group
     классы[номер] = {
+      classId: строка(запись.class_id, `classes[${номер}].class_id`),
       display: строка(запись.display, `classes[${номер}].display`),
-      brand: строка(запись.brand, `classes[${номер}].brand`),
-      platformGroup: typeof группа === 'string' && группа.length > 0 ? группа : null,
+      brand: марка(запись.brand, `classes[${номер}].brand`),
+      members: участники(запись.members, `classes[${номер}].members`),
     }
   }
   return классы
@@ -58,13 +77,24 @@ export function classLabel(classIdx: number): Класс | null {
   return CATALOG[classIdx]!
 }
 
+/**
+ * Совпадают ли марки двух классов. Правило вынесено из `sameBrand` отдельной функцией,
+ * потому что проверить его на настоящем каталоге нечем: классов без марки в нём пока нет,
+ * а тест на индексах ловил бы только совпадающие марки.
+ */
+export function brandsMatch(первый: Класс | null, второй: Класс | null): boolean {
+  'worklet'
+  if (первый == null || второй == null) return false
+  // Два класса без марки — две разные разнобрендовые группы, а не «одна марка»: иначе §6.4
+  // показал бы brand-only там, где бренда нет вовсе.
+  if (первый.brand == null || второй.brand == null) return false
+  return первый.brand === второй.brand
+}
+
 /** Совпадают ли бренды двух классов — вход ветви «показать только бренд» из §6.4. */
 export function sameBrand(первый: number, второй: number): boolean {
   'worklet'
-  const один = classLabel(первый)
-  const другой = classLabel(второй)
-  if (один == null || другой == null) return false
-  return один.brand === другой.brand
+  return brandsMatch(classLabel(первый), classLabel(второй))
 }
 
 export type ИнфоКаталога = {

@@ -2,6 +2,7 @@ package com.carlens.vision
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -26,12 +27,21 @@ data class IndexHeader(
     val metaSha256: String,
 )
 
+/**
+ * Запись каталога описывает класс, а не модель (§13.2): состав группы лежит в `members`,
+ * а `brand` пуст у разнобрендовой группы — «Geely Coolray / Belgee X50» одной маркой не
+ * назвать. Поля `idx` нет намеренно: индексом класса служит позиция в массиве `classes`.
+ *
+ * Значений по умолчанию ни у одного поля нет: мету пишет наш же `pipeline/index_format.py`,
+ * и отсутствие поля означает не «пустое значение», а мету другого формата — её надо
+ * отвергать, а не додумывать.
+ */
 @Serializable
 data class CatalogClass(
-    @SerialName("model_id") val modelId: String,
-    val brand: String,
+    @SerialName("class_id") val classId: String,
+    val members: List<String>,
+    val brand: String?,
     val display: String,
-    @SerialName("platform_group") val platformGroup: String? = null,
 )
 
 @Serializable
@@ -110,7 +120,7 @@ class CatalogIndex(
                     "sha256 меты $фактический против ${заголовок.metaSha256} в заголовке"
                 )
             }
-            val классы = json.decodeFromString<CatalogMeta>(String(meta, Charsets.UTF_8)).classes
+            val классы = разобратьМету(meta)
             if (классы.size != заголовок.numClasses) {
                 throw IndexFormatException(
                     "classes меты: ${классы.size} против ${заголовок.numClasses} в заголовке"
@@ -122,6 +132,19 @@ class CatalogIndex(
                 .asFloatBuffer()
                 .get(тело)
             return CatalogIndex(заголовок, классы, тело)
+        }
+
+        /**
+         * Мета старого формата, где класс равен модели, роняет `kotlinx.serialization`
+         * собственным `MissingFieldException` — из ассетов APK его видно как «что-то
+         * сломалось в сериализации». Единственный вызывающий `parse` (`CarVision.load`)
+         * разбирает ошибки формата индекса, поэтому и эта приходит к нему тем же типом,
+         * с текстом kotlinx внутри: он называет пропавшее поле.
+         */
+        private fun разобратьМету(meta: ByteArray): List<CatalogClass> = try {
+            json.decodeFromString<CatalogMeta>(String(meta, Charsets.UTF_8)).classes
+        } catch (ошибка: SerializationException) {
+            throw IndexFormatException("catalog_meta.json не по §13.2: ${ошибка.message}")
         }
 
         private fun разобратьЗаголовок(bin: ByteArray): IndexHeader {

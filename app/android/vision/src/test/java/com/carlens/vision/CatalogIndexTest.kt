@@ -36,11 +36,35 @@ class CatalogIndexTest {
     @Test
     fun `поля класса разобраны под именами формата`() {
         val классы = разобрать().classes
-        assertEquals("acme__one", классы[0].modelId)
+        assertEquals("acme__one", классы[0].classId)
+        assertEquals(listOf("acme__one"), классы[0].members)
         assertEquals("Acme", классы[0].brand)
         assertEquals("Acme One", классы[0].display)
-        assertNull(классы[0].platformGroup)
-        assertEquals("p2", классы[1].platformGroup)
+    }
+
+    @Test
+    fun `у разнобрендовой группы марки нет, а участники на месте`() {
+        val группа = разобрать().classes[1]
+        assertEquals("grp__twins", группа.classId)
+        assertEquals(listOf("acme__two", "beta__two"), группа.members)
+        assertNull(группа.brand)
+        assertEquals("Acme Two / Beta Two", группа.display)
+    }
+
+    @Test
+    fun `мета старого формата отвергается ошибкой формата индекса`() {
+        // Класс равен модели: `model_id` вместо `class_id`, `members` нет вовсе.
+        val старая = (
+            "{\"classes\":[{\"model_id\":\"acme__one\",\"brand\":\"Acme\"," +
+                "\"display\":\"Acme One\",\"platform_group\":null}]}"
+            ).toByteArray(Charsets.UTF_8)
+        val отказ = assertThrows(IndexFormatException::class.java) {
+            разобрать(bin = бинарникПодМету(старая, классов = 1), meta = старая)
+        }
+        // Сообщение обязано называть и файл, и пропавшее поле: иначе на устройстве видно
+        // «что-то сломалось в сериализации», а не «мета другого формата».
+        assertTrue(отказ.message!!.contains("catalog_meta.json"))
+        assertTrue(отказ.message!!.contains("class_id"))
     }
 
     @Test
@@ -179,8 +203,8 @@ class CatalogIndexTest {
             prefix = "{\"classes\":[",
             postfix = "]}",
         ) { номер ->
-            "{\"model_id\":\"synth__$номер\",\"brand\":\"Synth\"," +
-                "\"display\":\"Synth $номер\",\"platform_group\":null}"
+            "{\"class_id\":\"synth__$номер\",\"members\":[\"synth__$номер\"]," +
+                "\"brand\":\"Synth\",\"display\":\"Synth $номер\"}"
         }.toByteArray(Charsets.UTF_8)
 
         val значений = классов * центроидов * СИНТЕТИЧЕСКАЯ_РАЗМЕРНОСТЬ
@@ -191,6 +215,18 @@ class CatalogIndexTest {
             for (косинус in класс) вектор(косинус).forEach { буфер.putFloat(it) }
         }
         return CatalogIndex.parse(буфер.array(), мета, Embeddings::sha256)
+    }
+
+    /**
+     * Бинарник, валидный по заголовку и sha256 под заданную мету: разбор доходит до разбора
+     * JSON и падает уже на нём, а не раньше. Тело нулевое — до него дело не доходит.
+     */
+    private fun бинарникПодМету(мета: ByteArray, классов: Int): ByteArray {
+        val центроидов = 1
+        val значений = классов * центроидов * СИНТЕТИЧЕСКАЯ_РАЗМЕРНОСТЬ
+        val буфер = ByteBuffer.allocate(64 + значений * 4).order(ByteOrder.LITTLE_ENDIAN)
+        записатьЗаголовок(буфер, мета, классов, центроидов)
+        return буфер.array()
     }
 
     private fun записатьЗаголовок(

@@ -28,10 +28,14 @@ export default function ClassPicker(свойства: СвойстваВыбор
     const все = allClasses()
     const пары = все.map((класс, индекс) => ({ класс, индекс }))
     if (строка.length === 0) return пары
-    // Поиск идёт и по бренду: пользователь, не знающий модель, ищет «toyota», а не «camry».
+    // Поиск идёт и по марке: пользователь, не знающий модель, ищет «toyota», а не «camry».
+    // У разнобрендовой группы марки нет вовсе (§13.2), и найти её по марке участника можно
+    // только через `members`: `member_id` вида «belgee__x50» несёт и марку, и модель.
     return пары.filter(
       ({ класс }) =>
-        класс.display.toLowerCase().includes(строка) || класс.brand.toLowerCase().includes(строка),
+        класс.display.toLowerCase().includes(строка) ||
+        (класс.brand?.toLowerCase().includes(строка) ?? false) ||
+        класс.members.some((участник) => участник.toLowerCase().includes(строка)),
     )
   }, [запрос])
 
@@ -56,7 +60,8 @@ export default function ClassPicker(свойства: СвойстваВыбор
           renderItem={({ item }) => (
             <Pressable style={styles.строка} onPress={() => наВыбор(item.индекс)}>
               <Text style={styles.текст}>{item.класс.display}</Text>
-              <Text style={styles.бренд}>{item.класс.brand}</Text>
+              {/* У группы марки нет, а `display` уже называет обе: прочерк, как в деталях. */}
+              <Text style={styles.бренд}>{item.класс.brand ?? '—'}</Text>
             </Pressable>
           )}
         />

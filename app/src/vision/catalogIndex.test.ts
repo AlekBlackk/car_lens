@@ -30,8 +30,17 @@ test('разбирает заголовок фикстуры', () => {
 test('классы приходят в порядке индексов', () => {
   const index = loadIndex(bin(), meta(), sha256)
   expect(index.classes.length).toBe(2)
-  expect(index.classes[0]?.model_id).toBe('acme__one')
-  expect(index.classes[1]?.display).toBe('Acme Two')
+  expect(index.classes[0]?.class_id).toBe('acme__one')
+  expect(index.classes[0]?.members).toEqual(['acme__one'])
+  expect(index.classes[0]?.brand).toBe('Acme')
+  expect(index.classes[1]?.display).toBe('Acme Two / Beta Two')
+})
+
+test('у разнобрендовой группы марки нет, а участники на месте', () => {
+  const group = loadIndex(bin(), meta(), sha256).classes[1]
+  expect(group?.class_id).toBe('grp__twins')
+  expect(group?.members).toEqual(['acme__two', 'beta__two'])
+  expect(group?.brand).toBeNull()
 })
 
 test('центроиды нормализованы и не копируются лишний раз', () => {

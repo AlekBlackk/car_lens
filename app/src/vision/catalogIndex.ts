@@ -33,11 +33,15 @@ export interface IndexHeader {
   metaSha256: string
 }
 
+/**
+ * Запись описывает класс, а не модель (§13.2): состав группы лежит в `members`, а `brand`
+ * пуст у разнобрендовой группы. Поля `idx` нет — индексом служит позиция в `classes`.
+ */
 export interface CatalogClass {
-  model_id: string
-  brand: string
+  class_id: string
+  members: string[]
+  brand: string | null
   display: string
-  platform_group: string | null
 }
 
 export interface CatalogIndex {
