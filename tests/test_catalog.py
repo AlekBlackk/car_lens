@@ -150,6 +150,25 @@ groups:
         load_catalog(_записать(tmp_path, текст))
 
 
+def test_марка_с_пустым_слагом_отвергается(tmp_path: Path) -> None:
+    """§6: у «Лада», «Москвич» и «УАЗ» слаг пуст, то есть одинаков.
+
+    Каноническое имя марки — латиница, русское написание живёт в `display`.
+    Отказ приходит на самой марке, а не на её моделях: собранный из пустого
+    слага `model_id` вида `__2107` не прошёл бы и проверку формата, но по
+    её сообщению настоящую причину — марку кириллицей — не найти.
+    """
+    текст = """
+version: 1
+brands:
+  Лада:
+    models:
+      "2107": {display: Лада 2107}
+"""
+    with pytest.raises(CatalogError, match="пустой слаг"):
+        load_catalog(_записать(tmp_path, текст))
+
+
 def test_неизвестная_версия_схемы_отвергается(tmp_path: Path) -> None:
     with pytest.raises(CatalogError, match="version"):
         load_catalog(_записать(tmp_path, "version: 99\nbrands: {}\n"))

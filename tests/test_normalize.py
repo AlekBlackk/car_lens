@@ -4,8 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.catalog import Catalog, load_catalog
-from pipeline.normalize import BODY_STYLES, model_core, normalize
+from pipeline.catalog import Catalog, brand_slug, load_catalog, member_index
+from pipeline.normalize import (
+    BODY_STYLES,
+    DEFAULT_BRAND_ALIASES_PATH,
+    canonical_brand,
+    load_brand_aliases,
+    model_core,
+    normalize,
+)
 
 YAML = """
 version: 1
@@ -158,6 +165,216 @@ def test_хвостовой_год_отбрасывается(каталог: Ca
     итог = normalize("A4 Sedan 2012", "Audi", каталог, {})
     assert итог.model_id == "audi__a4"
     assert итог.body_style == "sedan"
+
+
+@pytest.fixture
+def марки() -> dict[str, str]:
+    """Настоящая карта марок проекта: она и есть данные, а не подставка."""
+    return load_brand_aliases(DEFAULT_BRAND_ALIASES_PATH)
+
+
+def test_кириллические_марки_неразличимы_по_слагу_и_разводятся_картой(
+    марки: dict[str, str],
+) -> None:
+    """§6: у «Лада», «Москвич» и «УАЗ» слаг не просто пуст — он одинаков.
+
+    Три разные марки схлопываются в одну, и любая из них получает отказ
+    ещё до карты моделей: `normalize` фильтрует каталог по слагу марки, а
+    `aliases.yaml` смотрит уже внутри отобранного. Починить это записью в
+    карту моделей невозможно — развести марки может только карта марок,
+    применённая до нормализации.
+    """
+    assert brand_slug("Лада") == brand_slug("Москвич") == brand_slug("УАЗ") == ""
+    assert {canonical_brand(м, марки) for м in ("Лада", "Москвич", "УАЗ")} == {
+        "Lada",
+        "Moskvich",
+        "UAZ",
+    }
+
+
+@pytest.mark.parametrize(
+    ("сырое", "ожидание"),
+    [
+        ("Лада", "Lada"),
+        ("ВАЗ", "Lada"),
+        ("LADA", "Lada"),
+        ("Ваз 2107", "Lada"),
+        ("Москвич", "Moskvich"),
+        ("УАЗ", "UAZ"),
+        ("ГАЗ", "GAZ"),
+        ("Хендай", "Hyundai"),
+        ("Хёндэ", "Hyundai"),
+        ("Мерседес", "Mercedes-Benz"),
+        ("Ленд Ровер", "Land Rover"),
+    ],
+)
+def test_карта_марок_приводит_написание_к_каталожному(
+    марки: dict[str, str], сырое: str, ожидание: str
+) -> None:
+    """Транслитерации в правилах §3.3 нет: «Хёндэ» → `Hyundai` не выводится.
+
+    «Ваз 2107» в поле марки разбирается префиксом, а не своей записью:
+    сочетаний марки с номером модели столько же, сколько моделей, и руками
+    их не перечислить.
+    """
+    assert canonical_brand(сырое, марки) == ожидание
+
+
+def test_марка_вне_карты_с_непустым_слагом_возвращается_как_есть(марки: dict[str, str]) -> None:
+    """Иначе карту пришлось бы наполнять всеми сорока марками каталога."""
+    assert canonical_brand("Volkswagen", марки) == "Volkswagen"
+
+
+def test_марка_вне_карты_с_пустым_слагом_даёт_none(марки: dict[str, str]) -> None:
+    """`None` означает ровно «канонизировать нечем»: от марки не осталось
+    ни одного ASCII-символа, и сравнивать с каталогом нечего.
+    """
+    assert canonical_brand("Тарантас", марки) is None
+
+
+def test_канонические_имена_карты_дают_непустой_слаг(марки: dict[str, str]) -> None:
+    """Из значения собирается слаг `model_id`, поэтому кириллица в нём завела
+    бы ровно ту дыру, которую карта и закрывает.
+    """
+    assert марки
+    assert [имя for имя in марки.values() if not brand_slug(имя)] == []
+
+
+def test_ключ_карты_марок_готовится_как_и_сырая_строка(tmp_path: Path) -> None:
+    """Иначе запись с «ё» не нашлась бы никогда: подготовка §3.3 снимает с «ё»
+    диакритику, и ключ из файла обязан пройти ту же чистку.
+    """
+    путь = tmp_path / "brand_aliases.yaml"
+    путь.write_text("version: 1\nbrands:\n  Хёндэ: Hyundai\n", encoding="utf-8")
+    карта = load_brand_aliases(путь)
+    assert canonical_brand("ХЁНДЭ", карта) == "Hyundai"
+    assert canonical_brand("Хендэ", карта) == "Hyundai"
+
+
+def test_пустой_слаг_марки_даёт_отдельную_причину(каталог: Catalog) -> None:
+    """«Лада» не отсутствует в каталоге — она до каталога не доехала.
+
+    Общий `unknown_brand` слил бы два разных случая: «такой марки нет» и
+    «марку не провели через `canonical_brand`». Первый чинится каталогом,
+    второй — картой марок, и по отчёту их надо различать.
+    """
+    итог = normalize("Жигули", "Лада", каталог, {})
+    assert итог.model_id is None
+    assert итог.reason == "unknown_brand_no_slug"
+
+
+YAML_РФ = """
+version: 1
+brands:
+  Lada:
+    models:
+      "2107": {display: Лада 2107}
+      "2110": {display: Лада 2110}
+      largus: {display: Лада Ларгус}
+  UAZ:
+    models:
+      "2206": {display: УАЗ-2206}
+      patriot: {display: УАЗ Патриот}
+  Renault:
+    models:
+      logan_mcv: {display: Renault Logan MCV}
+groups:
+  grp__largus_logan:
+    members: [lada__largus, renault__logan_mcv]
+    display: Лада Ларгус / Renault Logan MCV
+"""
+
+# Ключи — строки после подготовки §3.3, а не как в объявлении: «семёрка»
+# доезжает до карты как «семерка», потому что диакритика с «ё» снимается.
+АЛИАСЫ_РФ = {
+    "жигули": "lada__2107",
+    "семерка": "lada__2107",
+    "2107": "lada__2107",
+    "ваз-2107": "lada__2107",
+    "буханка": "uaz__2206",
+    "патриот": "uaz__patriot",
+    "ларгус": "lada__largus",
+}
+
+
+@pytest.fixture
+def каталог_рф(tmp_path: Path) -> Catalog:
+    путь = tmp_path / "canonical.yaml"
+    путь.write_text(YAML_РФ, encoding="utf-8")
+    return load_catalog(путь)
+
+
+@pytest.mark.parametrize(
+    ("сырое", "марка", "ожидание"),
+    [
+        ("Жигули", "Lada", "lada__2107"),
+        ("семёрка", "Lada", "lada__2107"),
+        ("Буханка", "UAZ", "uaz__2206"),
+        ("Патриот", "UAZ", "uaz__patriot"),
+    ],
+)
+def test_разговорное_имя_берётся_только_алиасом(
+    каталог_рф: Catalog, сырое: str, марка: str, ожидание: str
+) -> None:
+    """Fuzzy этих строк не видит вовсе: `_ключ_сравнения` оставляет только
+    `[a-z0-9]`, и от «Жигули» не остаётся ни одного символа для сравнения.
+    """
+    итог = normalize(сырое, марка, каталог_рф, АЛИАСЫ_РФ)
+    assert итог.model_id == ожидание
+    assert итог.reason == "alias"
+    assert normalize(сырое, марка, каталог_рф, {}).model_id is None
+
+
+@pytest.mark.parametrize("сырое", ["2107", "ВАЗ-2107"])
+def test_числовая_модель_доезжает_до_карты_целиком(каталог_рф: Catalog, сырое: str) -> None:
+    """Отсечка по `\\d\\.\\d` на «2107» не срабатывает, и за модельный год
+    четыре цифры тоже не принимаются: `_ГОД` знает только 19xx и 20xx.
+
+    Строка доезжает до карты целиком — и решает именно карта: правилам §3.3
+    в номере модели разбирать нечего, а «ВАЗ-2107» несёт ещё и кириллический
+    префикс марки, от которого `_ключ_сравнения` не оставит ничего.
+    """
+    итог = normalize(сырое, "Lada", каталог_рф, АЛИАСЫ_РФ)
+    assert итог.model_id == "lada__2107"
+    assert итог.reason == "alias"
+
+
+def test_чужой_номер_модели_не_притягивается_к_соседнему(каталог_рф: Catalog) -> None:
+    """«2108» в каталоге нет, а «2107» и «2110» есть: на голых числах fuzzy
+    обязан отказать, а не выбрать ближайшее — разница в один символ здесь
+    означает другую модель.
+    """
+    итог = normalize("2108", "Lada", каталог_рф, АЛИАСЫ_РФ)
+    assert итог.model_id is None
+    assert итог.reason == "below_threshold"
+
+
+def test_ребейдж_даёт_разные_model_id(каталог_рф: Catalog) -> None:
+    """«Ларгус» и «Logan MCV» — одна машина под двумя шильдиками, но два
+    разных `model_id`: `normalize` возвращает модель, а не класс.
+
+    Сойтись они могут только в `class_idx`, и лишь потому, что группа
+    объявлена секцией `groups:`; без этой записи их было бы два класса.
+    """
+    ларгус = normalize("Ларгус", "Lada", каталог_рф, АЛИАСЫ_РФ)
+    логан = normalize("Logan MCV", "Renault", каталог_рф, АЛИАСЫ_РФ)
+    assert ларгус.model_id == "lada__largus"
+    assert логан.model_id == "renault__logan_mcv"
+    assert ларгус.model_id != логан.model_id
+    класс = member_index(каталог_рф)
+    assert класс["lada__largus"] == класс["renault__logan_mcv"] == "grp__largus_logan"
+
+
+def test_русское_объявление_проходит_две_карты_подряд(
+    каталог_рф: Catalog, марки: dict[str, str]
+) -> None:
+    """Порядок §6: сначала марка, потом модель. В обратном порядке «ВАЗ» дал бы
+    пустой слаг, и до карты моделей строка не дошла бы вовсе.
+    """
+    марка = canonical_brand("ВАЗ", марки)
+    assert марка is not None
+    итог = normalize("Жигули", марка, каталог_рф, АЛИАСЫ_РФ)
+    assert (марка, итог.model_id) == ("Lada", "lada__2107")
 
 
 def test_год_остаётся_если_он_единственный_токен() -> None:

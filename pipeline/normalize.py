@@ -8,6 +8,11 @@
 Кандидаты для сопоставления берутся **только среди моделей заявленной
 марки**. Поиск по всему каталогу выдаёт правдоподобные, но неверные
 сопоставления между марками.
+
+Сама марка приводится к каноническому виду **до** `normalize()`, картой
+`brand_aliases.yaml` (§6): кириллическое написание фильтр по слагу марки
+не проходит, а карта моделей смотрит уже внутри отобранного, поэтому
+внутри `normalize` починить это нечем.
 """
 
 from __future__ import annotations
@@ -25,6 +30,9 @@ from rapidfuzz import fuzz, process
 from pipeline.catalog import Catalog, brand_slug
 
 DEFAULT_ALIASES_PATH = Path(__file__).resolve().parent.parent / "catalog" / "aliases.yaml"
+DEFAULT_BRAND_ALIASES_PATH = (
+    Path(__file__).resolve().parent.parent / "catalog" / "brand_aliases.yaml"
+)
 
 BODY_STYLES = frozenset({"hatchback", "sedan", "wagon", "suv", "coupe", "van", "pickup"})
 
@@ -109,6 +117,19 @@ def load_aliases(path: Path) -> dict[str, str]:
     сырое: Any = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     таблица = сырое.get("aliases") or {}
     return {str(k).strip().lower(): str(v) for k, v in таблица.items()}
+
+
+def load_brand_aliases(path: Path) -> dict[str, str]:
+    """Прочитать `brand_aliases.yaml` в плоскую карту марок (§6).
+
+    Ключ проходит ту же подготовку, что и сырая строка при поиске, а не
+    просто `lower()`, как в `load_aliases`: марки здесь пишут кириллицей,
+    а `_подготовить` снимает диакритику, и «ё» в «Хёндэ» до сравнения не
+    доживает. Ключ, подготовленный иначе, не нашёлся бы никогда.
+    """
+    сырое: Any = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    таблица = сырое.get("brands") or {}
+    return {_подготовить(str(k)): str(v) for k, v in таблица.items()}
 
 
 def _снять_диакритику(текст: str) -> str:
@@ -213,6 +234,38 @@ def _найти_алиас(aliases: Mapping[str, str], подготовленн�
     return None
 
 
+def _варианты_марки(подготовленное: str) -> Iterator[str]:
+    """Кандидаты для поиска в карте марок, от длинного к короткому.
+
+    В поле марки объявления попадает и номер модели: «Ваз 2107». Такими
+    сочетаниями карту не наполнить — их столько же, сколько моделей, —
+    поэтому после полной строки пробуются её префиксы, и «ваз» находится.
+    Составные марки от этого не страдают: «ленд ровер» пробуется целиком
+    и только потом сокращается до «ленд».
+    """
+    токены = подготовленное.split()
+    for n in range(len(токены), 0, -1):
+        yield " ".join(токены[:n])
+
+
+def canonical_brand(raw: str, aliases: Mapping[str, str]) -> str | None:
+    """Сырое написание марки → каноническая марка каталога (§6).
+
+    Промах в карте при непустом слаге отдаёт сырое имя: латинские марки
+    каталога в карте не дублируются, `Volkswagen` доходит до каталога сам.
+
+    `None` означает ровно одно — канонизировать нечем: слаг пуст, то есть
+    от марки не осталось ни одного ASCII-символа, и с чем сравнивать
+    каталог, неизвестно. Такую марку нельзя пускать в `normalize`: там она
+    неотличима от любой другой кириллической.
+    """
+    for кандидат in _варианты_марки(_подготовить(raw)):
+        совпадение = aliases.get(кандидат)
+        if совпадение:
+            return совпадение
+    return raw if brand_slug(raw) else None
+
+
 def normalize(
     raw: str,
     brand: str,
@@ -226,6 +279,15 @@ def normalize(
         return NormalizeResult(raw, None, None, 0.0, "empty")
 
     слаг_марки = brand_slug(brand)
+    # Пустой слаг — не «марки нет в каталоге», а «марку не провели через
+    # `canonical_brand`»: у «Лада», «Москвич» и «УАЗ» слаг одинаково пуст, и
+    # фильтр ниже ответил бы на все три одно и то же. Каталог пустых слагов не
+    # содержит — `load_catalog` их отвергает, — так что общий `unknown_brand`
+    # здесь просто соврал бы о причине, а чинятся эти два случая по-разному:
+    # один каталогом, другой картой марок (§6).
+    if not слаг_марки:
+        return NormalizeResult(raw, None, None, 0.0, "unknown_brand_no_slug")
+
     свои = [m for m in catalog.models if brand_slug(m.brand) == слаг_марки]
     if not свои:
         return NormalizeResult(raw, None, None, 0.0, "unknown_brand")
