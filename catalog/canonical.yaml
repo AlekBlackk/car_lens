@@ -1,96 +1,92 @@
-# Канонический каталог марок и моделей.
+# Канонический каталог марок и моделей российского парка.
+#
 # model_id собирается как <слаг марки>__<слаг модели>, отдельным полем не хранится.
-# Полный набор моделей набирается на M0 по частотности в объявлениях (§3.3).
+# Единица приёмки — КЛАСС, а не модель (§13.2): пять платформенных групп внизу файла
+# дают пять классов на десять моделей. Итог — 150 классов на 155 моделях, 48 марок.
+#
+# Состав набран по долям парка АВТОСТАТ (§3 дизайна `2026-08-25-m0-catalog-ru-design.md`),
+# разложен по квотам §4 и проверяется `tests/test_canonical_catalog.py`. Правка состава
+# без правки того теста — это молчаливый уход от 150 классов и от порога §10 в 40 марок.
+#
+# display отечественных марок — кириллицей: так их пишут в объявлениях. Иномарки —
+# латиницей: на улице их узнают по надписи на крышке багажника (§6 дизайна, рулинг 3).
+# Идентификаторы латиницей везде: model_id уходит в имена файлов и в JSON на устройстве.
+#
+# Поколения и рестайлинги отдельными классами не заводятся (§7): Kia Rio трёх поколений —
+# один класс. Праворульные версии — тоже (Corolla Fielder живёт классом Corolla).
 version: 1
 brands:
-  Volkswagen:
+  # ---------------------------------------------------------------- отечественные, 24
+  # Крупнейшая доля парка: одна Lada — 13.4 млн машин, больше 28% всего парка.
+  # Пропорция дала бы марке 42 класса, а различимых кузовов у неё около шестнадцати —
+  # лишние слоты ушли японцам и китайцам (рулинг 2).
+  Lada:
     models:
-      golf: {display: Volkswagen Golf}
-      passat: {display: Volkswagen Passat}
-      polo: {display: Volkswagen Polo}
-      tiguan: {display: Volkswagen Tiguan}
-      touran: {display: Volkswagen Touran}
+      "2101": {display: Лада 2101 «копейка»}
+      "2104": {display: Лада 2104 (универсал)}
+      "2106": {display: Лада 2106}
+      "2107": {display: Лада 2107}
+      samara: {display: Лада Самара (2108/2109/21099)}
+      samara_2: {display: Лада Самара-2 (2113/2114/2115)}
+      "2110": {display: Лада 110 (2110/2111/2112)}
+      priora: {display: Лада Приора}
+      kalina: {display: Лада Калина}
+      granta: {display: Лада Гранта}
+      vesta: {display: Лада Веста}
+      xray: {display: Лада Икс-рей}
+      largus: {display: Лада Ларгус}
+      niva_2121: {display: Лада Нива Легенда (2121)}
+      niva_2131: {display: Лада Нива Легенда 5-дверная (2131)}
+      niva_travel: {display: Лада Нива Тревел}
+  UAZ:
+    models:
+      patriot: {display: УАЗ Патриот}
+      hunter: {display: УАЗ Хантер}
+      pickup: {display: УАЗ Пикап}
+      bukhanka: {display: УАЗ Буханка (452/2206)}
+  GAZ:
+    models:
+      volga_3110: {display: ГАЗ Волга (3110/31105)}
+      sobol: {display: ГАЗ Соболь}
+      gazel: {display: ГАЗель}
+  Moskvich:
+    models:
+      "2140": {display: Москвич 2140}
+      "2141": {display: Москвич 2141}
+      "3": {display: Москвич 3}
+
+  # ------------------------------------------------------------------- японские, 32
+  # 33.8% парка иномарок — крупнейшая доля, и модельный ряд дробится мелко, поэтому
+  # сюда ушли слоты, высвободившиеся у Lada.
   Toyota:
     models:
       corolla: {display: Toyota Corolla}
-      yaris: {display: Toyota Yaris}
+      camry: {display: Toyota Camry}
       rav4: {display: Toyota RAV4}
+      land_cruiser: {display: Toyota Land Cruiser}
+      land_cruiser_prado: {display: Toyota Land Cruiser Prado}
+      highlander: {display: Toyota Highlander}
       avensis: {display: Toyota Avensis}
-      auris: {display: Toyota Auris}
-      aygo: {display: Toyota Aygo}
-  Peugeot:
+      mark_2: {display: Toyota Mark II}
+  Lexus:
     models:
-      "208": {display: Peugeot 208}
-      "308": {display: Peugeot 308}
-      "3008": {display: Peugeot 3008}
-      "108": {display: Peugeot 108}
-  Citroen:
-    models:
-      c3: {display: Citroën C3}
-      c4: {display: Citroën C4}
-      berlingo: {display: Citroën Berlingo}
-      c1: {display: Citroën C1}
-  Skoda:
-    models:
-      octavia: {display: Škoda Octavia}
-      fabia: {display: Škoda Fabia}
-      superb: {display: Škoda Superb}
-      kodiaq: {display: Škoda Kodiaq}
-  Audi:
-    models:
-      a3: {display: Audi A3}
-      a4: {display: Audi A4}
-      a6: {display: Audi A6}
-      q5: {display: Audi Q5}
-  BMW:
-    models:
-      "3_series": {display: BMW 3 Series}
-      "5_series": {display: BMW 5 Series}
-      x3: {display: BMW X3}
-      x5: {display: BMW X5}
-  Mercedes-Benz:
-    models:
-      c_class: {display: Mercedes-Benz C-Class}
-      e_class: {display: Mercedes-Benz E-Class}
-      a_class: {display: Mercedes-Benz A-Class}
-      glc: {display: Mercedes-Benz GLC}
-  Ford:
-    models:
-      focus: {display: Ford Focus}
-      fiesta: {display: Ford Fiesta}
-      mondeo: {display: Ford Mondeo}
-      kuga: {display: Ford Kuga}
-  Opel:
-    models:
-      astra: {display: Opel Astra}
-      corsa: {display: Opel Corsa}
-      insignia: {display: Opel Insignia}
-  Renault:
-    models:
-      clio: {display: Renault Clio}
-      megane: {display: Renault Mégane}
-      captur: {display: Renault Captur}
+      rx: {display: Lexus RX}
+      lx: {display: Lexus LX}
+      nx: {display: Lexus NX}
   Nissan:
     models:
       qashqai: {display: Nissan Qashqai}
+      x_trail: {display: Nissan X-Trail}
+      almera: {display: Nissan Almera}
       juke: {display: Nissan Juke}
-      leaf: {display: Nissan Leaf}
-  Volvo:
+      murano: {display: Nissan Murano}
+      terrano: {display: Nissan Terrano}
+  Mitsubishi:
     models:
-      v70: {display: Volvo V70}
-      xc60: {display: Volvo XC60}
-      xc90: {display: Volvo XC90}
-      v60: {display: Volvo V60}
-  Kia:
-    models:
-      ceed: {display: Kia Ceed}
-      sportage: {display: Kia Sportage}
-      niro: {display: Kia Niro}
-  Hyundai:
-    models:
-      i30: {display: Hyundai i30}
-      tucson: {display: Hyundai Tucson}
-      kona: {display: Hyundai Kona}
+      outlander: {display: Mitsubishi Outlander}
+      lancer: {display: Mitsubishi Lancer}
+      pajero: {display: Mitsubishi Pajero}
+      asx: {display: Mitsubishi ASX}
   Mazda:
     models:
       "3": {display: Mazda 3}
@@ -98,104 +94,241 @@ brands:
       cx5: {display: Mazda CX-5}
   Honda:
     models:
+      cr_v: {display: Honda CR-V}
       civic: {display: Honda Civic}
-      crv: {display: Honda CR-V}
-  Mitsubishi:
-    models:
-      outlander: {display: Mitsubishi Outlander}
-      asx: {display: Mitsubishi ASX}
+      accord: {display: Honda Accord}
   Subaru:
     models:
       forester: {display: Subaru Forester}
       outback: {display: Subaru Outback}
-  Seat:
-    models:
-      leon: {display: SEAT Leon}
-      ibiza: {display: SEAT Ibiza}
-  Fiat:
-    models:
-      "500": {display: Fiat 500}
-      punto: {display: Fiat Punto}
-  Dacia:
-    models:
-      duster: {display: Dacia Duster}
-      sandero: {display: Dacia Sandero}
+      impreza: {display: Subaru Impreza}
   Suzuki:
     models:
-      swift: {display: Suzuki Swift}
-      vitara: {display: Suzuki Vitara}
-  Tesla:
+      grand_vitara: {display: Suzuki Grand Vitara}
+      sx4: {display: Suzuki SX4}
+
+  # ------------------------------------------------------------------- корейские, 21
+  # 18.7% парка иномарок. Kia и Hyundai держат массовый сегмент 2010-х, Daewoo —
+  # парк, доехавший через СНГ, SsangYong — заметный остаток дилерских продаж.
+  Kia:
     models:
-      model_3: {display: Tesla Model 3}
-      model_y: {display: Tesla Model Y}
-  Lexus:
+      rio: {display: Kia Rio}
+      sportage: {display: Kia Sportage}
+      ceed: {display: Kia Ceed}
+      sorento: {display: Kia Sorento}
+      optima: {display: Kia Optima}
+      soul: {display: Kia Soul}
+      cerato: {display: Kia Cerato}
+      spectra: {display: Kia Spectra}
+  Hyundai:
     models:
-      nx: {display: Lexus NX}
-      rx: {display: Lexus RX}
-  Land Rover:
+      solaris: {display: Hyundai Solaris}
+      creta: {display: Hyundai Creta}
+      tucson: {display: Hyundai Tucson}
+      santa_fe: {display: Hyundai Santa Fe}
+      accent: {display: Hyundai Accent}
+      getz: {display: Hyundai Getz}
+      elantra: {display: Hyundai Elantra}
+  Solaris:
     models:
-      discovery: {display: Land Rover Discovery}
-      range_rover_evoque: {display: Land Rover Range Rover Evoque}
-  Jaguar:
+      hs: {display: Solaris HS}
+  Daewoo:
     models:
-      xf: {display: Jaguar XF}
-      f_pace: {display: Jaguar F-Pace}
-  Porsche:
+      nexia: {display: Daewoo Nexia}
+      matiz: {display: Daewoo Matiz}
+      lanos: {display: Daewoo Lanos}
+  SsangYong:
     models:
-      cayenne: {display: Porsche Cayenne}
-      macan: {display: Porsche Macan}
-  MINI:
+      kyron: {display: SsangYong Kyron}
+      actyon: {display: SsangYong Actyon}
+      rexton: {display: SsangYong Rexton}
+
+  # ---------------------------------------- немецкие масс-маркет и чешские, 11
+  # Volkswagen 5.5% и Skoda 3.0% парка иномарок: калужская и нижегородская сборка.
+  Volkswagen:
     models:
-      cooper: {display: MINI Cooper}
-      countryman: {display: MINI Countryman}
-  Alfa Romeo:
+      polo: {display: Volkswagen Polo}
+      tiguan: {display: Volkswagen Tiguan}
+      passat: {display: Volkswagen Passat}
+      golf: {display: Volkswagen Golf}
+      touareg: {display: Volkswagen Touareg}
+      transporter: {display: Volkswagen Transporter}
+  Skoda:
     models:
-      giulia: {display: Alfa Romeo Giulia}
-      stelvio: {display: Alfa Romeo Stelvio}
+      octavia: {display: Škoda Octavia}
+      rapid: {display: Škoda Rapid}
+      fabia: {display: Škoda Fabia}
+      kodiaq: {display: Škoda Kodiaq}
+  Opel:
+    models:
+      astra: {display: Opel Astra}
+      zafira: {display: Opel Zafira}
+
+  # ------------------------------------------------------- немецкие премиум, 9
+  # Доля парка невелика, но узнаваемости пользователь ждёт от этих марок в первую
+  # очередь, поэтому квота держится на трёх самых массовых кузовах каждой.
+  Mercedes-Benz:
+    models:
+      c_class: {display: Mercedes-Benz C-Class}
+      e_class: {display: Mercedes-Benz E-Class}
+      gle: {display: Mercedes-Benz GLE}
+      sprinter: {display: Mercedes-Benz Sprinter}
+  BMW:
+    models:
+      "3_series": {display: BMW 3 Series}
+      "5_series": {display: BMW 5 Series}
+      x5: {display: BMW X5}
+  Audi:
+    models:
+      a4: {display: Audi A4}
+      a6: {display: Audi A6}
+      q5: {display: Audi Q5}
+
+  # ------------------------------------------------------------ французские, 11
+  # Renault 6.7% парка иномарок, вровень с Nissan. Logan и Duster — одни из самых
+  # массовых кузовов российской улицы.
+  Renault:
+    models:
+      logan: {display: Renault Logan}
+      sandero: {display: Renault Sandero}
+      duster: {display: Renault Duster}
+      megane: {display: Renault Mégane}
+      kaptur: {display: Renault Kaptur}
+      logan_mcv: {display: Renault Logan MCV}
+  Peugeot:
+    models:
+      "206": {display: Peugeot 206}
+      "308": {display: Peugeot 308}
+      "408": {display: Peugeot 408}
+  Citroen:
+    models:
+      c4: {display: Citroën C4}
+      berlingo: {display: Citroën Berlingo}
+
+  # ------------------------------------------------------------ американские, 10
+  # Chevrolet 5.0% и Ford 3.9% парка иномарок — Lacetti, Niva и Focus держат
+  # массовый сегмент 2000-х.
   Chevrolet:
     models:
+      lacetti: {display: Chevrolet Lacetti}
       cruze: {display: Chevrolet Cruze}
+      aveo: {display: Chevrolet Aveo}
       captiva: {display: Chevrolet Captiva}
-  Jeep:
+      niva: {display: Chevrolet Niva}
+      lanos: {display: Chevrolet Lanos}
+  Ford:
     models:
-      renegade: {display: Jeep Renegade}
-      compass: {display: Jeep Compass}
-  Saab:
+      focus: {display: Ford Focus}
+      mondeo: {display: Ford Mondeo}
+      kuga: {display: Ford Kuga}
+      fiesta: {display: Ford Fiesta}
+      transit: {display: Ford Transit}
+
+  # ---------------------------------------------------------------- китайские, 18
+  # 2.65 млн машин, около 6% парка, но растут быстрее всех: каталог без них
+  # устареет за год. Берутся реально разъехавшиеся модели, а не модельные ряды.
+  Chery:
     models:
-      "9_3": {display: Saab 9-3}
-      "9_5": {display: Saab 9-5}
-  Chrysler:
+      amulet: {display: Chery Amulet}
+      tiggo_4: {display: Chery Tiggo 4}
+      tiggo_7_pro: {display: Chery Tiggo 7 Pro}
+      tiggo_8: {display: Chery Tiggo 8}
+  Haval:
     models:
-      voyager: {display: Chrysler Voyager}
-      "300c": {display: Chrysler 300C}
-  Smart:
+      jolion: {display: Haval Jolion}
+      f7: {display: Haval F7}
+      dargo: {display: Haval Dargo}
+  Geely:
     models:
-      fortwo: {display: Smart Fortwo}
-      forfour: {display: Smart Forfour}
-  Ssangyong:
+      coolray: {display: Geely Coolray}
+      atlas_pro: {display: Geely Atlas Pro}
+      monjaro: {display: Geely Monjaro}
+      emgrand: {display: Geely Emgrand}
+  Belgee:
     models:
-      korando: {display: SsangYong Korando}
-      rexton: {display: SsangYong Rexton}
+      x50: {display: Belgee X50}
+      x70: {display: Belgee X70}
+  Changan:
+    models:
+      cs35_plus: {display: Changan CS35 Plus}
+      cs55_plus: {display: Changan CS55 Plus}
+  Exeed:
+    models:
+      txl: {display: EXEED TXL}
+  Omoda:
+    models:
+      c5: {display: OMODA C5}
+  Great Wall:
+    models:
+      hover: {display: Great Wall Hover}
+  Lifan:
+    models:
+      x60: {display: Lifan X60}
+      solano: {display: Lifan Solano}
+  Xcite:
+    models:
+      x_cross_7: {display: Xcite X-Cross 7}
+  JAC:
+    models:
+      js4: {display: JAC JS4}
+
+  # ------------------------------------------------- лёгкие коммерческие, 6
+  # Массовы на улице, и без своих классов уехали бы в `unknown` или в чужой класс.
+  # Детектор §4.1 отдаёт `car`, поэтому это кузова, а не грузовики (§7).
+  # ГАЗель, Transit, Sprinter, Transporter и Буханка объявлены у своих марок выше.
   Iveco:
     models:
       daily: {display: Iveco Daily}
-      eurocargo: {display: Iveco EuroCargo}
-  Cupra:
+
+  # ------------------------------------------------------------- хвост марок, 8
+  # §10 требует не менее 40 марок. Хвост добран марками с заметным парком, но малым
+  # числом кузовов выше порога отсечки: по одному классу на марку.
+  Datsun:
     models:
-      formentor: {display: CUPRA Formentor}
-      born: {display: CUPRA Born}
-  Polestar:
+      on_do: {display: Datsun on-DO}
+  Ravon:
     models:
-      "2": {display: Polestar 2}
-      "3": {display: Polestar 3}
-  BYD:
+      nexia_r3: {display: Ravon Nexia R3}
+  Volvo:
     models:
-      atto_3: {display: BYD Atto 3}
-      seal: {display: BYD Seal}
-# Платформенные группы (§13.2): несколько model_id, различающихся только шильдиком, —
-# один класс обучения и один слот в catalog_index.bin. Различить такие машины по кропу
-# кузова нельзя, и требовать этого от сети бессмысленно.
+      xc60: {display: Volvo XC60}
+  Land Rover:
+    models:
+      discovery: {display: Land Rover Discovery}
+  Jeep:
+    models:
+      grand_cherokee: {display: Jeep Grand Cherokee}
+  Infiniti:
+    models:
+      fx: {display: Infiniti FX}
+  Fiat:
+    models:
+      albea: {display: Fiat Albea}
+  Porsche:
+    models:
+      cayenne: {display: Porsche Cayenne}
+
+# Платформенные группы (§13.2, §5.1 дизайна): несколько model_id, различающихся только
+# шильдиком, — один класс обучения и один слот в catalog_index.bin. Кузов, оптика и
+# решётка совпадают, различие — эмблема и надпись; различить такие машины по кропу
+# физически нельзя, и требовать этого от сети бессмысленно.
+#
+# Здесь ровно пять групп — те, что §5.1 подтверждает. Кандидаты §5.2 (Duster/Terrano,
+# Chevrolet Niva / Niva Travel, Largus / Logan MCV, on-DO / Granta) остаются отдельными
+# классами: решает их confusion-замер на M3, а не впечатление от фотографий.
 groups:
-  grp__kei_trio:
-    members: [toyota__aygo, peugeot__108, citroen__c1]
-    display: "Toyota Aygo / Peugeot 108 / Citroën C1"
+  grp__jac_js4:
+    members: [moskvich__3, jac__js4]
+    display: "Москвич 3 / JAC JS4"
+  grp__coolray:
+    members: [geely__coolray, belgee__x50]
+    display: "Geely Coolray / Belgee X50"
+  grp__atlas_pro:
+    members: [geely__atlas_pro, belgee__x70]
+    display: "Geely Atlas Pro / Belgee X70"
+  grp__solaris_hs:
+    members: [hyundai__solaris, solaris__hs]
+    display: "Hyundai Solaris / Solaris HS"
+  grp__tiggo7:
+    members: [chery__tiggo_7_pro, xcite__x_cross_7]
+    display: "Chery Tiggo 7 Pro / Xcite X-Cross 7"

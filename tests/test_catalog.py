@@ -179,9 +179,12 @@ def test_реальный_каталог_проекта_валиден() -> None
 
     каталог = load_catalog(DEFAULT_CATALOG_PATH)
     assert len(каталог.brands()) >= 40
-    # Миграция kei_trio из полей моделей в секцию `groups:` — состав группы прежний.
-    assert member_index(каталог)["toyota__aygo"] == "grp__kei_trio"
-    assert member_index(каталог)["citroen__c1"] == "grp__kei_trio"
+    # Платформенная группа §5.1: Coolray и X50 различаются только шильдиком и
+    # занимают один класс. Состав каталога целиком проверяет
+    # `test_canonical_catalog.py`, здесь — что загрузчик читает `groups:` из
+    # настоящего файла, а не только из временных фикстур выше.
+    assert member_index(каталог)["geely__coolray"] == "grp__coolray"
+    assert member_index(каталог)["belgee__x50"] == "grp__coolray"
 
 
 def test_группа_даёт_один_класс_на_двух_моделей(tmp_path: Path) -> None:
