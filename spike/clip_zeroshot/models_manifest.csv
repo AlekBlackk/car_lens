@@ -1,0 +1,5 @@
+name,repo_id,revision,url,license,checked,weights_sha256
+tinyclip8m,wkcn/TinyCLIP-ViT-8M-16-Text-3M-YFCC15M,a2a8c6eaa2549ad66eb7c31b85022bf58273a26c,https://huggingface.co/wkcn/TinyCLIP-ViT-8M-16-Text-3M-YFCC15M,mit,2026-08-26,
+tinyclip39m,wkcn/TinyCLIP-ViT-39M-16-Text-19M-YFCC15M,07a4b0bc751cb64fecd2b661c048c1dd98d69444,https://huggingface.co/wkcn/TinyCLIP-ViT-39M-16-Text-19M-YFCC15M,mit,2026-08-26,
+openclip_b32,laion/CLIP-ViT-B-32-laion2B-s34B-b79K,1a25a446712ba5ee05982a381eed697ef9b435cf,https://huggingface.co/laion/CLIP-ViT-B-32-laion2B-s34B-b79K,mit,2026-08-26,
+siglip2_b16,google/siglip2-base-patch16-256,3f9f96cb90da5dbc758b01813f2f6f1aee24c1ab,https://huggingface.co/google/siglip2-base-patch16-256,apache-2.0,2026-08-26,
