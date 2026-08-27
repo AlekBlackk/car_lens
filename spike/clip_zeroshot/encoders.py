@@ -72,8 +72,17 @@ class _TransformersEncoder:
         self.tokenizer_name = имя_токенизатора
 
     def encode_text(self, промпты: list[str]) -> np.ndarray:
+        # У TinyCLIP токенизатор не задаёт свой `model_max_length` (в конфиге стоит
+        # заглушка-«бесконечность»), и `padding="max_length"` без явной длины валится
+        # с рваным батчем. Берём длину из конфига самой модели — она уже соответствует
+        # размеру её позиционных эмбеддингов (77 у CLIP-семейства, 64 у SigLIP2).
+        максимальная_длина = self.model.config.text_config.max_position_embeddings
         входы = self._processor(
-            text=промпты, padding="max_length", truncation=True, return_tensors="pt"
+            text=промпты,
+            padding="max_length",
+            truncation=True,
+            max_length=максимальная_длина,
+            return_tensors="pt",
         ).to(self._device)
         with self._torch.no_grad():
             выход = self.model.get_text_features(**входы)

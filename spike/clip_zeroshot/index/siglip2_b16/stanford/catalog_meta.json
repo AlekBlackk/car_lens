@@ -1,0 +1,1557 @@
+{
+  "format_version": 1,
+  "generated_at": "2026-08-27T12:20:08Z",
+  "model_weights_sha256": "model.safetensors=6125cacc01fa93bdc98a0c5101cefcd69b2ed1f8ab4f38d86f4ad5984f5dc863",
+  "embedding_dim": 768,
+  "centroids_per_class": 1,
+  "classes": [
+    {
+      "class_id": "acura__integra_type_r",
+      "members": [
+        "acura__integra_type_r"
+      ],
+      "brand": "Acura",
+      "display": "Acura Integra Type R"
+    },
+    {
+      "class_id": "acura__rl",
+      "members": [
+        "acura__rl"
+      ],
+      "brand": "Acura",
+      "display": "Acura RL"
+    },
+    {
+      "class_id": "acura__tl",
+      "members": [
+        "acura__tl"
+      ],
+      "brand": "Acura",
+      "display": "Acura TL"
+    },
+    {
+      "class_id": "acura__tl_type_s",
+      "members": [
+        "acura__tl_type_s"
+      ],
+      "brand": "Acura",
+      "display": "Acura TL Type-S"
+    },
+    {
+      "class_id": "acura__tsx",
+      "members": [
+        "acura__tsx"
+      ],
+      "brand": "Acura",
+      "display": "Acura TSX"
+    },
+    {
+      "class_id": "acura__zdx",
+      "members": [
+        "acura__zdx"
+      ],
+      "brand": "Acura",
+      "display": "Acura ZDX"
+    },
+    {
+      "class_id": "am_general__hummer",
+      "members": [
+        "am_general__hummer"
+      ],
+      "brand": "AM General",
+      "display": "AM General Hummer"
+    },
+    {
+      "class_id": "aston_martin__v8_vantage",
+      "members": [
+        "aston_martin__v8_vantage"
+      ],
+      "brand": "Aston Martin",
+      "display": "Aston Martin V8 Vantage"
+    },
+    {
+      "class_id": "aston_martin__virage",
+      "members": [
+        "aston_martin__virage"
+      ],
+      "brand": "Aston Martin",
+      "display": "Aston Martin Virage"
+    },
+    {
+      "class_id": "audi__100",
+      "members": [
+        "audi__100"
+      ],
+      "brand": "Audi",
+      "display": "Audi 100"
+    },
+    {
+      "class_id": "audi__a5",
+      "members": [
+        "audi__a5"
+      ],
+      "brand": "Audi",
+      "display": "Audi A5"
+    },
+    {
+      "class_id": "audi__r8",
+      "members": [
+        "audi__r8"
+      ],
+      "brand": "Audi",
+      "display": "Audi R8"
+    },
+    {
+      "class_id": "audi__rs_4",
+      "members": [
+        "audi__rs_4"
+      ],
+      "brand": "Audi",
+      "display": "Audi RS 4"
+    },
+    {
+      "class_id": "audi__s4",
+      "members": [
+        "audi__s4"
+      ],
+      "brand": "Audi",
+      "display": "Audi S4"
+    },
+    {
+      "class_id": "audi__s5",
+      "members": [
+        "audi__s5"
+      ],
+      "brand": "Audi",
+      "display": "Audi S5"
+    },
+    {
+      "class_id": "audi__s6",
+      "members": [
+        "audi__s6"
+      ],
+      "brand": "Audi",
+      "display": "Audi S6"
+    },
+    {
+      "class_id": "audi__tt",
+      "members": [
+        "audi__tt"
+      ],
+      "brand": "Audi",
+      "display": "Audi TT"
+    },
+    {
+      "class_id": "audi__tt_rs",
+      "members": [
+        "audi__tt_rs"
+      ],
+      "brand": "Audi",
+      "display": "Audi TT RS"
+    },
+    {
+      "class_id": "audi__tts",
+      "members": [
+        "audi__tts"
+      ],
+      "brand": "Audi",
+      "display": "Audi TTS"
+    },
+    {
+      "class_id": "audi__v8",
+      "members": [
+        "audi__v8"
+      ],
+      "brand": "Audi",
+      "display": "Audi V8"
+    },
+    {
+      "class_id": "bentley__arnage",
+      "members": [
+        "bentley__arnage"
+      ],
+      "brand": "Bentley",
+      "display": "Bentley Arnage"
+    },
+    {
+      "class_id": "bentley__continental_flying_spur",
+      "members": [
+        "bentley__continental_flying_spur"
+      ],
+      "brand": "Bentley",
+      "display": "Bentley Continental Flying Spur"
+    },
+    {
+      "class_id": "bentley__continental_gt",
+      "members": [
+        "bentley__continental_gt"
+      ],
+      "brand": "Bentley",
+      "display": "Bentley Continental GT"
+    },
+    {
+      "class_id": "bentley__continental_supersports_conv",
+      "members": [
+        "bentley__continental_supersports_conv"
+      ],
+      "brand": "Bentley",
+      "display": "Bentley Continental Supersports Conv."
+    },
+    {
+      "class_id": "bentley__mulsanne",
+      "members": [
+        "bentley__mulsanne"
+      ],
+      "brand": "Bentley",
+      "display": "Bentley Mulsanne"
+    },
+    {
+      "class_id": "bmw__1_series",
+      "members": [
+        "bmw__1_series"
+      ],
+      "brand": "BMW",
+      "display": "BMW 1 Series"
+    },
+    {
+      "class_id": "bmw__3_series",
+      "members": [
+        "bmw__3_series"
+      ],
+      "brand": "BMW",
+      "display": "BMW 3 Series"
+    },
+    {
+      "class_id": "bmw__6_series",
+      "members": [
+        "bmw__6_series"
+      ],
+      "brand": "BMW",
+      "display": "BMW 6 Series"
+    },
+    {
+      "class_id": "bmw__activehybrid_5",
+      "members": [
+        "bmw__activehybrid_5"
+      ],
+      "brand": "BMW",
+      "display": "BMW ActiveHybrid 5"
+    },
+    {
+      "class_id": "bmw__m3",
+      "members": [
+        "bmw__m3"
+      ],
+      "brand": "BMW",
+      "display": "BMW M3"
+    },
+    {
+      "class_id": "bmw__m5",
+      "members": [
+        "bmw__m5"
+      ],
+      "brand": "BMW",
+      "display": "BMW M5"
+    },
+    {
+      "class_id": "bmw__m6",
+      "members": [
+        "bmw__m6"
+      ],
+      "brand": "BMW",
+      "display": "BMW M6"
+    },
+    {
+      "class_id": "bmw__x3",
+      "members": [
+        "bmw__x3"
+      ],
+      "brand": "BMW",
+      "display": "BMW X3"
+    },
+    {
+      "class_id": "bmw__x5",
+      "members": [
+        "bmw__x5"
+      ],
+      "brand": "BMW",
+      "display": "BMW X5"
+    },
+    {
+      "class_id": "bmw__x6",
+      "members": [
+        "bmw__x6"
+      ],
+      "brand": "BMW",
+      "display": "BMW X6"
+    },
+    {
+      "class_id": "bmw__z4",
+      "members": [
+        "bmw__z4"
+      ],
+      "brand": "BMW",
+      "display": "BMW Z4"
+    },
+    {
+      "class_id": "bugatti__veyron_16_4",
+      "members": [
+        "bugatti__veyron_16_4"
+      ],
+      "brand": "Bugatti",
+      "display": "Bugatti Veyron 16.4"
+    },
+    {
+      "class_id": "buick__enclave",
+      "members": [
+        "buick__enclave"
+      ],
+      "brand": "Buick",
+      "display": "Buick Enclave"
+    },
+    {
+      "class_id": "buick__rainier",
+      "members": [
+        "buick__rainier"
+      ],
+      "brand": "Buick",
+      "display": "Buick Rainier"
+    },
+    {
+      "class_id": "buick__regal_gs",
+      "members": [
+        "buick__regal_gs"
+      ],
+      "brand": "Buick",
+      "display": "Buick Regal GS"
+    },
+    {
+      "class_id": "buick__verano",
+      "members": [
+        "buick__verano"
+      ],
+      "brand": "Buick",
+      "display": "Buick Verano"
+    },
+    {
+      "class_id": "cadillac__cts_v",
+      "members": [
+        "cadillac__cts_v"
+      ],
+      "brand": "Cadillac",
+      "display": "Cadillac CTS-V"
+    },
+    {
+      "class_id": "cadillac__escalade_ext",
+      "members": [
+        "cadillac__escalade_ext"
+      ],
+      "brand": "Cadillac",
+      "display": "Cadillac Escalade EXT"
+    },
+    {
+      "class_id": "cadillac__srx",
+      "members": [
+        "cadillac__srx"
+      ],
+      "brand": "Cadillac",
+      "display": "Cadillac SRX"
+    },
+    {
+      "class_id": "chevrolet__avalanche",
+      "members": [
+        "chevrolet__avalanche"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Avalanche"
+    },
+    {
+      "class_id": "chevrolet__camaro",
+      "members": [
+        "chevrolet__camaro"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Camaro"
+    },
+    {
+      "class_id": "chevrolet__cobalt_ss",
+      "members": [
+        "chevrolet__cobalt_ss"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Cobalt SS"
+    },
+    {
+      "class_id": "chevrolet__corvette",
+      "members": [
+        "chevrolet__corvette"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Corvette"
+    },
+    {
+      "class_id": "chevrolet__corvette_ron_fellows_z06",
+      "members": [
+        "chevrolet__corvette_ron_fellows_z06"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Corvette Ron Fellows Edition Z06"
+    },
+    {
+      "class_id": "chevrolet__corvette_zr1",
+      "members": [
+        "chevrolet__corvette_zr1"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Corvette ZR1"
+    },
+    {
+      "class_id": "chevrolet__express",
+      "members": [
+        "chevrolet__express"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Express"
+    },
+    {
+      "class_id": "chevrolet__express_cargo",
+      "members": [
+        "chevrolet__express_cargo"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Express Cargo"
+    },
+    {
+      "class_id": "chevrolet__hhr_ss",
+      "members": [
+        "chevrolet__hhr_ss"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet HHR SS"
+    },
+    {
+      "class_id": "chevrolet__impala",
+      "members": [
+        "chevrolet__impala"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Impala"
+    },
+    {
+      "class_id": "chevrolet__malibu",
+      "members": [
+        "chevrolet__malibu"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Malibu"
+    },
+    {
+      "class_id": "chevrolet__monte_carlo",
+      "members": [
+        "chevrolet__monte_carlo"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Monte Carlo"
+    },
+    {
+      "class_id": "chevrolet__silverado_1500",
+      "members": [
+        "chevrolet__silverado_1500"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Silverado 1500"
+    },
+    {
+      "class_id": "chevrolet__silverado_1500_classic",
+      "members": [
+        "chevrolet__silverado_1500_classic"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Silverado 1500 Classic"
+    },
+    {
+      "class_id": "chevrolet__silverado_2500hd",
+      "members": [
+        "chevrolet__silverado_2500hd"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Silverado 2500HD"
+    },
+    {
+      "class_id": "chevrolet__sonic",
+      "members": [
+        "chevrolet__sonic"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Sonic"
+    },
+    {
+      "class_id": "chevrolet__tahoe",
+      "members": [
+        "chevrolet__tahoe"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Tahoe Hybrid"
+    },
+    {
+      "class_id": "chevrolet__trailblazer_ss",
+      "members": [
+        "chevrolet__trailblazer_ss"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet TrailBlazer SS"
+    },
+    {
+      "class_id": "chevrolet__traverse",
+      "members": [
+        "chevrolet__traverse"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Traverse"
+    },
+    {
+      "class_id": "chrysler__300_srt_8",
+      "members": [
+        "chrysler__300_srt_8"
+      ],
+      "brand": "Chrysler",
+      "display": "Chrysler 300 SRT-8"
+    },
+    {
+      "class_id": "chrysler__aspen",
+      "members": [
+        "chrysler__aspen"
+      ],
+      "brand": "Chrysler",
+      "display": "Chrysler Aspen"
+    },
+    {
+      "class_id": "chrysler__crossfire",
+      "members": [
+        "chrysler__crossfire"
+      ],
+      "brand": "Chrysler",
+      "display": "Chrysler Crossfire"
+    },
+    {
+      "class_id": "chrysler__pt_cruiser",
+      "members": [
+        "chrysler__pt_cruiser"
+      ],
+      "brand": "Chrysler",
+      "display": "Chrysler PT Cruiser"
+    },
+    {
+      "class_id": "chrysler__sebring",
+      "members": [
+        "chrysler__sebring"
+      ],
+      "brand": "Chrysler",
+      "display": "Chrysler Sebring"
+    },
+    {
+      "class_id": "chrysler__town_and_country",
+      "members": [
+        "chrysler__town_and_country"
+      ],
+      "brand": "Chrysler",
+      "display": "Chrysler Town and Country"
+    },
+    {
+      "class_id": "daewoo__nubira",
+      "members": [
+        "daewoo__nubira"
+      ],
+      "brand": "Daewoo",
+      "display": "Daewoo Nubira"
+    },
+    {
+      "class_id": "dodge__caliber",
+      "members": [
+        "dodge__caliber"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Caliber"
+    },
+    {
+      "class_id": "dodge__caravan",
+      "members": [
+        "dodge__caravan"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Caravan"
+    },
+    {
+      "class_id": "dodge__challenger_srt8",
+      "members": [
+        "dodge__challenger_srt8"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Challenger SRT8"
+    },
+    {
+      "class_id": "dodge__charger",
+      "members": [
+        "dodge__charger"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Charger"
+    },
+    {
+      "class_id": "dodge__charger_srt_8",
+      "members": [
+        "dodge__charger_srt_8"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Charger SRT-8"
+    },
+    {
+      "class_id": "dodge__dakota",
+      "members": [
+        "dodge__dakota"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Dakota"
+    },
+    {
+      "class_id": "dodge__durango",
+      "members": [
+        "dodge__durango"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Durango"
+    },
+    {
+      "class_id": "dodge__journey",
+      "members": [
+        "dodge__journey"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Journey"
+    },
+    {
+      "class_id": "dodge__magnum",
+      "members": [
+        "dodge__magnum"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Magnum"
+    },
+    {
+      "class_id": "dodge__ram_3500",
+      "members": [
+        "dodge__ram_3500"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Ram Pickup 3500"
+    },
+    {
+      "class_id": "dodge__sprinter_cargo",
+      "members": [
+        "dodge__sprinter_cargo"
+      ],
+      "brand": "Dodge",
+      "display": "Dodge Sprinter Cargo"
+    },
+    {
+      "class_id": "eagle__talon",
+      "members": [
+        "eagle__talon"
+      ],
+      "brand": "Eagle",
+      "display": "Eagle Talon"
+    },
+    {
+      "class_id": "ferrari__458_italia",
+      "members": [
+        "ferrari__458_italia"
+      ],
+      "brand": "Ferrari",
+      "display": "Ferrari 458 Italia"
+    },
+    {
+      "class_id": "ferrari__california",
+      "members": [
+        "ferrari__california"
+      ],
+      "brand": "Ferrari",
+      "display": "Ferrari California"
+    },
+    {
+      "class_id": "ferrari__ff",
+      "members": [
+        "ferrari__ff"
+      ],
+      "brand": "Ferrari",
+      "display": "Ferrari FF"
+    },
+    {
+      "class_id": "fiat__500",
+      "members": [
+        "fiat__500"
+      ],
+      "brand": "FIAT",
+      "display": "FIAT 500"
+    },
+    {
+      "class_id": "fiat__500_abarth",
+      "members": [
+        "fiat__500_abarth"
+      ],
+      "brand": "FIAT",
+      "display": "FIAT 500 Abarth"
+    },
+    {
+      "class_id": "fisker__karma",
+      "members": [
+        "fisker__karma"
+      ],
+      "brand": "Fisker",
+      "display": "Fisker Karma"
+    },
+    {
+      "class_id": "ford__e_series",
+      "members": [
+        "ford__e_series"
+      ],
+      "brand": "Ford",
+      "display": "Ford E-Series"
+    },
+    {
+      "class_id": "ford__edge",
+      "members": [
+        "ford__edge"
+      ],
+      "brand": "Ford",
+      "display": "Ford Edge"
+    },
+    {
+      "class_id": "ford__expedition_el",
+      "members": [
+        "ford__expedition_el"
+      ],
+      "brand": "Ford",
+      "display": "Ford Expedition EL"
+    },
+    {
+      "class_id": "ford__f_150",
+      "members": [
+        "ford__f_150"
+      ],
+      "brand": "Ford",
+      "display": "Ford F-150"
+    },
+    {
+      "class_id": "ford__f_450_super_duty",
+      "members": [
+        "ford__f_450_super_duty"
+      ],
+      "brand": "Ford",
+      "display": "Ford F-450 Super Duty"
+    },
+    {
+      "class_id": "ford__fiesta",
+      "members": [
+        "ford__fiesta"
+      ],
+      "brand": "Ford",
+      "display": "Ford Fiesta"
+    },
+    {
+      "class_id": "ford__focus",
+      "members": [
+        "ford__focus"
+      ],
+      "brand": "Ford",
+      "display": "Ford Focus"
+    },
+    {
+      "class_id": "ford__freestar",
+      "members": [
+        "ford__freestar"
+      ],
+      "brand": "Ford",
+      "display": "Ford Freestar"
+    },
+    {
+      "class_id": "ford__gt",
+      "members": [
+        "ford__gt"
+      ],
+      "brand": "Ford",
+      "display": "Ford GT"
+    },
+    {
+      "class_id": "ford__mustang",
+      "members": [
+        "ford__mustang"
+      ],
+      "brand": "Ford",
+      "display": "Ford Mustang"
+    },
+    {
+      "class_id": "ford__ranger",
+      "members": [
+        "ford__ranger"
+      ],
+      "brand": "Ford",
+      "display": "Ford Ranger"
+    },
+    {
+      "class_id": "geo__metro",
+      "members": [
+        "geo__metro"
+      ],
+      "brand": "Geo",
+      "display": "Geo Metro"
+    },
+    {
+      "class_id": "gmc__acadia",
+      "members": [
+        "gmc__acadia"
+      ],
+      "brand": "GMC",
+      "display": "GMC Acadia"
+    },
+    {
+      "class_id": "gmc__canyon",
+      "members": [
+        "gmc__canyon"
+      ],
+      "brand": "GMC",
+      "display": "GMC Canyon"
+    },
+    {
+      "class_id": "gmc__savana",
+      "members": [
+        "gmc__savana"
+      ],
+      "brand": "GMC",
+      "display": "GMC Savana"
+    },
+    {
+      "class_id": "gmc__terrain",
+      "members": [
+        "gmc__terrain"
+      ],
+      "brand": "GMC",
+      "display": "GMC Terrain"
+    },
+    {
+      "class_id": "gmc__yukon",
+      "members": [
+        "gmc__yukon"
+      ],
+      "brand": "GMC",
+      "display": "GMC Yukon Hybrid"
+    },
+    {
+      "class_id": "honda__accord",
+      "members": [
+        "honda__accord"
+      ],
+      "brand": "Honda",
+      "display": "Honda Accord"
+    },
+    {
+      "class_id": "honda__odyssey",
+      "members": [
+        "honda__odyssey"
+      ],
+      "brand": "Honda",
+      "display": "Honda Odyssey"
+    },
+    {
+      "class_id": "hummer__h2_sut",
+      "members": [
+        "hummer__h2_sut"
+      ],
+      "brand": "HUMMER",
+      "display": "HUMMER H2 SUT"
+    },
+    {
+      "class_id": "hummer__h3t",
+      "members": [
+        "hummer__h3t"
+      ],
+      "brand": "HUMMER",
+      "display": "HUMMER H3T"
+    },
+    {
+      "class_id": "hyundai__accent",
+      "members": [
+        "hyundai__accent"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Accent"
+    },
+    {
+      "class_id": "hyundai__azera",
+      "members": [
+        "hyundai__azera"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Azera"
+    },
+    {
+      "class_id": "hyundai__elantra",
+      "members": [
+        "hyundai__elantra"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Elantra"
+    },
+    {
+      "class_id": "hyundai__genesis",
+      "members": [
+        "hyundai__genesis"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Genesis"
+    },
+    {
+      "class_id": "hyundai__santa_fe",
+      "members": [
+        "hyundai__santa_fe"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Santa Fe"
+    },
+    {
+      "class_id": "hyundai__sonata",
+      "members": [
+        "hyundai__sonata"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Sonata"
+    },
+    {
+      "class_id": "hyundai__tucson",
+      "members": [
+        "hyundai__tucson"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Tucson"
+    },
+    {
+      "class_id": "hyundai__veloster",
+      "members": [
+        "hyundai__veloster"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Veloster"
+    },
+    {
+      "class_id": "hyundai__veracruz",
+      "members": [
+        "hyundai__veracruz"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Veracruz"
+    },
+    {
+      "class_id": "infiniti__g_ipl",
+      "members": [
+        "infiniti__g_ipl"
+      ],
+      "brand": "Infiniti",
+      "display": "Infiniti G Coupe IPL"
+    },
+    {
+      "class_id": "infiniti__qx56",
+      "members": [
+        "infiniti__qx56"
+      ],
+      "brand": "Infiniti",
+      "display": "Infiniti QX56"
+    },
+    {
+      "class_id": "isuzu__ascender",
+      "members": [
+        "isuzu__ascender"
+      ],
+      "brand": "Isuzu",
+      "display": "Isuzu Ascender"
+    },
+    {
+      "class_id": "jaguar__xk_xkr",
+      "members": [
+        "jaguar__xk_xkr"
+      ],
+      "brand": "Jaguar",
+      "display": "Jaguar XK XKR"
+    },
+    {
+      "class_id": "jeep__compass",
+      "members": [
+        "jeep__compass"
+      ],
+      "brand": "Jeep",
+      "display": "Jeep Compass"
+    },
+    {
+      "class_id": "jeep__grand_cherokee",
+      "members": [
+        "jeep__grand_cherokee"
+      ],
+      "brand": "Jeep",
+      "display": "Jeep Grand Cherokee"
+    },
+    {
+      "class_id": "jeep__liberty",
+      "members": [
+        "jeep__liberty"
+      ],
+      "brand": "Jeep",
+      "display": "Jeep Liberty"
+    },
+    {
+      "class_id": "jeep__patriot",
+      "members": [
+        "jeep__patriot"
+      ],
+      "brand": "Jeep",
+      "display": "Jeep Patriot"
+    },
+    {
+      "class_id": "jeep__wrangler",
+      "members": [
+        "jeep__wrangler"
+      ],
+      "brand": "Jeep",
+      "display": "Jeep Wrangler"
+    },
+    {
+      "class_id": "lamborghini__aventador",
+      "members": [
+        "lamborghini__aventador"
+      ],
+      "brand": "Lamborghini",
+      "display": "Lamborghini Aventador"
+    },
+    {
+      "class_id": "lamborghini__diablo",
+      "members": [
+        "lamborghini__diablo"
+      ],
+      "brand": "Lamborghini",
+      "display": "Lamborghini Diablo"
+    },
+    {
+      "class_id": "lamborghini__gallardo_lp_570_4_superleggera",
+      "members": [
+        "lamborghini__gallardo_lp_570_4_superleggera"
+      ],
+      "brand": "Lamborghini",
+      "display": "Lamborghini Gallardo LP 570-4 Superleggera"
+    },
+    {
+      "class_id": "lamborghini__reventon",
+      "members": [
+        "lamborghini__reventon"
+      ],
+      "brand": "Lamborghini",
+      "display": "Lamborghini Reventon"
+    },
+    {
+      "class_id": "land_rover__lr2",
+      "members": [
+        "land_rover__lr2"
+      ],
+      "brand": "Land Rover",
+      "display": "Land Rover LR2"
+    },
+    {
+      "class_id": "land_rover__range_rover",
+      "members": [
+        "land_rover__range_rover"
+      ],
+      "brand": "Land Rover",
+      "display": "Land Rover Range Rover"
+    },
+    {
+      "class_id": "lincoln__town_car",
+      "members": [
+        "lincoln__town_car"
+      ],
+      "brand": "Lincoln",
+      "display": "Lincoln Town Car"
+    },
+    {
+      "class_id": "maybach__landaulet",
+      "members": [
+        "maybach__landaulet"
+      ],
+      "brand": "Maybach",
+      "display": "Maybach Landaulet"
+    },
+    {
+      "class_id": "mazda__tribute",
+      "members": [
+        "mazda__tribute"
+      ],
+      "brand": "Mazda",
+      "display": "Mazda Tribute"
+    },
+    {
+      "class_id": "mclaren__mp4_12c",
+      "members": [
+        "mclaren__mp4_12c"
+      ],
+      "brand": "McLaren",
+      "display": "McLaren MP4-12C"
+    },
+    {
+      "class_id": "mercedes_benz__300_class",
+      "members": [
+        "mercedes_benz__300_class"
+      ],
+      "brand": "Mercedes-Benz",
+      "display": "Mercedes-Benz 300-Class"
+    },
+    {
+      "class_id": "mercedes_benz__c_class",
+      "members": [
+        "mercedes_benz__c_class"
+      ],
+      "brand": "Mercedes-Benz",
+      "display": "Mercedes-Benz C-Class"
+    },
+    {
+      "class_id": "mercedes_benz__e_class",
+      "members": [
+        "mercedes_benz__e_class"
+      ],
+      "brand": "Mercedes-Benz",
+      "display": "Mercedes-Benz E-Class"
+    },
+    {
+      "class_id": "mercedes_benz__s_class",
+      "members": [
+        "mercedes_benz__s_class"
+      ],
+      "brand": "Mercedes-Benz",
+      "display": "Mercedes-Benz S-Class"
+    },
+    {
+      "class_id": "mercedes_benz__sl_class",
+      "members": [
+        "mercedes_benz__sl_class"
+      ],
+      "brand": "Mercedes-Benz",
+      "display": "Mercedes-Benz SL-Class"
+    },
+    {
+      "class_id": "mercedes_benz__sprinter",
+      "members": [
+        "mercedes_benz__sprinter"
+      ],
+      "brand": "Mercedes-Benz",
+      "display": "Mercedes-Benz Sprinter"
+    },
+    {
+      "class_id": "mini__cooper",
+      "members": [
+        "mini__cooper"
+      ],
+      "brand": "MINI",
+      "display": "MINI Cooper Roadster"
+    },
+    {
+      "class_id": "mitsubishi__lancer",
+      "members": [
+        "mitsubishi__lancer"
+      ],
+      "brand": "Mitsubishi",
+      "display": "Mitsubishi Lancer"
+    },
+    {
+      "class_id": "nissan__240sx",
+      "members": [
+        "nissan__240sx"
+      ],
+      "brand": "Nissan",
+      "display": "Nissan 240SX"
+    },
+    {
+      "class_id": "nissan__juke",
+      "members": [
+        "nissan__juke"
+      ],
+      "brand": "Nissan",
+      "display": "Nissan Juke"
+    },
+    {
+      "class_id": "nissan__leaf",
+      "members": [
+        "nissan__leaf"
+      ],
+      "brand": "Nissan",
+      "display": "Nissan Leaf"
+    },
+    {
+      "class_id": "nissan__nv_passenger",
+      "members": [
+        "nissan__nv_passenger"
+      ],
+      "brand": "Nissan",
+      "display": "Nissan NV Passenger"
+    },
+    {
+      "class_id": "plymouth__neon",
+      "members": [
+        "plymouth__neon"
+      ],
+      "brand": "Plymouth",
+      "display": "Plymouth Neon"
+    },
+    {
+      "class_id": "porsche__panamera",
+      "members": [
+        "porsche__panamera"
+      ],
+      "brand": "Porsche",
+      "display": "Porsche Panamera"
+    },
+    {
+      "class_id": "ram__c_cargo",
+      "members": [
+        "ram__c_cargo"
+      ],
+      "brand": "Ram",
+      "display": "Ram C/V Cargo"
+    },
+    {
+      "class_id": "rolls_royce__ghost",
+      "members": [
+        "rolls_royce__ghost"
+      ],
+      "brand": "Rolls-Royce",
+      "display": "Rolls-Royce Ghost"
+    },
+    {
+      "class_id": "rolls_royce__phantom",
+      "members": [
+        "rolls_royce__phantom"
+      ],
+      "brand": "Rolls-Royce",
+      "display": "Rolls-Royce Phantom"
+    },
+    {
+      "class_id": "rolls_royce__phantom_drophead",
+      "members": [
+        "rolls_royce__phantom_drophead"
+      ],
+      "brand": "Rolls-Royce",
+      "display": "Rolls-Royce Phantom Drophead"
+    },
+    {
+      "class_id": "scion__xd",
+      "members": [
+        "scion__xd"
+      ],
+      "brand": "Scion",
+      "display": "Scion xD"
+    },
+    {
+      "class_id": "smart__fortwo",
+      "members": [
+        "smart__fortwo"
+      ],
+      "brand": "smart",
+      "display": "smart fortwo"
+    },
+    {
+      "class_id": "spyker__c8",
+      "members": [
+        "spyker__c8"
+      ],
+      "brand": "Spyker",
+      "display": "Spyker C8"
+    },
+    {
+      "class_id": "suzuki__aerio",
+      "members": [
+        "suzuki__aerio"
+      ],
+      "brand": "Suzuki",
+      "display": "Suzuki Aerio"
+    },
+    {
+      "class_id": "suzuki__kizashi",
+      "members": [
+        "suzuki__kizashi"
+      ],
+      "brand": "Suzuki",
+      "display": "Suzuki Kizashi"
+    },
+    {
+      "class_id": "suzuki__sx4",
+      "members": [
+        "suzuki__sx4"
+      ],
+      "brand": "Suzuki",
+      "display": "Suzuki SX4"
+    },
+    {
+      "class_id": "tesla__model_s",
+      "members": [
+        "tesla__model_s"
+      ],
+      "brand": "Tesla",
+      "display": "Tesla Model S"
+    },
+    {
+      "class_id": "toyota__4runner",
+      "members": [
+        "toyota__4runner"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota 4Runner"
+    },
+    {
+      "class_id": "toyota__camry",
+      "members": [
+        "toyota__camry"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota Camry"
+    },
+    {
+      "class_id": "toyota__corolla",
+      "members": [
+        "toyota__corolla"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota Corolla"
+    },
+    {
+      "class_id": "toyota__sequoia",
+      "members": [
+        "toyota__sequoia"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota Sequoia"
+    },
+    {
+      "class_id": "volkswagen__beetle",
+      "members": [
+        "volkswagen__beetle"
+      ],
+      "brand": "Volkswagen",
+      "display": "Volkswagen Beetle"
+    },
+    {
+      "class_id": "volkswagen__golf",
+      "members": [
+        "volkswagen__golf"
+      ],
+      "brand": "Volkswagen",
+      "display": "Volkswagen Golf"
+    },
+    {
+      "class_id": "volvo__240",
+      "members": [
+        "volvo__240"
+      ],
+      "brand": "Volvo",
+      "display": "Volvo 240"
+    },
+    {
+      "class_id": "volvo__c30",
+      "members": [
+        "volvo__c30"
+      ],
+      "brand": "Volvo",
+      "display": "Volvo C30"
+    },
+    {
+      "class_id": "volvo__xc90",
+      "members": [
+        "volvo__xc90"
+      ],
+      "brand": "Volvo",
+      "display": "Volvo XC90"
+    }
+  ],
+  "text_source": {
+    "repo_id": "google/siglip2-base-patch16-256",
+    "revision": "3f9f96cb90da5dbc758b01813f2f6f1aee24c1ab",
+    "license": "apache-2.0",
+    "tokenizer": "siglip",
+    "prompt_template": "a photo of a {name}, a car",
+    "labels": {
+      "acura__integra_type_r": "Acura Integra Type R",
+      "acura__rl": "Acura RL",
+      "acura__tl": "Acura TL",
+      "acura__tl_type_s": "Acura TL Type-S",
+      "acura__tsx": "Acura TSX",
+      "acura__zdx": "Acura ZDX",
+      "am_general__hummer": "AM General Hummer",
+      "aston_martin__v8_vantage": "Aston Martin V8 Vantage",
+      "aston_martin__virage": "Aston Martin Virage",
+      "audi__100": "Audi 100",
+      "audi__a5": "Audi A5",
+      "audi__r8": "Audi R8",
+      "audi__rs_4": "Audi RS 4",
+      "audi__s4": "Audi S4",
+      "audi__s5": "Audi S5",
+      "audi__s6": "Audi S6",
+      "audi__tt": "Audi TT",
+      "audi__tt_rs": "Audi TT RS",
+      "audi__tts": "Audi TTS",
+      "audi__v8": "Audi V8",
+      "bentley__arnage": "Bentley Arnage",
+      "bentley__continental_flying_spur": "Bentley Continental Flying Spur",
+      "bentley__continental_gt": "Bentley Continental GT",
+      "bentley__continental_supersports_conv": "Bentley Continental Supersports Conv.",
+      "bentley__mulsanne": "Bentley Mulsanne",
+      "bmw__1_series": "BMW 1 Series",
+      "bmw__3_series": "BMW 3 Series",
+      "bmw__6_series": "BMW 6 Series",
+      "bmw__activehybrid_5": "BMW ActiveHybrid 5",
+      "bmw__m3": "BMW M3",
+      "bmw__m5": "BMW M5",
+      "bmw__m6": "BMW M6",
+      "bmw__x3": "BMW X3",
+      "bmw__x5": "BMW X5",
+      "bmw__x6": "BMW X6",
+      "bmw__z4": "BMW Z4",
+      "bugatti__veyron_16_4": "Bugatti Veyron 16.4",
+      "buick__enclave": "Buick Enclave",
+      "buick__rainier": "Buick Rainier",
+      "buick__regal_gs": "Buick Regal GS",
+      "buick__verano": "Buick Verano",
+      "cadillac__cts_v": "Cadillac CTS-V",
+      "cadillac__escalade_ext": "Cadillac Escalade EXT",
+      "cadillac__srx": "Cadillac SRX",
+      "chevrolet__avalanche": "Chevrolet Avalanche",
+      "chevrolet__camaro": "Chevrolet Camaro",
+      "chevrolet__cobalt_ss": "Chevrolet Cobalt SS",
+      "chevrolet__corvette": "Chevrolet Corvette",
+      "chevrolet__corvette_ron_fellows_z06": "Chevrolet Corvette Ron Fellows Edition Z06",
+      "chevrolet__corvette_zr1": "Chevrolet Corvette ZR1",
+      "chevrolet__express": "Chevrolet Express",
+      "chevrolet__express_cargo": "Chevrolet Express Cargo",
+      "chevrolet__hhr_ss": "Chevrolet HHR SS",
+      "chevrolet__impala": "Chevrolet Impala",
+      "chevrolet__malibu": "Chevrolet Malibu",
+      "chevrolet__monte_carlo": "Chevrolet Monte Carlo",
+      "chevrolet__silverado_1500": "Chevrolet Silverado 1500",
+      "chevrolet__silverado_1500_classic": "Chevrolet Silverado 1500 Classic",
+      "chevrolet__silverado_2500hd": "Chevrolet Silverado 2500HD",
+      "chevrolet__sonic": "Chevrolet Sonic",
+      "chevrolet__tahoe": "Chevrolet Tahoe Hybrid",
+      "chevrolet__trailblazer_ss": "Chevrolet TrailBlazer SS",
+      "chevrolet__traverse": "Chevrolet Traverse",
+      "chrysler__300_srt_8": "Chrysler 300 SRT-8",
+      "chrysler__aspen": "Chrysler Aspen",
+      "chrysler__crossfire": "Chrysler Crossfire",
+      "chrysler__pt_cruiser": "Chrysler PT Cruiser",
+      "chrysler__sebring": "Chrysler Sebring",
+      "chrysler__town_and_country": "Chrysler Town and Country",
+      "daewoo__nubira": "Daewoo Nubira",
+      "dodge__caliber": "Dodge Caliber",
+      "dodge__caravan": "Dodge Caravan",
+      "dodge__challenger_srt8": "Dodge Challenger SRT8",
+      "dodge__charger": "Dodge Charger",
+      "dodge__charger_srt_8": "Dodge Charger SRT-8",
+      "dodge__dakota": "Dodge Dakota",
+      "dodge__durango": "Dodge Durango",
+      "dodge__journey": "Dodge Journey",
+      "dodge__magnum": "Dodge Magnum",
+      "dodge__ram_3500": "Dodge Ram Pickup 3500",
+      "dodge__sprinter_cargo": "Dodge Sprinter Cargo",
+      "eagle__talon": "Eagle Talon",
+      "ferrari__458_italia": "Ferrari 458 Italia",
+      "ferrari__california": "Ferrari California",
+      "ferrari__ff": "Ferrari FF",
+      "fiat__500": "FIAT 500",
+      "fiat__500_abarth": "FIAT 500 Abarth",
+      "fisker__karma": "Fisker Karma",
+      "ford__e_series": "Ford E-Series",
+      "ford__edge": "Ford Edge",
+      "ford__expedition_el": "Ford Expedition EL",
+      "ford__f_150": "Ford F-150",
+      "ford__f_450_super_duty": "Ford F-450 Super Duty",
+      "ford__fiesta": "Ford Fiesta",
+      "ford__focus": "Ford Focus",
+      "ford__freestar": "Ford Freestar",
+      "ford__gt": "Ford GT",
+      "ford__mustang": "Ford Mustang",
+      "ford__ranger": "Ford Ranger",
+      "geo__metro": "Geo Metro",
+      "gmc__acadia": "GMC Acadia",
+      "gmc__canyon": "GMC Canyon",
+      "gmc__savana": "GMC Savana",
+      "gmc__terrain": "GMC Terrain",
+      "gmc__yukon": "GMC Yukon Hybrid",
+      "honda__accord": "Honda Accord",
+      "honda__odyssey": "Honda Odyssey",
+      "hummer__h2_sut": "HUMMER H2 SUT",
+      "hummer__h3t": "HUMMER H3T",
+      "hyundai__accent": "Hyundai Accent",
+      "hyundai__azera": "Hyundai Azera",
+      "hyundai__elantra": "Hyundai Elantra",
+      "hyundai__genesis": "Hyundai Genesis",
+      "hyundai__santa_fe": "Hyundai Santa Fe",
+      "hyundai__sonata": "Hyundai Sonata",
+      "hyundai__tucson": "Hyundai Tucson",
+      "hyundai__veloster": "Hyundai Veloster",
+      "hyundai__veracruz": "Hyundai Veracruz",
+      "infiniti__g_ipl": "Infiniti G Coupe IPL",
+      "infiniti__qx56": "Infiniti QX56",
+      "isuzu__ascender": "Isuzu Ascender",
+      "jaguar__xk_xkr": "Jaguar XK XKR",
+      "jeep__compass": "Jeep Compass",
+      "jeep__grand_cherokee": "Jeep Grand Cherokee",
+      "jeep__liberty": "Jeep Liberty",
+      "jeep__patriot": "Jeep Patriot",
+      "jeep__wrangler": "Jeep Wrangler",
+      "lamborghini__aventador": "Lamborghini Aventador",
+      "lamborghini__diablo": "Lamborghini Diablo",
+      "lamborghini__gallardo_lp_570_4_superleggera": "Lamborghini Gallardo LP 570-4 Superleggera",
+      "lamborghini__reventon": "Lamborghini Reventon",
+      "land_rover__lr2": "Land Rover LR2",
+      "land_rover__range_rover": "Land Rover Range Rover",
+      "lincoln__town_car": "Lincoln Town Car",
+      "maybach__landaulet": "Maybach Landaulet",
+      "mazda__tribute": "Mazda Tribute",
+      "mclaren__mp4_12c": "McLaren MP4-12C",
+      "mercedes_benz__300_class": "Mercedes-Benz 300-Class",
+      "mercedes_benz__c_class": "Mercedes-Benz C-Class",
+      "mercedes_benz__e_class": "Mercedes-Benz E-Class",
+      "mercedes_benz__s_class": "Mercedes-Benz S-Class",
+      "mercedes_benz__sl_class": "Mercedes-Benz SL-Class",
+      "mercedes_benz__sprinter": "Mercedes-Benz Sprinter",
+      "mini__cooper": "MINI Cooper Roadster",
+      "mitsubishi__lancer": "Mitsubishi Lancer",
+      "nissan__240sx": "Nissan 240SX",
+      "nissan__juke": "Nissan Juke",
+      "nissan__leaf": "Nissan Leaf",
+      "nissan__nv_passenger": "Nissan NV Passenger",
+      "plymouth__neon": "Plymouth Neon",
+      "porsche__panamera": "Porsche Panamera",
+      "ram__c_cargo": "Ram C/V Cargo",
+      "rolls_royce__ghost": "Rolls-Royce Ghost",
+      "rolls_royce__phantom": "Rolls-Royce Phantom",
+      "rolls_royce__phantom_drophead": "Rolls-Royce Phantom Drophead",
+      "scion__xd": "Scion xD",
+      "smart__fortwo": "smart fortwo",
+      "spyker__c8": "Spyker C8",
+      "suzuki__aerio": "Suzuki Aerio",
+      "suzuki__kizashi": "Suzuki Kizashi",
+      "suzuki__sx4": "Suzuki SX4",
+      "tesla__model_s": "Tesla Model S",
+      "toyota__4runner": "Toyota 4Runner",
+      "toyota__camry": "Toyota Camry",
+      "toyota__corolla": "Toyota Corolla",
+      "toyota__sequoia": "Toyota Sequoia",
+      "volkswagen__beetle": "Volkswagen Beetle",
+      "volkswagen__golf": "Volkswagen Golf",
+      "volvo__240": "Volvo 240",
+      "volvo__c30": "Volvo C30",
+      "volvo__xc90": "Volvo XC90"
+    }
+  }
+}
