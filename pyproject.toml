@@ -30,6 +30,8 @@ train = [
     "scikit-learn==1.9.0",
     "ultralytics==8.4.120",
     "datasets==5.0.1",
+    "open-clip-torch==3.3.0",
+    "transformers==5.15.0",
 ]
 # Экспорт идёт в отдельной venv, а не в обучающей: `litert-torch` тянет свой стек
 # конвертера (jax, xdsl, torchao), и держать его рядом с обучением значило бы решать

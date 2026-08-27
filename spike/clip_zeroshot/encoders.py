@@ -48,89 +48,14 @@ def family_of(пин: ModelPin) -> str:
     raise EncoderError(f"неизвестное семейство для {repo_id!r}")
 
 
-class _OpenClipEncoder:
-    """TinyCLIP и OpenCLIP LAION — оба поднимаются через open_clip или transformers."""
+class _TransformersEncoder:
+    """Приватный базовый класс для моделей, загружаемых через transformers.
 
-    def __init__(self, пин: ModelPin, кэш: Path, device: str) -> None:
-        import torch
+    Содержит общую логику для TinyCLIP и SigLIP2: оба используют
+    AutoModel/AutoProcessor и get_*_features().pooler_output.
+    """
 
-        self._torch = torch
-        self._device = device
-        self._пин = пин
-
-        # Проверяем, это TinyCLIP или обычный OpenCLIP
-        это_tinyclip = "tinyclip" in пин.repo_id.lower()
-
-        if это_tinyclip:
-            # TinyCLIP загружается через transformers, но использует open_clip интерфейс
-            from transformers import AutoModel, AutoProcessor
-
-            self.model = (
-                AutoModel.from_pretrained(пин.repo_id, revision=пин.revision, cache_dir=str(кэш))
-                .to(device)
-                .eval()
-            )
-            self._processor = AutoProcessor.from_pretrained(
-                пин.repo_id, revision=пин.revision, cache_dir=str(кэш)
-            )
-            self.tokenizer_name = "transformers"
-            self._используем_transformers = True
-        else:
-            # OpenCLIP LAION загружается через open_clip
-            import open_clip
-
-            модель, _, препроцесс = open_clip.create_model_and_transforms(
-                f"hf-hub:{пин.repo_id}", cache_dir=str(кэш)
-            )
-            self.model = модель.to(device).eval()
-            self._preprocess = препроцесс
-            self._tokenize = open_clip.get_tokenizer(f"hf-hub:{пин.repo_id}")
-            self.tokenizer_name = "open_clip"
-            self._используем_transformers = False
-
-    def encode_text(self, промпты: list[str]) -> np.ndarray:
-        if self._используем_transformers:
-            входы = self._processor(
-                text=промпты, padding="max_length", truncation=True, return_tensors="pt"
-            ).to(self._device)
-            with self._torch.no_grad():
-                выход = self.model.get_text_features(**входы)
-            вектора = выход.pooler_output
-            return вектора.cpu().numpy().astype(np.float32)
-        else:
-            токены = self._tokenize(промпты).to(self._device)
-            with self._torch.no_grad():
-                вектора = self.model.encode_text(токены)
-            return вектора.cpu().numpy().astype(np.float32)
-
-    def encode_images(self, пути: list[Path]) -> np.ndarray:
-        from PIL import Image
-
-        куски: list[np.ndarray] = []
-        for начало in range(0, len(пути), 32):
-            пакет = пути[начало : начало + 32]
-
-            if self._используем_transformers:
-                изображения = [Image.open(п).convert("RGB") for п in пакет]
-                входы = self._processor(images=изображения, return_tensors="pt").to(self._device)
-                with self._torch.no_grad():
-                    выход = self.model.get_image_features(**входы)
-                вектора = выход.pooler_output
-            else:
-                тензоры = self._torch.stack(
-                    [self._preprocess(Image.open(п).convert("RGB")) for п in пакет]
-                ).to(self._device)
-                with self._torch.no_grad():
-                    вектора = self.model.encode_image(тензоры)
-
-            куски.append(вектора.cpu().numpy().astype(np.float32))
-        return np.concatenate(куски)
-
-
-class _SiglipEncoder:
-    """SigLIP2 поднимается `transformers`: своего пути в `open_clip` у него нет."""
-
-    def __init__(self, пин: ModelPin, кэш: Path, device: str) -> None:
+    def __init__(self, пин: ModelPin, кэш: Path, device: str, имя_токенизатора: str) -> None:
         import torch
         from transformers import AutoModel, AutoProcessor
 
@@ -144,7 +69,7 @@ class _SiglipEncoder:
         self._processor = AutoProcessor.from_pretrained(
             пин.repo_id, revision=пин.revision, cache_dir=str(кэш)
         )
-        self.tokenizer_name = "siglip"
+        self.tokenizer_name = имя_токенизатора
 
     def encode_text(self, промпты: list[str]) -> np.ndarray:
         входы = self._processor(
@@ -169,9 +94,77 @@ class _SiglipEncoder:
         return np.concatenate(куски)
 
 
+class _TinyClipEncoder(_TransformersEncoder):
+    """TinyCLIP — CLIP-модель через transformers."""
+
+    def __init__(self, пин: ModelPin, кэш: Path, device: str) -> None:
+        super().__init__(пин, кэш, device, "transformers")
+
+
+class _OpenClipEncoder:
+    """OpenCLIP LAION загружается через open_clip.
+
+    Внимание: семейство open_clip используется для TinyCLIP и OpenCLIP LAION,
+    но `tokenizer_name` у них РАЗНЫЙ (see load_encoder). TinyCLIP на самом деле
+    это transformers CLIP-модель, а не настоящий OpenCLIP.
+    """
+
+    def __init__(self, пин: ModelPin, кэш: Path, device: str) -> None:
+        import open_clip
+        import torch
+
+        self._torch = torch
+        self._device = device
+        модель, _, препроцесс = open_clip.create_model_and_transforms(
+            f"hf-hub:{пин.repo_id}", cache_dir=str(кэш)
+        )
+        self.model = модель.to(device).eval()
+        self._preprocess = препроцесс
+        self._tokenize = open_clip.get_tokenizer(f"hf-hub:{пин.repo_id}")
+        self.tokenizer_name = "open_clip"
+
+    def encode_text(self, промпты: list[str]) -> np.ndarray:
+        токены = self._tokenize(промпты).to(self._device)
+        with self._torch.no_grad():
+            вектора = self.model.encode_text(токены)
+        return вектора.cpu().numpy().astype(np.float32)
+
+    def encode_images(self, пути: list[Path]) -> np.ndarray:
+        from PIL import Image
+
+        куски: list[np.ndarray] = []
+        for начало in range(0, len(пути), 32):
+            пакет = пути[начало : начало + 32]
+            тензоры = self._torch.stack(
+                [self._preprocess(Image.open(п).convert("RGB")) for п in пакет]
+            ).to(self._device)
+            with self._torch.no_grad():
+                вектора = self.model.encode_image(тензоры)
+            куски.append(вектора.cpu().numpy().astype(np.float32))
+        return np.concatenate(куски)
+
+
+class _SiglipEncoder(_TransformersEncoder):
+    """SigLIP2 через transformers."""
+
+    def __init__(self, пин: ModelPin, кэш: Path, device: str) -> None:
+        super().__init__(пин, кэш, device, "siglip")
+
+
 def load_encoder(пин: ModelPin, кэш: Path, device: str) -> Encoder:
-    """Поднять кодировщик кандидата на приколоченной ревизии."""
+    """Поднять кодировщик кандидата на приколоченной ревизии.
+
+    Семейство определяется family_of(), но внутри мы дополнительно проверяем,
+    это TinyCLIP или обычный OpenCLIP LAION, несмотря на то что оба в семействе
+    "open_clip". tokenizer_name результирующего кодировщика разный:
+    - TinyCLIP: "transformers" (это transformers CLIP, не настоящий open_clip)
+    - OpenCLIP LAION: "open_clip" (настоящий open_clip через hf-hub)
+    """
     семейство = family_of(пин)
     if семейство == "open_clip":
+        # Проверяем, это TinyCLIP или OpenCLIP LAION
+        если_tinyclip = "tinyclip" in пин.repo_id.lower()
+        if если_tinyclip:
+            return _TinyClipEncoder(пин, кэш, device)
         return _OpenClipEncoder(пин, кэш, device)
     return _SiglipEncoder(пин, кэш, device)
