@@ -61,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Прогнать харвест и записать отчёт, манифест и атрибуцию."""
-    import open_clip  # type: ignore[import-not-found]
+    import open_clip  # type: ignore[import-untyped]
 
     аргументы = build_parser().parse_args(argv)
     корень = harvest_dir()
@@ -105,7 +105,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for class_id in аргументы.classes or порядок:
         итоги.append(harvest_class(запросы[class_id], зависимости, состояние, дедуп))
         save_state(корень / "state.json", состояние)
-        print(f"{class_id}: принято={итоги[-1].accepted} просмотрено={итоги[-1].seen}")
+        print(f"{class_id}: принято={итоги[-1].accepted} просмотрено={итоги[-1].seen}", flush=True)
 
     строки = load_manifest(DEFAULT_MANIFEST_PATH)
     гейт = check_gate(итоги, строки, audited_total=0, audited_dirty=0,

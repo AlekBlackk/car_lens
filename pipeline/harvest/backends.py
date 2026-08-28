@@ -12,6 +12,8 @@ HTTP берётся из стандартной библиотеки: новый
 
 from __future__ import annotations
 
+import http.client
+import urllib.error
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -40,10 +42,10 @@ class UrllibTransport:
         try:
             with urlopen(запрос, timeout=HTTP_TIMEOUT_SECONDS) as ответ:
                 return HttpResponse(int(ответ.status), ответ.read())
-        except OSError as ошибка:
+        except (OSError, http.client.HTTPException, urllib.error.URLError, TimeoutError) as ошибка:
             # Код 429 и 503 приходят исключением: его разбирает `request_with_backoff`,
             # поэтому статус надо вернуть, а не потерять внутри трассировки.
-            код = int(getattr(ошибка, "code", 0) or 0)
+            код = int(getattr(ошибка, "code", 0) or getattr(ошибка, "status", 0) or 0)
             return HttpResponse(код or 599, b"")
 
 
