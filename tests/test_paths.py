@@ -32,6 +32,7 @@ def test_подкаталоги_лежат_под_корнем(monkeypatch: pyte
     assert paths.crops_dir() == Path("/tmp/cl/crops")
     assert paths.splits_dir() == Path("/tmp/cl/splits")
     assert paths.runs_dir() == Path("/tmp/cl/runs")
+    assert paths.harvest_dir() == Path("/tmp/cl/harvest")
 
 
 def test_ensure_dirs_создаёт_всё_дерево(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

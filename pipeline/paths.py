@@ -44,6 +44,11 @@ def runs_dir() -> Path:
     return data_root() / "runs"
 
 
+def harvest_dir() -> Path:
+    """Кэш оригиналов, кропы и состояние харвеста (§8 дизайна M0-harvest)."""
+    return data_root() / "harvest"
+
+
 def ensure_dirs() -> None:
     """Создать всё дерево каталогов данных, если его нет."""
     root = data_root()
