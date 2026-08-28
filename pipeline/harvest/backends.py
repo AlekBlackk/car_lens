@@ -75,7 +75,9 @@ class OnnxBoxDetector:
 
     def detect(self, image: np.ndarray) -> list[Detection]:
         высота, ширина = image.shape[:2]
-        blob = cv2.dnn.blobFromImage(image, size=(self._size, self._size))
+        blob = np.expand_dims(cv2.resize(image, (self._size, self._size)), axis=0).astype(
+            np.float32
+        )
         self._net.setInput(blob)
         return decode_ssd_output(self._net.forward(), ширина, высота, self._conf)
 

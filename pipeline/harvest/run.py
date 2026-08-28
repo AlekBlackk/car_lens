@@ -83,8 +83,13 @@ def process_candidate(
         return "too_small_file", None
 
     данные = deps.source.fetch(candidate)
+    if not данные:
+        return "http", None
+    try:
+        кадр = decode_image(данные)
+    except Exception:
+        return "http", None
     store(deps.root, candidate.source, данные, "jpg")
-    кадр = decode_image(данные)
 
     машина = vehicle_gate(кадр, deps.vehicle_detector)
     if машина.box is None:
