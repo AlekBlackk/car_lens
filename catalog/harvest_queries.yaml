@@ -1,0 +1,459 @@
+# Термины поиска и категории Commons на каждый класс каталога.
+#
+# categories — категория Commons целиком (без префикса «Category:»); это первичный и
+# более надёжный источник разметки, чем полнотекстовый поиск.
+# terms — строки полнотекстового поиска, добор к категориям.
+# Группы grp__* ищутся по каждому члену отдельно (правило 4 Р-11) и складываются в
+# один класс.
+version: 1
+classes:
+  audi__a4:
+    categories: [Audi A4]
+    terms: ["Audi A4"]
+  audi__a6:
+    categories: [Audi A6]
+    terms: ["Audi A6"]
+  audi__q5:
+    categories: [Audi Q5]
+    terms: ["Audi Q5"]
+  bmw__3_series:
+    categories: [BMW 3 Series, BMW 3er]
+    terms: ["BMW 3 Series", "BMW 3er"]
+  bmw__5_series:
+    categories: [BMW 5 Series, BMW 5er]
+    terms: ["BMW 5 Series", "BMW 5er"]
+  bmw__x5:
+    categories: [BMW X5]
+    terms: ["BMW X5"]
+  changan__cs35_plus:
+    categories: [Changan CS35 Plus]
+    terms: ["Changan CS35 Plus"]
+  changan__cs55_plus:
+    categories: [Changan CS55 Plus]
+    terms: ["Changan CS55 Plus"]
+  chery__amulet:
+    categories: [Chery Amulet, Chery A15, Chery Cowin]
+    terms: ["Chery Amulet", "Chery A15", "Chery Cowin"]
+  chery__tiggo_4:
+    categories: [Chery Tiggo 4, Chery Tiggo 5x]
+    terms: ["Chery Tiggo 4", "Chery Tiggo 5x"]
+  chery__tiggo_8:
+    categories: [Chery Tiggo 8]
+    terms: ["Chery Tiggo 8"]
+  chevrolet__aveo:
+    categories: [Chevrolet Aveo]
+    terms: ["Chevrolet Aveo"]
+  chevrolet__captiva:
+    categories: [Chevrolet Captiva]
+    terms: ["Chevrolet Captiva"]
+  chevrolet__cruze:
+    categories: [Chevrolet Cruze]
+    terms: ["Chevrolet Cruze"]
+  chevrolet__lacetti:
+    categories: [Chevrolet Lacetti]
+    terms: ["Chevrolet Lacetti"]
+  chevrolet__lanos:
+    categories: [Chevrolet Lanos]
+    terms: ["Chevrolet Lanos"]
+  chevrolet__niva:
+    categories: [Chevrolet Niva, VAZ-2123]
+    terms: ["Chevrolet Niva", "VAZ-2123"]
+  citroen__berlingo:
+    categories: [Citroën Berlingo, Citroen Berlingo]
+    terms: ["Citroen Berlingo", "Citroën Berlingo"]
+  citroen__c4:
+    categories: [Citroën C4, Citroen C4]
+    terms: ["Citroen C4", "Citroën C4"]
+  daewoo__lanos:
+    categories: [Daewoo Lanos]
+    terms: ["Daewoo Lanos"]
+  daewoo__matiz:
+    categories: [Daewoo Matiz]
+    terms: ["Daewoo Matiz"]
+  daewoo__nexia:
+    categories: [Daewoo Nexia]
+    terms: ["Daewoo Nexia"]
+  datsun__on_do:
+    categories: [Datsun on-DO]
+    terms: ["Datsun on-DO"]
+  exeed__txl:
+    categories: [Exeed TXL, EXEED TXL]
+    terms: ["EXEED TXL", "Exeed TXL"]
+  fiat__albea:
+    categories: [Fiat Albea]
+    terms: ["Fiat Albea"]
+  ford__fiesta:
+    categories: [Ford Fiesta]
+    terms: ["Ford Fiesta"]
+  ford__focus:
+    categories: [Ford Focus]
+    terms: ["Ford Focus"]
+  ford__kuga:
+    categories: [Ford Kuga]
+    terms: ["Ford Kuga"]
+  ford__mondeo:
+    categories: [Ford Mondeo]
+    terms: ["Ford Mondeo"]
+  ford__transit:
+    categories: [Ford Transit]
+    terms: ["Ford Transit"]
+  gaz__gazel:
+    categories: [GAZelle, GAZ-3302 GAZelle]
+    terms: ["GAZelle", "GAZ Gazel"]
+  gaz__sobol:
+    categories: [GAZ Sobol, GAZ-2752 Sobol]
+    terms: ["GAZ Sobol"]
+  gaz__volga_3110:
+    categories: [GAZ-3110 Volga, GAZ-31105 Volga, GAZ Volga]
+    terms: ["GAZ Volga", "GAZ-3110", "GAZ-31105"]
+  geely__emgrand:
+    categories: [Geely Emgrand, Geely Emgrand EC7]
+    terms: ["Geely Emgrand", "Geely EC7"]
+  geely__monjaro:
+    categories: [Geely Monjaro, Geely Xingyue L]
+    terms: ["Geely Monjaro", "Geely Xingyue L"]
+  great_wall__hover:
+    categories: [Great Wall Hover, Great Wall Haval H3, Great Wall Haval H5]
+    terms: ["Great Wall Hover", "Great Wall Haval H3", "Great Wall Haval H5"]
+  grp__atlas_pro:
+    categories: [Geely Atlas Pro, Belgee X70]
+    terms: ["Geely Atlas Pro", "Belgee X70"]
+  grp__coolray:
+    categories: [Geely Coolray, Belgee X50]
+    terms: ["Geely Coolray", "Belgee X50"]
+  grp__jac_js4:
+    categories: [Moskvich 3, JAC JS4]
+    terms: ["Moskvich 3", "JAC JS4"]
+  grp__solaris_hs:
+    categories: [Hyundai Solaris, Solaris HS]
+    terms: ["Hyundai Solaris", "Solaris HS"]
+  grp__tiggo7:
+    categories: [Chery Tiggo 7 Pro, Chery Tiggo 7, Xcite X-Cross 7]
+    terms: ["Chery Tiggo 7 Pro", "Chery Tiggo 7", "Xcite X-Cross 7"]
+  haval__dargo:
+    categories: [Haval Dargo, Haval Big Dog]
+    terms: ["Haval Dargo", "Haval Big Dog"]
+  haval__f7:
+    categories: [Haval F7]
+    terms: ["Haval F7"]
+  haval__jolion:
+    categories: [Haval Jolion]
+    terms: ["Haval Jolion"]
+  honda__accord:
+    categories: [Honda Accord]
+    terms: ["Honda Accord"]
+  honda__civic:
+    categories: [Honda Civic]
+    terms: ["Honda Civic"]
+  honda__cr_v:
+    categories: [Honda CR-V]
+    terms: ["Honda CR-V"]
+  hyundai__accent:
+    categories: [Hyundai Accent]
+    terms: ["Hyundai Accent"]
+  hyundai__creta:
+    categories: [Hyundai Creta]
+    terms: ["Hyundai Creta"]
+  hyundai__elantra:
+    categories: [Hyundai Elantra]
+    terms: ["Hyundai Elantra"]
+  hyundai__getz:
+    categories: [Hyundai Getz]
+    terms: ["Hyundai Getz"]
+  hyundai__santa_fe:
+    categories: [Hyundai Santa Fe]
+    terms: ["Hyundai Santa Fe"]
+  hyundai__tucson:
+    categories: [Hyundai Tucson]
+    terms: ["Hyundai Tucson"]
+  infiniti__fx:
+    categories: [Infiniti FX]
+    terms: ["Infiniti FX"]
+  iveco__daily:
+    categories: [Iveco Daily]
+    terms: ["Iveco Daily"]
+  jeep__grand_cherokee:
+    categories: [Jeep Grand Cherokee]
+    terms: ["Jeep Grand Cherokee"]
+  kia__ceed:
+    categories: [Kia Cee'd, Kia Ceed]
+    terms: ["Kia Ceed", "Kia Cee'd"]
+  kia__cerato:
+    categories: [Kia Cerato, Kia Forte]
+    terms: ["Kia Cerato", "Kia Forte"]
+  kia__optima:
+    categories: [Kia Optima, Kia K5]
+    terms: ["Kia Optima", "Kia K5"]
+  kia__rio:
+    categories: [Kia Rio]
+    terms: ["Kia Rio"]
+  kia__sorento:
+    categories: [Kia Sorento]
+    terms: ["Kia Sorento"]
+  kia__soul:
+    categories: [Kia Soul]
+    terms: ["Kia Soul"]
+  kia__spectra:
+    categories: [Kia Spectra, Kia Sephia]
+    terms: ["Kia Spectra", "Kia Sephia"]
+  kia__sportage:
+    categories: [Kia Sportage]
+    terms: ["Kia Sportage"]
+  lada__2101:
+    categories: [VAZ-2101, Lada 2101]
+    terms: ["VAZ-2101", "Lada 2101", "Lada 2101 Kopeika"]
+  lada__2104:
+    categories: [VAZ-2104, Lada 2104]
+    terms: ["VAZ-2104", "Lada 2104"]
+  lada__2106:
+    categories: [VAZ-2106, Lada 2106]
+    terms: ["VAZ-2106", "Lada 2106"]
+  lada__2107:
+    categories: [VAZ-2107, Lada 2107]
+    terms: ["VAZ-2107", "Lada 2107"]
+  lada__2110:
+    categories: [VAZ-2110, VAZ-2111, VAZ-2112, Lada 110]
+    terms: ["VAZ-2110", "VAZ-2111", "VAZ-2112", "Lada 110"]
+  lada__granta:
+    categories: [Lada Granta, VAZ-2190]
+    terms: ["Lada Granta", "VAZ-2190"]
+  lada__kalina:
+    categories: [Lada Kalina, VAZ-1118]
+    terms: ["Lada Kalina", "VAZ-1118"]
+  lada__largus:
+    categories: [Lada Largus]
+    terms: ["Lada Largus"]
+  lada__niva_2121:
+    categories: [VAZ-2121, Lada 4x4, Lada Niva]
+    terms: ["VAZ-2121", "Lada Niva", "Lada 4x4"]
+  lada__niva_2131:
+    categories: [VAZ-2131, Lada 2131]
+    terms: ["VAZ-2131", "Lada 2131"]
+  lada__niva_travel:
+    categories: [Lada Niva Travel]
+    terms: ["Lada Niva Travel"]
+  lada__priora:
+    categories: [Lada Priora, VAZ-2170]
+    terms: ["Lada Priora", "VAZ-2170"]
+  lada__samara:
+    categories: [VAZ-2108, VAZ-2109, VAZ-21099, Lada Samara]
+    terms: ["VAZ-2108", "VAZ-2109", "VAZ-21099", "Lada Samara"]
+  lada__samara_2:
+    categories: [VAZ-2113, VAZ-2114, VAZ-2115, Lada Samara 2]
+    terms: ["VAZ-2113", "VAZ-2114", "VAZ-2115", "Lada Samara-2"]
+  lada__vesta:
+    categories: [Lada Vesta]
+    terms: ["Lada Vesta"]
+  lada__xray:
+    categories: [Lada XRAY]
+    terms: ["Lada XRAY"]
+  land_rover__discovery:
+    categories: [Land Rover Discovery]
+    terms: ["Land Rover Discovery"]
+  lexus__lx:
+    categories: [Lexus LX]
+    terms: ["Lexus LX"]
+  lexus__nx:
+    categories: [Lexus NX]
+    terms: ["Lexus NX"]
+  lexus__rx:
+    categories: [Lexus RX]
+    terms: ["Lexus RX"]
+  lifan__solano:
+    categories: [Lifan Solano, Lifan 620]
+    terms: ["Lifan Solano", "Lifan 620"]
+  lifan__x60:
+    categories: [Lifan X60]
+    terms: ["Lifan X60"]
+  mazda__3:
+    categories: [Mazda 3, Mazda3, Mazda Axela]
+    terms: ["Mazda 3", "Mazda3", "Mazda Axela"]
+  mazda__6:
+    categories: [Mazda 6, Mazda6, Mazda Atenza]
+    terms: ["Mazda 6", "Mazda6", "Mazda Atenza"]
+  mazda__cx5:
+    categories: [Mazda CX-5]
+    terms: ["Mazda CX-5"]
+  mercedes_benz__c_class:
+    categories: [Mercedes-Benz C-Class]
+    terms: ["Mercedes-Benz C-Class"]
+  mercedes_benz__e_class:
+    categories: [Mercedes-Benz E-Class]
+    terms: ["Mercedes-Benz E-Class"]
+  mercedes_benz__gle:
+    categories: [Mercedes-Benz GLE-Class, Mercedes-Benz GLE]
+    terms: ["Mercedes-Benz GLE", "Mercedes-Benz GLE-Class"]
+  mercedes_benz__sprinter:
+    categories: [Mercedes-Benz Sprinter]
+    terms: ["Mercedes-Benz Sprinter"]
+  mitsubishi__asx:
+    categories: [Mitsubishi ASX, Mitsubishi RVR]
+    terms: ["Mitsubishi ASX", "Mitsubishi RVR"]
+  mitsubishi__lancer:
+    categories: [Mitsubishi Lancer]
+    terms: ["Mitsubishi Lancer"]
+  mitsubishi__outlander:
+    categories: [Mitsubishi Outlander]
+    terms: ["Mitsubishi Outlander"]
+  mitsubishi__pajero:
+    categories: [Mitsubishi Pajero, Mitsubishi Montero]
+    terms: ["Mitsubishi Pajero", "Mitsubishi Montero"]
+  moskvich__2140:
+    categories: [Moskvitch-2140, Moskvich 2140]
+    terms: ["Moskvich 2140", "Moskvitch-2140", "AZLK 2140"]
+  moskvich__2141:
+    categories: [Moskvitch-2141, Moskvich 2141, Aleko]
+    terms: ["Moskvich 2141", "Moskvitch-2141", "AZLK 2141", "Aleko"]
+  nissan__almera:
+    categories: [Nissan Almera]
+    terms: ["Nissan Almera"]
+  nissan__juke:
+    categories: [Nissan Juke]
+    terms: ["Nissan Juke"]
+  nissan__murano:
+    categories: [Nissan Murano]
+    terms: ["Nissan Murano"]
+  nissan__qashqai:
+    categories: [Nissan Qashqai]
+    terms: ["Nissan Qashqai"]
+  nissan__terrano:
+    categories: [Nissan Terrano]
+    terms: ["Nissan Terrano"]
+  nissan__x_trail:
+    categories: [Nissan X-Trail]
+    terms: ["Nissan X-Trail"]
+  omoda__c5:
+    categories: [Omoda C5, OMODA C5]
+    terms: ["OMODA C5", "Omoda C5"]
+  opel__astra:
+    categories: [Opel Astra]
+    terms: ["Opel Astra"]
+  opel__zafira:
+    categories: [Opel Zafira]
+    terms: ["Opel Zafira"]
+  peugeot__206:
+    categories: [Peugeot 206]
+    terms: ["Peugeot 206"]
+  peugeot__308:
+    categories: [Peugeot 308]
+    terms: ["Peugeot 308"]
+  peugeot__408:
+    categories: [Peugeot 408]
+    terms: ["Peugeot 408"]
+  porsche__cayenne:
+    categories: [Porsche Cayenne]
+    terms: ["Porsche Cayenne"]
+  ravon__nexia_r3:
+    categories: [Ravon Nexia R3]
+    terms: ["Ravon Nexia R3"]
+  renault__duster:
+    categories: [Renault Duster, Dacia Duster]
+    terms: ["Renault Duster", "Dacia Duster"]
+  renault__kaptur:
+    categories: [Renault Kaptur, Renault Captur]
+    terms: ["Renault Kaptur", "Renault Captur"]
+  renault__logan:
+    categories: [Renault Logan, Dacia Logan]
+    terms: ["Renault Logan", "Dacia Logan"]
+  renault__logan_mcv:
+    categories: [Renault Logan MCV, Dacia Logan MCV]
+    terms: ["Renault Logan MCV", "Dacia Logan MCV"]
+  renault__megane:
+    categories: [Renault Mégane, Renault Megane]
+    terms: ["Renault Megane", "Renault Mégane"]
+  renault__sandero:
+    categories: [Renault Sandero, Dacia Sandero]
+    terms: ["Renault Sandero", "Dacia Sandero"]
+  skoda__fabia:
+    categories: [Škoda Fabia, Skoda Fabia]
+    terms: ["Skoda Fabia", "Škoda Fabia"]
+  skoda__kodiaq:
+    categories: [Škoda Kodiaq, Skoda Kodiaq]
+    terms: ["Skoda Kodiaq", "Škoda Kodiaq"]
+  skoda__octavia:
+    categories: [Škoda Octavia, Skoda Octavia]
+    terms: ["Skoda Octavia", "Škoda Octavia"]
+  skoda__rapid:
+    categories: [Škoda Rapid, Skoda Rapid]
+    terms: ["Skoda Rapid", "Škoda Rapid"]
+  ssangyong__actyon:
+    categories: [SsangYong Actyon]
+    terms: ["SsangYong Actyon"]
+  ssangyong__kyron:
+    categories: [SsangYong Kyron]
+    terms: ["SsangYong Kyron"]
+  ssangyong__rexton:
+    categories: [SsangYong Rexton]
+    terms: ["SsangYong Rexton"]
+  subaru__forester:
+    categories: [Subaru Forester]
+    terms: ["Subaru Forester"]
+  subaru__impreza:
+    categories: [Subaru Impreza]
+    terms: ["Subaru Impreza"]
+  subaru__outback:
+    categories: [Subaru Outback]
+    terms: ["Subaru Outback"]
+  suzuki__grand_vitara:
+    categories: [Suzuki Grand Vitara, Suzuki Escudo]
+    terms: ["Suzuki Grand Vitara", "Suzuki Escudo"]
+  suzuki__sx4:
+    categories: [Suzuki SX4]
+    terms: ["Suzuki SX4"]
+  toyota__avensis:
+    categories: [Toyota Avensis]
+    terms: ["Toyota Avensis"]
+  toyota__camry:
+    categories: [Toyota Camry]
+    terms: ["Toyota Camry"]
+  toyota__corolla:
+    categories: [Toyota Corolla, Toyota Corolla Fielder]
+    terms: ["Toyota Corolla", "Toyota Corolla Fielder"]
+  toyota__highlander:
+    categories: [Toyota Highlander, Toyota Kluger]
+    terms: ["Toyota Highlander", "Toyota Kluger"]
+  toyota__land_cruiser:
+    categories: [Toyota Land Cruiser]
+    terms: ["Toyota Land Cruiser"]
+  toyota__land_cruiser_prado:
+    categories: [Toyota Land Cruiser Prado]
+    terms: ["Toyota Land Cruiser Prado"]
+  toyota__mark_2:
+    categories: [Toyota Mark II]
+    terms: ["Toyota Mark II", "Toyota Mark 2"]
+  toyota__rav4:
+    categories: [Toyota RAV4]
+    terms: ["Toyota RAV4"]
+  uaz__bukhanka:
+    categories: [UAZ-452, UAZ-2206, UAZ Bukhanka]
+    terms: ["UAZ Bukhanka", "UAZ-452", "UAZ-2206"]
+  uaz__hunter:
+    categories: [UAZ Hunter, UAZ-315195]
+    terms: ["UAZ Hunter", "UAZ-315195"]
+  uaz__patriot:
+    categories: [UAZ Patriot, UAZ-3163]
+    terms: ["UAZ Patriot", "UAZ-3163"]
+  uaz__pickup:
+    categories: [UAZ Pickup, UAZ-23632]
+    terms: ["UAZ Pickup", "UAZ-23632"]
+  volkswagen__golf:
+    categories: [Volkswagen Golf, VW Golf]
+    terms: ["Volkswagen Golf", "VW Golf"]
+  volkswagen__passat:
+    categories: [Volkswagen Passat, VW Passat]
+    terms: ["Volkswagen Passat", "VW Passat"]
+  volkswagen__polo:
+    categories: [Volkswagen Polo, VW Polo]
+    terms: ["Volkswagen Polo", "VW Polo"]
+  volkswagen__tiguan:
+    categories: [Volkswagen Tiguan, VW Tiguan]
+    terms: ["Volkswagen Tiguan", "VW Tiguan"]
+  volkswagen__touareg:
+    categories: [Volkswagen Touareg, VW Touareg]
+    terms: ["Volkswagen Touareg", "VW Touareg"]
+  volkswagen__transporter:
+    categories: [Volkswagen Transporter, VW Transporter, Volkswagen T4, Volkswagen T5, Volkswagen T6]
+    terms: ["Volkswagen Transporter", "VW Transporter"]
+  volvo__xc60:
+    categories: [Volvo XC60]
+    terms: ["Volvo XC60"]
