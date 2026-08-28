@@ -166,7 +166,11 @@ class CommonsSource:
             page_url=str(инфо.get("descriptionurl", "")),
             file_url=str(инфо.get("url", "")),
             license_raw=str((мета.get("LicenseShortName") or {}).get("value", "")),
-            author=str((мета.get("Artist") or {}).get("value", "")),
+            author=str(
+                (мета.get("Artist") or {}).get("value", "")
+                or (мета.get("Credit") or {}).get("value", "")
+                or "Неизвестен"
+            ),
             title=str(страница.get("title", "")),
             width=int(инфо.get("width", 0)),
             height=int(инфо.get("height", 0)),
