@@ -106,9 +106,13 @@ class CommonsSource:
         прошло = time.monotonic() - self._последний_запрос
         if прошло < MIN_INTERVAL_SECONDS:
             self._sleep(MIN_INTERVAL_SECONDS - прошло)
-        ответ = request_with_backoff(
-            self._transport, candidate.file_url, {}, sleep=self._sleep
-        )
+        try:
+            ответ = request_with_backoff(
+                self._transport, candidate.file_url, {}, sleep=self._sleep
+            )
+        except HarvestHttpError:
+            self._последний_запрос = time.monotonic()
+            return b""
         self._последний_запрос = time.monotonic()
         return ответ.body
 

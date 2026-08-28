@@ -82,7 +82,10 @@ def process_candidate(
     if min(candidate.width, candidate.height) < MIN_SIDE:
         return "too_small_file", None
 
-    данные = deps.source.fetch(candidate)
+    try:
+        данные = deps.source.fetch(candidate)
+    except Exception:
+        return "http", None
     if not данные:
         return "http", None
     try:
@@ -170,15 +173,18 @@ def harvest_class(
     for запрос in _запросы(queries):
         while not is_class_done(state, class_id):
             ключ = f"{class_id}|{basis_of(запрос)}"
-            страница = deps.source.search(
-                SourceQuery(
-                    class_id,
-                    запрос.category,
-                    запрос.text,
-                    PAGE_LIMIT,
-                    state.tokens.get(ключ),
+            try:
+                страница = deps.source.search(
+                    SourceQuery(
+                        class_id,
+                        запрос.category,
+                        запрос.text,
+                        PAGE_LIMIT,
+                        state.tokens.get(ключ),
+                    )
                 )
-            )
+            except Exception:
+                break
             for кандидат in страница.candidates:
                 if is_class_done(state, class_id):
                     break
