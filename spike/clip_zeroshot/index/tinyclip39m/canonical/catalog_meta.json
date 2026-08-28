@@ -1,0 +1,1373 @@
+{
+  "format_version": 1,
+  "generated_at": "2026-08-28T14:56:20Z",
+  "model_weights_sha256": "model.safetensors=112bdfb07ebc8994e9afba7a2a314e278493a675033595cf48e54cf8a17ae587;pytorch_model.bin=14a1f69f54f8673718dd8c2522532b9f30334e3e5949f9ece098e95d92f04c2e",
+  "embedding_dim": 512,
+  "centroids_per_class": 1,
+  "classes": [
+    {
+      "class_id": "audi__a4",
+      "members": [
+        "audi__a4"
+      ],
+      "brand": "Audi",
+      "display": "Audi A4"
+    },
+    {
+      "class_id": "audi__a6",
+      "members": [
+        "audi__a6"
+      ],
+      "brand": "Audi",
+      "display": "Audi A6"
+    },
+    {
+      "class_id": "audi__q5",
+      "members": [
+        "audi__q5"
+      ],
+      "brand": "Audi",
+      "display": "Audi Q5"
+    },
+    {
+      "class_id": "grp__coolray",
+      "members": [
+        "geely__coolray",
+        "belgee__x50"
+      ],
+      "brand": null,
+      "display": "Geely Coolray / Belgee X50"
+    },
+    {
+      "class_id": "grp__atlas_pro",
+      "members": [
+        "geely__atlas_pro",
+        "belgee__x70"
+      ],
+      "brand": null,
+      "display": "Geely Atlas Pro / Belgee X70"
+    },
+    {
+      "class_id": "bmw__3_series",
+      "members": [
+        "bmw__3_series"
+      ],
+      "brand": "BMW",
+      "display": "BMW 3 Series"
+    },
+    {
+      "class_id": "bmw__5_series",
+      "members": [
+        "bmw__5_series"
+      ],
+      "brand": "BMW",
+      "display": "BMW 5 Series"
+    },
+    {
+      "class_id": "bmw__x5",
+      "members": [
+        "bmw__x5"
+      ],
+      "brand": "BMW",
+      "display": "BMW X5"
+    },
+    {
+      "class_id": "changan__cs35_plus",
+      "members": [
+        "changan__cs35_plus"
+      ],
+      "brand": "Changan",
+      "display": "Changan CS35 Plus"
+    },
+    {
+      "class_id": "changan__cs55_plus",
+      "members": [
+        "changan__cs55_plus"
+      ],
+      "brand": "Changan",
+      "display": "Changan CS55 Plus"
+    },
+    {
+      "class_id": "chery__amulet",
+      "members": [
+        "chery__amulet"
+      ],
+      "brand": "Chery",
+      "display": "Chery Amulet"
+    },
+    {
+      "class_id": "chery__tiggo_4",
+      "members": [
+        "chery__tiggo_4"
+      ],
+      "brand": "Chery",
+      "display": "Chery Tiggo 4"
+    },
+    {
+      "class_id": "grp__tiggo7",
+      "members": [
+        "chery__tiggo_7_pro",
+        "xcite__x_cross_7"
+      ],
+      "brand": null,
+      "display": "Chery Tiggo 7 Pro / Xcite X-Cross 7"
+    },
+    {
+      "class_id": "chery__tiggo_8",
+      "members": [
+        "chery__tiggo_8"
+      ],
+      "brand": "Chery",
+      "display": "Chery Tiggo 8"
+    },
+    {
+      "class_id": "chevrolet__aveo",
+      "members": [
+        "chevrolet__aveo"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Aveo"
+    },
+    {
+      "class_id": "chevrolet__captiva",
+      "members": [
+        "chevrolet__captiva"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Captiva"
+    },
+    {
+      "class_id": "chevrolet__cruze",
+      "members": [
+        "chevrolet__cruze"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Cruze"
+    },
+    {
+      "class_id": "chevrolet__lacetti",
+      "members": [
+        "chevrolet__lacetti"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Lacetti"
+    },
+    {
+      "class_id": "chevrolet__lanos",
+      "members": [
+        "chevrolet__lanos"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Lanos"
+    },
+    {
+      "class_id": "chevrolet__niva",
+      "members": [
+        "chevrolet__niva"
+      ],
+      "brand": "Chevrolet",
+      "display": "Chevrolet Niva"
+    },
+    {
+      "class_id": "citroen__berlingo",
+      "members": [
+        "citroen__berlingo"
+      ],
+      "brand": "Citroen",
+      "display": "Citroën Berlingo"
+    },
+    {
+      "class_id": "citroen__c4",
+      "members": [
+        "citroen__c4"
+      ],
+      "brand": "Citroen",
+      "display": "Citroën C4"
+    },
+    {
+      "class_id": "daewoo__lanos",
+      "members": [
+        "daewoo__lanos"
+      ],
+      "brand": "Daewoo",
+      "display": "Daewoo Lanos"
+    },
+    {
+      "class_id": "daewoo__matiz",
+      "members": [
+        "daewoo__matiz"
+      ],
+      "brand": "Daewoo",
+      "display": "Daewoo Matiz"
+    },
+    {
+      "class_id": "daewoo__nexia",
+      "members": [
+        "daewoo__nexia"
+      ],
+      "brand": "Daewoo",
+      "display": "Daewoo Nexia"
+    },
+    {
+      "class_id": "datsun__on_do",
+      "members": [
+        "datsun__on_do"
+      ],
+      "brand": "Datsun",
+      "display": "Datsun on-DO"
+    },
+    {
+      "class_id": "exeed__txl",
+      "members": [
+        "exeed__txl"
+      ],
+      "brand": "Exeed",
+      "display": "EXEED TXL"
+    },
+    {
+      "class_id": "fiat__albea",
+      "members": [
+        "fiat__albea"
+      ],
+      "brand": "Fiat",
+      "display": "Fiat Albea"
+    },
+    {
+      "class_id": "ford__fiesta",
+      "members": [
+        "ford__fiesta"
+      ],
+      "brand": "Ford",
+      "display": "Ford Fiesta"
+    },
+    {
+      "class_id": "ford__focus",
+      "members": [
+        "ford__focus"
+      ],
+      "brand": "Ford",
+      "display": "Ford Focus"
+    },
+    {
+      "class_id": "ford__kuga",
+      "members": [
+        "ford__kuga"
+      ],
+      "brand": "Ford",
+      "display": "Ford Kuga"
+    },
+    {
+      "class_id": "ford__mondeo",
+      "members": [
+        "ford__mondeo"
+      ],
+      "brand": "Ford",
+      "display": "Ford Mondeo"
+    },
+    {
+      "class_id": "ford__transit",
+      "members": [
+        "ford__transit"
+      ],
+      "brand": "Ford",
+      "display": "Ford Transit"
+    },
+    {
+      "class_id": "gaz__gazel",
+      "members": [
+        "gaz__gazel"
+      ],
+      "brand": "GAZ",
+      "display": "ГАЗель"
+    },
+    {
+      "class_id": "gaz__sobol",
+      "members": [
+        "gaz__sobol"
+      ],
+      "brand": "GAZ",
+      "display": "ГАЗ Соболь"
+    },
+    {
+      "class_id": "gaz__volga_3110",
+      "members": [
+        "gaz__volga_3110"
+      ],
+      "brand": "GAZ",
+      "display": "ГАЗ Волга (3110/31105)"
+    },
+    {
+      "class_id": "geely__emgrand",
+      "members": [
+        "geely__emgrand"
+      ],
+      "brand": "Geely",
+      "display": "Geely Emgrand"
+    },
+    {
+      "class_id": "geely__monjaro",
+      "members": [
+        "geely__monjaro"
+      ],
+      "brand": "Geely",
+      "display": "Geely Monjaro"
+    },
+    {
+      "class_id": "great_wall__hover",
+      "members": [
+        "great_wall__hover"
+      ],
+      "brand": "Great Wall",
+      "display": "Great Wall Hover"
+    },
+    {
+      "class_id": "haval__dargo",
+      "members": [
+        "haval__dargo"
+      ],
+      "brand": "Haval",
+      "display": "Haval Dargo"
+    },
+    {
+      "class_id": "haval__f7",
+      "members": [
+        "haval__f7"
+      ],
+      "brand": "Haval",
+      "display": "Haval F7"
+    },
+    {
+      "class_id": "haval__jolion",
+      "members": [
+        "haval__jolion"
+      ],
+      "brand": "Haval",
+      "display": "Haval Jolion"
+    },
+    {
+      "class_id": "honda__accord",
+      "members": [
+        "honda__accord"
+      ],
+      "brand": "Honda",
+      "display": "Honda Accord"
+    },
+    {
+      "class_id": "honda__civic",
+      "members": [
+        "honda__civic"
+      ],
+      "brand": "Honda",
+      "display": "Honda Civic"
+    },
+    {
+      "class_id": "honda__cr_v",
+      "members": [
+        "honda__cr_v"
+      ],
+      "brand": "Honda",
+      "display": "Honda CR-V"
+    },
+    {
+      "class_id": "hyundai__accent",
+      "members": [
+        "hyundai__accent"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Accent"
+    },
+    {
+      "class_id": "hyundai__creta",
+      "members": [
+        "hyundai__creta"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Creta"
+    },
+    {
+      "class_id": "hyundai__elantra",
+      "members": [
+        "hyundai__elantra"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Elantra"
+    },
+    {
+      "class_id": "hyundai__getz",
+      "members": [
+        "hyundai__getz"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Getz"
+    },
+    {
+      "class_id": "hyundai__santa_fe",
+      "members": [
+        "hyundai__santa_fe"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Santa Fe"
+    },
+    {
+      "class_id": "grp__solaris_hs",
+      "members": [
+        "hyundai__solaris",
+        "solaris__hs"
+      ],
+      "brand": null,
+      "display": "Hyundai Solaris / Solaris HS"
+    },
+    {
+      "class_id": "hyundai__tucson",
+      "members": [
+        "hyundai__tucson"
+      ],
+      "brand": "Hyundai",
+      "display": "Hyundai Tucson"
+    },
+    {
+      "class_id": "infiniti__fx",
+      "members": [
+        "infiniti__fx"
+      ],
+      "brand": "Infiniti",
+      "display": "Infiniti FX"
+    },
+    {
+      "class_id": "iveco__daily",
+      "members": [
+        "iveco__daily"
+      ],
+      "brand": "Iveco",
+      "display": "Iveco Daily"
+    },
+    {
+      "class_id": "grp__jac_js4",
+      "members": [
+        "moskvich__3",
+        "jac__js4"
+      ],
+      "brand": null,
+      "display": "Москвич 3 / JAC JS4"
+    },
+    {
+      "class_id": "jeep__grand_cherokee",
+      "members": [
+        "jeep__grand_cherokee"
+      ],
+      "brand": "Jeep",
+      "display": "Jeep Grand Cherokee"
+    },
+    {
+      "class_id": "kia__ceed",
+      "members": [
+        "kia__ceed"
+      ],
+      "brand": "Kia",
+      "display": "Kia Ceed"
+    },
+    {
+      "class_id": "kia__cerato",
+      "members": [
+        "kia__cerato"
+      ],
+      "brand": "Kia",
+      "display": "Kia Cerato"
+    },
+    {
+      "class_id": "kia__optima",
+      "members": [
+        "kia__optima"
+      ],
+      "brand": "Kia",
+      "display": "Kia Optima"
+    },
+    {
+      "class_id": "kia__rio",
+      "members": [
+        "kia__rio"
+      ],
+      "brand": "Kia",
+      "display": "Kia Rio"
+    },
+    {
+      "class_id": "kia__sorento",
+      "members": [
+        "kia__sorento"
+      ],
+      "brand": "Kia",
+      "display": "Kia Sorento"
+    },
+    {
+      "class_id": "kia__soul",
+      "members": [
+        "kia__soul"
+      ],
+      "brand": "Kia",
+      "display": "Kia Soul"
+    },
+    {
+      "class_id": "kia__spectra",
+      "members": [
+        "kia__spectra"
+      ],
+      "brand": "Kia",
+      "display": "Kia Spectra"
+    },
+    {
+      "class_id": "kia__sportage",
+      "members": [
+        "kia__sportage"
+      ],
+      "brand": "Kia",
+      "display": "Kia Sportage"
+    },
+    {
+      "class_id": "lada__2101",
+      "members": [
+        "lada__2101"
+      ],
+      "brand": "Lada",
+      "display": "Лада 2101 «копейка»"
+    },
+    {
+      "class_id": "lada__2104",
+      "members": [
+        "lada__2104"
+      ],
+      "brand": "Lada",
+      "display": "Лада 2104 (универсал)"
+    },
+    {
+      "class_id": "lada__2106",
+      "members": [
+        "lada__2106"
+      ],
+      "brand": "Lada",
+      "display": "Лада 2106"
+    },
+    {
+      "class_id": "lada__2107",
+      "members": [
+        "lada__2107"
+      ],
+      "brand": "Lada",
+      "display": "Лада 2107"
+    },
+    {
+      "class_id": "lada__2110",
+      "members": [
+        "lada__2110"
+      ],
+      "brand": "Lada",
+      "display": "Лада 110 (2110/2111/2112)"
+    },
+    {
+      "class_id": "lada__granta",
+      "members": [
+        "lada__granta"
+      ],
+      "brand": "Lada",
+      "display": "Лада Гранта"
+    },
+    {
+      "class_id": "lada__kalina",
+      "members": [
+        "lada__kalina"
+      ],
+      "brand": "Lada",
+      "display": "Лада Калина"
+    },
+    {
+      "class_id": "lada__largus",
+      "members": [
+        "lada__largus"
+      ],
+      "brand": "Lada",
+      "display": "Лада Ларгус"
+    },
+    {
+      "class_id": "lada__niva_2121",
+      "members": [
+        "lada__niva_2121"
+      ],
+      "brand": "Lada",
+      "display": "Лада Нива Легенда (2121)"
+    },
+    {
+      "class_id": "lada__niva_2131",
+      "members": [
+        "lada__niva_2131"
+      ],
+      "brand": "Lada",
+      "display": "Лада Нива Легенда 5-дверная (2131)"
+    },
+    {
+      "class_id": "lada__niva_travel",
+      "members": [
+        "lada__niva_travel"
+      ],
+      "brand": "Lada",
+      "display": "Лада Нива Тревел"
+    },
+    {
+      "class_id": "lada__priora",
+      "members": [
+        "lada__priora"
+      ],
+      "brand": "Lada",
+      "display": "Лада Приора"
+    },
+    {
+      "class_id": "lada__samara",
+      "members": [
+        "lada__samara"
+      ],
+      "brand": "Lada",
+      "display": "Лада Самара (2108/2109/21099)"
+    },
+    {
+      "class_id": "lada__samara_2",
+      "members": [
+        "lada__samara_2"
+      ],
+      "brand": "Lada",
+      "display": "Лада Самара-2 (2113/2114/2115)"
+    },
+    {
+      "class_id": "lada__vesta",
+      "members": [
+        "lada__vesta"
+      ],
+      "brand": "Lada",
+      "display": "Лада Веста"
+    },
+    {
+      "class_id": "lada__xray",
+      "members": [
+        "lada__xray"
+      ],
+      "brand": "Lada",
+      "display": "Лада Икс-рей"
+    },
+    {
+      "class_id": "land_rover__discovery",
+      "members": [
+        "land_rover__discovery"
+      ],
+      "brand": "Land Rover",
+      "display": "Land Rover Discovery"
+    },
+    {
+      "class_id": "lexus__lx",
+      "members": [
+        "lexus__lx"
+      ],
+      "brand": "Lexus",
+      "display": "Lexus LX"
+    },
+    {
+      "class_id": "lexus__nx",
+      "members": [
+        "lexus__nx"
+      ],
+      "brand": "Lexus",
+      "display": "Lexus NX"
+    },
+    {
+      "class_id": "lexus__rx",
+      "members": [
+        "lexus__rx"
+      ],
+      "brand": "Lexus",
+      "display": "Lexus RX"
+    },
+    {
+      "class_id": "lifan__solano",
+      "members": [
+        "lifan__solano"
+      ],
+      "brand": "Lifan",
+      "display": "Lifan Solano"
+    },
+    {
+      "class_id": "lifan__x60",
+      "members": [
+        "lifan__x60"
+      ],
+      "brand": "Lifan",
+      "display": "Lifan X60"
+    },
+    {
+      "class_id": "mazda__3",
+      "members": [
+        "mazda__3"
+      ],
+      "brand": "Mazda",
+      "display": "Mazda 3"
+    },
+    {
+      "class_id": "mazda__6",
+      "members": [
+        "mazda__6"
+      ],
+      "brand": "Mazda",
+      "display": "Mazda 6"
+    },
+    {
+      "class_id": "mazda__cx5",
+      "members": [
+        "mazda__cx5"
+      ],
+      "brand": "Mazda",
+      "display": "Mazda CX-5"
+    },
+    {
+      "class_id": "mercedes_benz__c_class",
+      "members": [
+        "mercedes_benz__c_class"
+      ],
+      "brand": "Mercedes-Benz",
+      "display": "Mercedes-Benz C-Class"
+    },
+    {
+      "class_id": "mercedes_benz__e_class",
+      "members": [
+        "mercedes_benz__e_class"
+      ],
+      "brand": "Mercedes-Benz",
+      "display": "Mercedes-Benz E-Class"
+    },
+    {
+      "class_id": "mercedes_benz__gle",
+      "members": [
+        "mercedes_benz__gle"
+      ],
+      "brand": "Mercedes-Benz",
+      "display": "Mercedes-Benz GLE"
+    },
+    {
+      "class_id": "mercedes_benz__sprinter",
+      "members": [
+        "mercedes_benz__sprinter"
+      ],
+      "brand": "Mercedes-Benz",
+      "display": "Mercedes-Benz Sprinter"
+    },
+    {
+      "class_id": "mitsubishi__asx",
+      "members": [
+        "mitsubishi__asx"
+      ],
+      "brand": "Mitsubishi",
+      "display": "Mitsubishi ASX"
+    },
+    {
+      "class_id": "mitsubishi__lancer",
+      "members": [
+        "mitsubishi__lancer"
+      ],
+      "brand": "Mitsubishi",
+      "display": "Mitsubishi Lancer"
+    },
+    {
+      "class_id": "mitsubishi__outlander",
+      "members": [
+        "mitsubishi__outlander"
+      ],
+      "brand": "Mitsubishi",
+      "display": "Mitsubishi Outlander"
+    },
+    {
+      "class_id": "mitsubishi__pajero",
+      "members": [
+        "mitsubishi__pajero"
+      ],
+      "brand": "Mitsubishi",
+      "display": "Mitsubishi Pajero"
+    },
+    {
+      "class_id": "moskvich__2140",
+      "members": [
+        "moskvich__2140"
+      ],
+      "brand": "Moskvich",
+      "display": "Москвич 2140"
+    },
+    {
+      "class_id": "moskvich__2141",
+      "members": [
+        "moskvich__2141"
+      ],
+      "brand": "Moskvich",
+      "display": "Москвич 2141"
+    },
+    {
+      "class_id": "nissan__almera",
+      "members": [
+        "nissan__almera"
+      ],
+      "brand": "Nissan",
+      "display": "Nissan Almera"
+    },
+    {
+      "class_id": "nissan__juke",
+      "members": [
+        "nissan__juke"
+      ],
+      "brand": "Nissan",
+      "display": "Nissan Juke"
+    },
+    {
+      "class_id": "nissan__murano",
+      "members": [
+        "nissan__murano"
+      ],
+      "brand": "Nissan",
+      "display": "Nissan Murano"
+    },
+    {
+      "class_id": "nissan__qashqai",
+      "members": [
+        "nissan__qashqai"
+      ],
+      "brand": "Nissan",
+      "display": "Nissan Qashqai"
+    },
+    {
+      "class_id": "nissan__terrano",
+      "members": [
+        "nissan__terrano"
+      ],
+      "brand": "Nissan",
+      "display": "Nissan Terrano"
+    },
+    {
+      "class_id": "nissan__x_trail",
+      "members": [
+        "nissan__x_trail"
+      ],
+      "brand": "Nissan",
+      "display": "Nissan X-Trail"
+    },
+    {
+      "class_id": "omoda__c5",
+      "members": [
+        "omoda__c5"
+      ],
+      "brand": "Omoda",
+      "display": "OMODA C5"
+    },
+    {
+      "class_id": "opel__astra",
+      "members": [
+        "opel__astra"
+      ],
+      "brand": "Opel",
+      "display": "Opel Astra"
+    },
+    {
+      "class_id": "opel__zafira",
+      "members": [
+        "opel__zafira"
+      ],
+      "brand": "Opel",
+      "display": "Opel Zafira"
+    },
+    {
+      "class_id": "peugeot__206",
+      "members": [
+        "peugeot__206"
+      ],
+      "brand": "Peugeot",
+      "display": "Peugeot 206"
+    },
+    {
+      "class_id": "peugeot__308",
+      "members": [
+        "peugeot__308"
+      ],
+      "brand": "Peugeot",
+      "display": "Peugeot 308"
+    },
+    {
+      "class_id": "peugeot__408",
+      "members": [
+        "peugeot__408"
+      ],
+      "brand": "Peugeot",
+      "display": "Peugeot 408"
+    },
+    {
+      "class_id": "porsche__cayenne",
+      "members": [
+        "porsche__cayenne"
+      ],
+      "brand": "Porsche",
+      "display": "Porsche Cayenne"
+    },
+    {
+      "class_id": "ravon__nexia_r3",
+      "members": [
+        "ravon__nexia_r3"
+      ],
+      "brand": "Ravon",
+      "display": "Ravon Nexia R3"
+    },
+    {
+      "class_id": "renault__duster",
+      "members": [
+        "renault__duster"
+      ],
+      "brand": "Renault",
+      "display": "Renault Duster"
+    },
+    {
+      "class_id": "renault__kaptur",
+      "members": [
+        "renault__kaptur"
+      ],
+      "brand": "Renault",
+      "display": "Renault Kaptur"
+    },
+    {
+      "class_id": "renault__logan",
+      "members": [
+        "renault__logan"
+      ],
+      "brand": "Renault",
+      "display": "Renault Logan"
+    },
+    {
+      "class_id": "renault__logan_mcv",
+      "members": [
+        "renault__logan_mcv"
+      ],
+      "brand": "Renault",
+      "display": "Renault Logan MCV"
+    },
+    {
+      "class_id": "renault__megane",
+      "members": [
+        "renault__megane"
+      ],
+      "brand": "Renault",
+      "display": "Renault Mégane"
+    },
+    {
+      "class_id": "renault__sandero",
+      "members": [
+        "renault__sandero"
+      ],
+      "brand": "Renault",
+      "display": "Renault Sandero"
+    },
+    {
+      "class_id": "skoda__fabia",
+      "members": [
+        "skoda__fabia"
+      ],
+      "brand": "Skoda",
+      "display": "Škoda Fabia"
+    },
+    {
+      "class_id": "skoda__kodiaq",
+      "members": [
+        "skoda__kodiaq"
+      ],
+      "brand": "Skoda",
+      "display": "Škoda Kodiaq"
+    },
+    {
+      "class_id": "skoda__octavia",
+      "members": [
+        "skoda__octavia"
+      ],
+      "brand": "Skoda",
+      "display": "Škoda Octavia"
+    },
+    {
+      "class_id": "skoda__rapid",
+      "members": [
+        "skoda__rapid"
+      ],
+      "brand": "Skoda",
+      "display": "Škoda Rapid"
+    },
+    {
+      "class_id": "ssangyong__actyon",
+      "members": [
+        "ssangyong__actyon"
+      ],
+      "brand": "SsangYong",
+      "display": "SsangYong Actyon"
+    },
+    {
+      "class_id": "ssangyong__kyron",
+      "members": [
+        "ssangyong__kyron"
+      ],
+      "brand": "SsangYong",
+      "display": "SsangYong Kyron"
+    },
+    {
+      "class_id": "ssangyong__rexton",
+      "members": [
+        "ssangyong__rexton"
+      ],
+      "brand": "SsangYong",
+      "display": "SsangYong Rexton"
+    },
+    {
+      "class_id": "subaru__forester",
+      "members": [
+        "subaru__forester"
+      ],
+      "brand": "Subaru",
+      "display": "Subaru Forester"
+    },
+    {
+      "class_id": "subaru__impreza",
+      "members": [
+        "subaru__impreza"
+      ],
+      "brand": "Subaru",
+      "display": "Subaru Impreza"
+    },
+    {
+      "class_id": "subaru__outback",
+      "members": [
+        "subaru__outback"
+      ],
+      "brand": "Subaru",
+      "display": "Subaru Outback"
+    },
+    {
+      "class_id": "suzuki__grand_vitara",
+      "members": [
+        "suzuki__grand_vitara"
+      ],
+      "brand": "Suzuki",
+      "display": "Suzuki Grand Vitara"
+    },
+    {
+      "class_id": "suzuki__sx4",
+      "members": [
+        "suzuki__sx4"
+      ],
+      "brand": "Suzuki",
+      "display": "Suzuki SX4"
+    },
+    {
+      "class_id": "toyota__avensis",
+      "members": [
+        "toyota__avensis"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota Avensis"
+    },
+    {
+      "class_id": "toyota__camry",
+      "members": [
+        "toyota__camry"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota Camry"
+    },
+    {
+      "class_id": "toyota__corolla",
+      "members": [
+        "toyota__corolla"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota Corolla"
+    },
+    {
+      "class_id": "toyota__highlander",
+      "members": [
+        "toyota__highlander"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota Highlander"
+    },
+    {
+      "class_id": "toyota__land_cruiser",
+      "members": [
+        "toyota__land_cruiser"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota Land Cruiser"
+    },
+    {
+      "class_id": "toyota__land_cruiser_prado",
+      "members": [
+        "toyota__land_cruiser_prado"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota Land Cruiser Prado"
+    },
+    {
+      "class_id": "toyota__mark_2",
+      "members": [
+        "toyota__mark_2"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota Mark II"
+    },
+    {
+      "class_id": "toyota__rav4",
+      "members": [
+        "toyota__rav4"
+      ],
+      "brand": "Toyota",
+      "display": "Toyota RAV4"
+    },
+    {
+      "class_id": "uaz__bukhanka",
+      "members": [
+        "uaz__bukhanka"
+      ],
+      "brand": "UAZ",
+      "display": "УАЗ Буханка (452/2206)"
+    },
+    {
+      "class_id": "uaz__hunter",
+      "members": [
+        "uaz__hunter"
+      ],
+      "brand": "UAZ",
+      "display": "УАЗ Хантер"
+    },
+    {
+      "class_id": "uaz__patriot",
+      "members": [
+        "uaz__patriot"
+      ],
+      "brand": "UAZ",
+      "display": "УАЗ Патриот"
+    },
+    {
+      "class_id": "uaz__pickup",
+      "members": [
+        "uaz__pickup"
+      ],
+      "brand": "UAZ",
+      "display": "УАЗ Пикап"
+    },
+    {
+      "class_id": "volkswagen__golf",
+      "members": [
+        "volkswagen__golf"
+      ],
+      "brand": "Volkswagen",
+      "display": "Volkswagen Golf"
+    },
+    {
+      "class_id": "volkswagen__passat",
+      "members": [
+        "volkswagen__passat"
+      ],
+      "brand": "Volkswagen",
+      "display": "Volkswagen Passat"
+    },
+    {
+      "class_id": "volkswagen__polo",
+      "members": [
+        "volkswagen__polo"
+      ],
+      "brand": "Volkswagen",
+      "display": "Volkswagen Polo"
+    },
+    {
+      "class_id": "volkswagen__tiguan",
+      "members": [
+        "volkswagen__tiguan"
+      ],
+      "brand": "Volkswagen",
+      "display": "Volkswagen Tiguan"
+    },
+    {
+      "class_id": "volkswagen__touareg",
+      "members": [
+        "volkswagen__touareg"
+      ],
+      "brand": "Volkswagen",
+      "display": "Volkswagen Touareg"
+    },
+    {
+      "class_id": "volkswagen__transporter",
+      "members": [
+        "volkswagen__transporter"
+      ],
+      "brand": "Volkswagen",
+      "display": "Volkswagen Transporter"
+    },
+    {
+      "class_id": "volvo__xc60",
+      "members": [
+        "volvo__xc60"
+      ],
+      "brand": "Volvo",
+      "display": "Volvo XC60"
+    }
+  ],
+  "text_source": {
+    "repo_id": "wkcn/TinyCLIP-ViT-39M-16-Text-19M-YFCC15M",
+    "revision": "07a4b0bc751cb64fecd2b661c048c1dd98d69444",
+    "license": "mit",
+    "tokenizer": "transformers",
+    "prompt_template": "a photo of a {name}, a car",
+    "labels": {
+      "audi__a4": "Audi A4",
+      "audi__a6": "Audi A6",
+      "audi__q5": "Audi Q5",
+      "grp__coolray": "Geely Coolray or Belgee X50",
+      "grp__atlas_pro": "Geely Atlas Pro or Belgee X70",
+      "bmw__3_series": "BMW 3 Series",
+      "bmw__5_series": "BMW 5 Series",
+      "bmw__x5": "BMW X5",
+      "changan__cs35_plus": "Changan CS35 Plus",
+      "changan__cs55_plus": "Changan CS55 Plus",
+      "chery__amulet": "Chery Amulet",
+      "chery__tiggo_4": "Chery Tiggo 4",
+      "grp__tiggo7": "Chery Tiggo 7 Pro or Xcite X-Cross 7",
+      "chery__tiggo_8": "Chery Tiggo 8",
+      "chevrolet__aveo": "Chevrolet Aveo",
+      "chevrolet__captiva": "Chevrolet Captiva",
+      "chevrolet__cruze": "Chevrolet Cruze",
+      "chevrolet__lacetti": "Chevrolet Lacetti",
+      "chevrolet__lanos": "Chevrolet Lanos",
+      "chevrolet__niva": "Chevrolet Niva",
+      "citroen__berlingo": "Citroen Berlingo",
+      "citroen__c4": "Citroen C4",
+      "daewoo__lanos": "Daewoo Lanos",
+      "daewoo__matiz": "Daewoo Matiz",
+      "daewoo__nexia": "Daewoo Nexia",
+      "datsun__on_do": "Datsun on-DO",
+      "exeed__txl": "EXEED TXL",
+      "fiat__albea": "Fiat Albea",
+      "ford__fiesta": "Ford Fiesta",
+      "ford__focus": "Ford Focus",
+      "ford__kuga": "Ford Kuga",
+      "ford__mondeo": "Ford Mondeo",
+      "ford__transit": "Ford Transit",
+      "gaz__gazel": "GAZelle",
+      "gaz__sobol": "GAZ Sobol",
+      "gaz__volga_3110": "GAZ Volga (3110/31105)",
+      "geely__emgrand": "Geely Emgrand",
+      "geely__monjaro": "Geely Monjaro",
+      "great_wall__hover": "Great Wall Hover",
+      "haval__dargo": "Haval Dargo",
+      "haval__f7": "Haval F7",
+      "haval__jolion": "Haval Jolion",
+      "honda__accord": "Honda Accord",
+      "honda__civic": "Honda Civic",
+      "honda__cr_v": "Honda CR-V",
+      "hyundai__accent": "Hyundai Accent",
+      "hyundai__creta": "Hyundai Creta",
+      "hyundai__elantra": "Hyundai Elantra",
+      "hyundai__getz": "Hyundai Getz",
+      "hyundai__santa_fe": "Hyundai Santa Fe",
+      "grp__solaris_hs": "Hyundai Solaris or Solaris HS",
+      "hyundai__tucson": "Hyundai Tucson",
+      "infiniti__fx": "Infiniti FX",
+      "iveco__daily": "Iveco Daily",
+      "grp__jac_js4": "Moskvich 3 or JAC JS4",
+      "jeep__grand_cherokee": "Jeep Grand Cherokee",
+      "kia__ceed": "Kia Ceed",
+      "kia__cerato": "Kia Cerato",
+      "kia__optima": "Kia Optima",
+      "kia__rio": "Kia Rio",
+      "kia__sorento": "Kia Sorento",
+      "kia__soul": "Kia Soul",
+      "kia__spectra": "Kia Spectra",
+      "kia__sportage": "Kia Sportage",
+      "lada__2101": "Lada 2101 Kopeika",
+      "lada__2104": "Lada 2104 (wagon)",
+      "lada__2106": "Lada 2106",
+      "lada__2107": "Lada 2107",
+      "lada__2110": "Lada 110 (2110/2111/2112)",
+      "lada__granta": "Lada Granta",
+      "lada__kalina": "Lada Kalina",
+      "lada__largus": "Lada Largus",
+      "lada__niva_2121": "Lada Niva Legend (2121)",
+      "lada__niva_2131": "Lada Niva Legend 5-door (2131)",
+      "lada__niva_travel": "Lada Niva Travel",
+      "lada__priora": "Lada Priora",
+      "lada__samara": "Lada Samara (2108/2109/21099)",
+      "lada__samara_2": "Lada Samara-2 (2113/2114/2115)",
+      "lada__vesta": "Lada Vesta",
+      "lada__xray": "Lada XRAY",
+      "land_rover__discovery": "Land Rover Discovery",
+      "lexus__lx": "Lexus LX",
+      "lexus__nx": "Lexus NX",
+      "lexus__rx": "Lexus RX",
+      "lifan__solano": "Lifan Solano",
+      "lifan__x60": "Lifan X60",
+      "mazda__3": "Mazda 3",
+      "mazda__6": "Mazda 6",
+      "mazda__cx5": "Mazda CX-5",
+      "mercedes_benz__c_class": "Mercedes-Benz C-Class",
+      "mercedes_benz__e_class": "Mercedes-Benz E-Class",
+      "mercedes_benz__gle": "Mercedes-Benz GLE",
+      "mercedes_benz__sprinter": "Mercedes-Benz Sprinter",
+      "mitsubishi__asx": "Mitsubishi ASX",
+      "mitsubishi__lancer": "Mitsubishi Lancer",
+      "mitsubishi__outlander": "Mitsubishi Outlander",
+      "mitsubishi__pajero": "Mitsubishi Pajero",
+      "moskvich__2140": "Moskvich 2140",
+      "moskvich__2141": "Moskvich 2141",
+      "nissan__almera": "Nissan Almera",
+      "nissan__juke": "Nissan Juke",
+      "nissan__murano": "Nissan Murano",
+      "nissan__qashqai": "Nissan Qashqai",
+      "nissan__terrano": "Nissan Terrano",
+      "nissan__x_trail": "Nissan X-Trail",
+      "omoda__c5": "OMODA C5",
+      "opel__astra": "Opel Astra",
+      "opel__zafira": "Opel Zafira",
+      "peugeot__206": "Peugeot 206",
+      "peugeot__308": "Peugeot 308",
+      "peugeot__408": "Peugeot 408",
+      "porsche__cayenne": "Porsche Cayenne",
+      "ravon__nexia_r3": "Ravon Nexia R3",
+      "renault__duster": "Renault Duster",
+      "renault__kaptur": "Renault Kaptur",
+      "renault__logan": "Renault Logan",
+      "renault__logan_mcv": "Renault Logan MCV",
+      "renault__megane": "Renault Megane",
+      "renault__sandero": "Renault Sandero",
+      "skoda__fabia": "Skoda Fabia",
+      "skoda__kodiaq": "Skoda Kodiaq",
+      "skoda__octavia": "Skoda Octavia",
+      "skoda__rapid": "Skoda Rapid",
+      "ssangyong__actyon": "SsangYong Actyon",
+      "ssangyong__kyron": "SsangYong Kyron",
+      "ssangyong__rexton": "SsangYong Rexton",
+      "subaru__forester": "Subaru Forester",
+      "subaru__impreza": "Subaru Impreza",
+      "subaru__outback": "Subaru Outback",
+      "suzuki__grand_vitara": "Suzuki Grand Vitara",
+      "suzuki__sx4": "Suzuki SX4",
+      "toyota__avensis": "Toyota Avensis",
+      "toyota__camry": "Toyota Camry",
+      "toyota__corolla": "Toyota Corolla",
+      "toyota__highlander": "Toyota Highlander",
+      "toyota__land_cruiser": "Toyota Land Cruiser",
+      "toyota__land_cruiser_prado": "Toyota Land Cruiser Prado",
+      "toyota__mark_2": "Toyota Mark II",
+      "toyota__rav4": "Toyota RAV4",
+      "uaz__bukhanka": "UAZ Bukhanka (452/2206)",
+      "uaz__hunter": "UAZ Hunter",
+      "uaz__patriot": "UAZ Patriot",
+      "uaz__pickup": "UAZ Pickup",
+      "volkswagen__golf": "Volkswagen Golf",
+      "volkswagen__passat": "Volkswagen Passat",
+      "volkswagen__polo": "Volkswagen Polo",
+      "volkswagen__tiguan": "Volkswagen Tiguan",
+      "volkswagen__touareg": "Volkswagen Touareg",
+      "volkswagen__transporter": "Volkswagen Transporter",
+      "volvo__xc60": "Volvo XC60"
+    }
+  }
+}

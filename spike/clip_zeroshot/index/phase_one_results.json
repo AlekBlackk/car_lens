@@ -1,0 +1,86 @@
+{
+  "tinyclip8m": {
+    "stanford_top1": 0.06998654104979811,
+    "stanford_top3": 0.1541049798115747,
+    "control_top3": 0.0,
+    "ru_cn_top3": 0.007407407407407408,
+    "core_top3": {
+      "lada__2107": 0.0,
+      "lada__granta": 0.0,
+      "lada__niva_2121": 0.0,
+      "uaz__patriot": 0.0
+    },
+    "phase_one_passed": false,
+    "reasons": [
+      "G2: контроль 0.000 < 0.8 — замер недействителен, выборку надо переделать",
+      "G1: Stanford top-1 0.070 < 0.75",
+      "G1: Stanford top-3 0.154 < 0.85",
+      "G3: RU+CN top-3 0.007 < 0.5",
+      "G4: lada__2107 top-3 0.000 < 0.4",
+      "G4: lada__granta top-3 0.000 < 0.4",
+      "G4: lada__niva_2121 top-3 0.000 < 0.4",
+      "G4: uaz__patriot top-3 0.000 < 0.4"
+    ]
+  },
+  "tinyclip39m": {
+    "stanford_top1": 0.39300134589502017,
+    "stanford_top3": 0.6702557200538358,
+    "control_top3": 0.2727272727272727,
+    "ru_cn_top3": 0.14814814814814814,
+    "core_top3": {
+      "lada__2107": 0.375,
+      "lada__granta": 0.0,
+      "lada__niva_2121": 0.5,
+      "uaz__patriot": 0.2
+    },
+    "phase_one_passed": false,
+    "reasons": [
+      "G2: контроль 0.273 < 0.8 — замер недействителен, выборку надо переделать",
+      "G1: Stanford top-1 0.393 < 0.75",
+      "G1: Stanford top-3 0.670 < 0.85",
+      "G3: RU+CN top-3 0.148 < 0.5",
+      "G4: lada__2107 top-3 0.375 < 0.4",
+      "G4: lada__granta top-3 0.000 < 0.4",
+      "G4: uaz__patriot top-3 0.200 < 0.4"
+    ]
+  },
+  "openclip_b32": {
+    "stanford_top1": 0.7678331090174967,
+    "stanford_top3": 0.9226110363391655,
+    "control_top3": 0.6363636363636364,
+    "ru_cn_top3": 0.5111111111111111,
+    "core_top3": {
+      "lada__2107": 0.875,
+      "lada__granta": 0.75,
+      "lada__niva_2121": 0.75,
+      "uaz__patriot": 0.8
+    },
+    "phase_one_passed": false,
+    "reasons": [
+      "G2: контроль 0.636 < 0.8 — замер недействителен, выборку надо переделать"
+    ]
+  },
+  "siglip2_b16": {
+    "stanford_top1": 0.04576043068640646,
+    "stanford_top3": 0.06864064602960969,
+    "control_top3": 0.0,
+    "ru_cn_top3": 0.05925925925925926,
+    "core_top3": {
+      "lada__2107": 0.25,
+      "lada__granta": 0.0,
+      "lada__niva_2121": 0.0,
+      "uaz__patriot": 0.0
+    },
+    "phase_one_passed": false,
+    "reasons": [
+      "G2: контроль 0.000 < 0.8 — замер недействителен, выборку надо переделать",
+      "G1: Stanford top-1 0.046 < 0.75",
+      "G1: Stanford top-3 0.069 < 0.85",
+      "G3: RU+CN top-3 0.059 < 0.5",
+      "G4: lada__2107 top-3 0.250 < 0.4",
+      "G4: lada__granta top-3 0.000 < 0.4",
+      "G4: lada__niva_2121 top-3 0.000 < 0.4",
+      "G4: uaz__patriot top-3 0.000 < 0.4"
+    ]
+  }
+}
