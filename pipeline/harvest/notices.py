@@ -47,4 +47,15 @@ def render_notices(rows: Sequence[HarvestRow]) -> str:
     )
     куски += _раздел("Attribution (CC BY)", [с for с in rows if с.license_tier == 2])
     куски += _раздел("ShareAlike (CC BY-SA)", [с for с in rows if с.license_tier == 3])
+    куски += [
+        "## Модели контура редакции (подготовка данных)",
+        "",
+        "- `face` — YuNet (OpenCV Zoo), MIT",
+        "- `plate` — vehicle-license-plate-detection-barrier-0106 (OpenVINO Model Zoo), Apache-2.0",
+        "- `plate_hires` — joker5914/yolov8n-license-plate@8286762, AGPL-3.0",
+        "",
+        "Веса моделей используются локально исключительно в конвейере редакции",
+        "и подготовки данных, в мобильный дистрибутив и состав обученной модели не входят (Р-4).",
+        "",
+    ]
     return "\n".join(куски)
