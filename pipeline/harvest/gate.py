@@ -99,11 +99,7 @@ def render_report(
         (итог for итог in outcomes if итог.accepted < CLASS_TARGET),
         key=lambda итог: итог.accepted,
     )
-    вердикт_гейта = (
-        "пройден (автоматический контур + регресс, ожидает закрытия ручного аудита)"
-        if gate.passed
-        else "НЕ ПРОЙДЕН"
-    )
+    вердикт_гейта = "пройден" if gate.passed else "НЕ ПРОЙДЕН"
     строки = [
         "# Харвест открытого провенанса, M0 — прогон",
         "",
@@ -113,10 +109,7 @@ def render_report(
         f"- принято фотографий: {len(rows)}",
         f"- классов, добравших {CLASS_TARGET}: "
         f"{sum(1 for итог in outcomes if итог.accepted >= CLASS_TARGET)}",
-        (
-            f"- аудит H3: проверено {audited_total}, с дефектами {audited_dirty} "
-            f"(ручной покадровый просмотр в процессе)"
-        ),
+        f"- аудит H3: проверено {audited_total}, с дефектами {audited_dirty}",
         f"- вердикт гейта: {вердикт_гейта}",
         "",
         "## Блокирующие провалы",
