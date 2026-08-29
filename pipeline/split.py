@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -20,7 +19,7 @@ from typing import SupportsInt, cast
 
 import pandas as pd
 
-from pipeline.hashing import close_pairs, hamming
+from pipeline.hashing import bucket_of, close_pairs, hamming
 
 # `hamming` переехал в `pipeline.hashing`, но остаётся импортируемым отсюда:
 # он часть публичного интерфейса `split`, объявленного планом M-1a.
@@ -66,8 +65,7 @@ def _корзина(listing_id: str, seed: int) -> float:
     только от `listing_id` и `seed`, но не от порядка строк во входном
     кадре и не от версии numpy.
     """
-    сырое = hashlib.sha256(f"{seed}:{listing_id}".encode()).digest()
-    return int.from_bytes(сырое[:8], "big") / float(1 << 64)
+    return bucket_of(listing_id, seed)
 
 
 def split_by_listing(

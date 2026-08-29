@@ -11,6 +11,7 @@ uint64 (§13.1), поэтому значения приходят со знак�
 
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 
@@ -20,6 +21,16 @@ _БИТ_В_КУСКЕ = 8
 _КУСКОВ = HASH_BITS // _БИТ_В_КУСКЕ
 _МАСКА_КУСКА = (1 << _БИТ_В_КУСКЕ) - 1
 _МАСКА = (1 << HASH_BITS) - 1
+
+
+def bucket_of(key: str, seed: int) -> float:
+    """Устойчивое псевдослучайное число из строки в [0, 1).
+
+    Хеш вместо генератора случайных чисел: раскладка обязана зависеть только от ключа и
+    семени, но не от порядка входных строк и не от версии numpy.
+    """
+    сырое = hashlib.sha256(f"{seed}:{key}".encode()).digest()
+    return int.from_bytes(сырое[:8], "big") / float(1 << 64)
 
 
 def hamming(a: int, b: int) -> int:
