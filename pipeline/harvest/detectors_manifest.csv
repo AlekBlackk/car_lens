@@ -1,3 +1,5 @@
 name,format,url,revision,license,checked,sha256,derived_from
 face,onnx,https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx,f12e12798e8314f7c074a6656816c048dcc95b7a,mit,2026-08-28,8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4,
 plate,onnx,https://storage.openvinotoolkit.org/repositories/open_model_zoo/2023.0/models_bin/1/vehicle-license-plate-detection-barrier-0106/FP32/vehicle-license-plate-detection-barrier-0106.xml,2023.0,apache-2.0,2026-08-28,fb9b4ba6e3872946fbcec68a263b5f0428591a92954d41ffa4037f37ad9c847f,ir:45d82b40f48ce43e61188ed16a140c8a77c4340cf367fc18c491b1f1a1218dd7+f84139f97805d343273e840d47b81c89a7c96c6263226a5622670e66424fb2a1 | openvino2onnx vehicle-license-plate-detection-barrier-0106.xml plate.onnx
+plate_hires,pt,https://huggingface.co/joker5914/yolov8n-license-plate/resolve/8286762929bd4b111a19186f2a05e0a5940b6088/best.pt,8286762929bd4b111a19186f2a05e0a5940b6088,agpl-3.0,2026-08-29,75c9c5487e69d96a3076eaf6660b8dc4f84896055f786ee28fd90bdc3b48c1ec,
+

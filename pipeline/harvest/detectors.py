@@ -18,8 +18,12 @@ from pathlib import Path
 
 DEFAULT_DETECTORS_MANIFEST = Path(__file__).resolve().parent / "detectors_manifest.csv"
 
-REQUIRED_DETECTORS = ("plate", "face")
-ALLOWED_LICENSES = frozenset({"mit", "apache-2.0"})
+REQUIRED_DETECTORS = ("plate", "plate_hires", "face")
+# AGPL-3.0 допустим: обязательства AGPL наступают при распространении, а конвейер
+# подготовки данных (`pipeline/harvest/`, `scripts/`) никому не передаётся — то же
+# основание, что у детектора машин `yolo11n` в Р-4. В мобильный дистрибутив не входит.
+ALLOWED_LICENSES = frozenset({"mit", "apache-2.0", "agpl-3.0"})
+ALLOWED_FORMATS = frozenset({"onnx", "pt"})
 ОБЯЗАТЕЛЬНЫЕ_ПОЛЯ = ("name", "format", "url", "revision", "license", "checked", "sha256")
 
 
@@ -51,8 +55,10 @@ def load_detectors_manifest(path: Path) -> dict[str, DetectorPin]:
                 raise DetectorManifestError(f"{path}:{номер}: пустое поле {поле}")
         имя = строка["name"].strip()
         формат = строка["format"].strip().lower()
-        if формат != "onnx":
-            raise DetectorManifestError(f"{path}:{номер}: формат {формат!r}, допустим только onnx")
+        if формат not in ALLOWED_FORMATS:
+            raise DetectorManifestError(
+                f"{path}:{номер}: формат {формат!r}, допустимы {sorted(ALLOWED_FORMATS)}"
+            )
         лицензия = строка["license"].strip().lower()
         if лицензия not in ALLOWED_LICENSES:
             raise DetectorManifestError(f"{path}:{номер}: лицензия {лицензия!r} не свободная")
@@ -66,9 +72,10 @@ def load_detectors_manifest(path: Path) -> dict[str, DetectorPin]:
         # происхождения доказать, каким файлом замывали, невозможно.
         if not url.endswith(Path(url).name):  # pragma: no cover
             raise DetectorManifestError(f"{path}:{номер}: URL без имени файла")
-        if not derived and (not url_lower.endswith(".onnx") or "-converted" in url_lower):
+        получен_конвертацией = "-converted" in url_lower or not url_lower.endswith(f".{формат}")
+        if not derived and получен_конвертацией:
             raise DetectorManifestError(
-                f"{path}:{номер}: нужен derived_from для производного/не-ONNX источника"
+                f"{path}:{номер}: файл получен конвертацией — нужен derived_from"
             )
         if имя in пины:
             raise DetectorManifestError(f"{path}:{номер}: повтор детектора {имя!r}")
@@ -94,7 +101,7 @@ def load_detectors_manifest(path: Path) -> dict[str, DetectorPin]:
 def verify_weights(pins: dict[str, DetectorPin], models_dir: Path) -> None:
     """Сверить SHA256 скачанных файлов с манифестом."""
     for имя, пин in pins.items():
-        файл = models_dir / f"{имя}.onnx"
+        файл = models_dir / f"{имя}.{пин.format}"
         if not файл.exists():
             raise DetectorManifestError(f"{имя}: файл {файл} не найден")
         фактический = hashlib.sha256(файл.read_bytes()).hexdigest()
