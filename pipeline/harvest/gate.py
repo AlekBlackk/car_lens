@@ -27,7 +27,7 @@ from pipeline.harvest.manifest import HarvestRow, ManifestError, validate
 from pipeline.harvest.run import ClassOutcome
 
 H1_MIN_CLASSES = 100
-CLASS_TARGET = 15
+CLASS_TARGET = 30
 H2_CORE_CLASSES = ("lada__2107", "lada__granta", "lada__niva_2121", "uaz__patriot")
 
 
@@ -46,22 +46,23 @@ def check_gate(
     audited_total: int,
     audited_dirty: int,
     allow_sa: bool,
+    class_target: int = CLASS_TARGET,
 ) -> GateResult:
     """Проверить четыре порога и разделить провалы на блокирующие и измерительные."""
     блокирующие: list[str] = []
     измерительные: list[str] = []
 
-    добрали = sum(1 for итог in outcomes if итог.accepted >= CLASS_TARGET)
+    добрали = sum(1 for итог in outcomes if итог.accepted >= class_target)
     if добрали < H1_MIN_CLASSES:
         измерительные.append(
-            f"H1: классов с {CLASS_TARGET} принятыми — {добрали} < {H1_MIN_CLASSES}"
+            f"H1: классов с {class_target} принятыми — {добрали} < {H1_MIN_CLASSES}"
         )
 
     по_классам = {итог.class_id: итог.accepted for итог in outcomes}
     for class_id in H2_CORE_CLASSES:
         принято = по_классам.get(class_id, 0)
-        if принято < CLASS_TARGET:
-            измерительные.append(f"H2: ядровой {class_id} — {принято} < {CLASS_TARGET}")
+        if принято < class_target:
+            измерительные.append(f"H2: ядровой {class_id} — {принято} < {class_target}")
 
     if audited_dirty > 0:
         блокирующие.append(
@@ -93,10 +94,11 @@ def render_report(
     ran_at: str,
     audited_total: int,
     audited_dirty: int,
+    class_target: int = CLASS_TARGET,
 ) -> str:
     """Собрать `bench/harvest-m0.md`: числа прогона в отслеживаемом git месте."""
     дефицитные = sorted(
-        (итог for итог in outcomes if итог.accepted < CLASS_TARGET),
+        (итог for итог in outcomes if итог.accepted < class_target),
         key=lambda итог: итог.accepted,
     )
     вердикт_гейта = "пройден" if gate.passed else "НЕ ПРОЙДЕН"
@@ -107,8 +109,8 @@ def render_report(
         "",
         f"- классов в прогоне: {len(outcomes)}",
         f"- принято фотографий: {len(rows)}",
-        f"- классов, добравших {CLASS_TARGET}: "
-        f"{sum(1 for итог in outcomes if итог.accepted >= CLASS_TARGET)}",
+        f"- классов, добравших {class_target}: "
+        f"{sum(1 for итог in outcomes if итог.accepted >= class_target)}",
         f"- аудит H3: проверено {audited_total}, с дефектами {audited_dirty}",
         f"- вердикт гейта: {вердикт_гейта}",
         "",

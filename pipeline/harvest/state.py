@@ -16,8 +16,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-SEEN_BUDGET = 200
-ACCEPTED_TARGET = 15
+SEEN_BUDGET = 400
+ACCEPTED_TARGET = 30
 
 
 @dataclass(slots=True)
