@@ -82,3 +82,15 @@ def required_audit_files(rows: Sequence[HarvestRow], seed: int = 0) -> set[str]:
     выборка = random.Random(seed).sample(чистые, min(RANDOM_CLEAN_SAMPLE, len(чистые)))
     надо.update(выборка)
     return надо
+
+
+def audit_gap(rows: Sequence[HarvestRow], seed: int = 0) -> set[str]:
+    """Обязательные по §14 кадры, у которых нет вердикта.
+
+    Отличает «аудит прошёл и чист» от «аудита не было»: `audited_dirty == 0` верно в обоих
+    случаях, и на этой неоднозначности прогон 2026-08-29 отрапортовал H3 вакуумно. Пустая
+    недостача — единственное доказательство, что протокол закрыт, а не пропущен.
+    """
+    надо = required_audit_files(rows, seed=seed)
+    проверено = {строка.file for строка in rows if строка.audit}
+    return надо - проверено

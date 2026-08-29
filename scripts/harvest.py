@@ -160,7 +160,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
     REPORT_PATH.write_text(
-        render_report(итоги, строки, гейт, sha, date.today().isoformat()), encoding="utf-8"
+        render_report(
+            итоги,
+            строки,
+            гейт,
+            sha,
+            date.today().isoformat(),
+            audited_total=audited_total,
+            audited_dirty=audited_dirty,
+        ),
+        encoding="utf-8",
     )
     DEFAULT_NOTICES_PATH.write_text(render_notices(строки), encoding="utf-8")
     return 0 if гейт.passed else 1

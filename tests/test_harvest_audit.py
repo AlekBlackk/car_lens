@@ -7,6 +7,7 @@ from pipeline.harvest.audit import (
     AuditError,
     apply_audit,
     audit_counts,
+    audit_gap,
     load_audit,
     required_audit_files,
 )
@@ -90,3 +91,28 @@ def test_обязательный_охват_аудита() -> None:
     assert all(f"f{n}.jpg" in надо for n in range(5))
     assert all(f"core{n}.jpg" in надо for n in range(3))
     assert sum(1 for f in надо if f.startswith("clean")) == 200
+
+
+def test_пустой_аудит_даёт_полную_недостачу() -> None:
+    """Ноль вердиктов — это непроверенный протокол, а не чистая выборка."""
+    строки = [_строка(f"p{n}.jpg", plates=1) for n in range(3)]
+    пропущено = audit_gap(строки, seed=0)
+    assert пропущено == {"p0.jpg", "p1.jpg", "p2.jpg"}
+
+
+def test_частичный_аудит_называет_непроверенные_кадры() -> None:
+    строки = [_строка(f"p{n}.jpg", plates=1, audit="ok" if n < 2 else "") for n in range(4)]
+    assert audit_gap(строки, seed=0) == {"p2.jpg", "p3.jpg"}
+
+
+def test_сплошной_аудит_недостачи_не_оставляет() -> None:
+    строки = [_строка(f"p{n}.jpg", plates=1, audit="ok") for n in range(3)]
+    assert audit_gap(строки, seed=0) == set()
+
+
+def test_недостача_не_считает_лишние_кадры_вне_протокола() -> None:
+    """Проверенный сверх протокола кадр недостачу не создаёт."""
+    строки = [_строка("p0.jpg", plates=1, audit="ok")] + [
+        _строка(f"clean{n}.jpg", audit="ok") for n in range(3)
+    ]
+    assert audit_gap(строки, seed=0) == set()
