@@ -17,8 +17,8 @@ classes:
     categories: [Audi Q5]
     terms: ["Audi Q5"]
   bmw__3_series:
-    categories: [BMW 3 Series, BMW 3er]
-    terms: ["BMW 3 Series", "BMW 3er"]
+    categories: [BMW 3 Series, BMW E30, BMW E36, BMW E46, BMW E90, BMW E91, BMW E92, BMW F30, BMW F31, BMW G20, BMW G21, BMW 3er]
+    terms: ["BMW 3 Series", "BMW 3er", "BMW E30", "BMW E36", "BMW E46", "BMW E90", "BMW F30", "BMW G20"]
   bmw__5_series:
     categories: [BMW 5 Series, BMW 5er]
     terms: ["BMW 5 Series", "BMW 5er"]
@@ -257,8 +257,8 @@ classes:
     categories: [Lexus NX]
     terms: ["Lexus NX"]
   lexus__rx:
-    categories: [Lexus RX]
-    terms: ["Lexus RX"]
+    categories: [Lexus RX, Lexus RX (XU10), Lexus RX (XU30), Lexus RX (AL10), Lexus RX (AL20), Lexus RX (ALA10), Lexus RX 300, Lexus RX 350, Lexus RX 400h, Lexus RX 450h]
+    terms: ["Lexus RX", "Lexus RX300", "Lexus RX350", "Lexus RX450h", "Lexus RX 350", "Lexus RX 450h"]
   lifan__solano:
     categories: [Lifan Solano, Lifan 620]
     terms: ["Lifan Solano", "Lifan 620"]
