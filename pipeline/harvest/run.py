@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,14 +20,14 @@ import cv2
 import numpy as np
 
 from pipeline.clean import phash_of
-from pipeline.crop import Detection, Detector, crop_image
+from pipeline.crop import VEHICLE_CLASSES, Detection, Detector, crop_image, select_primary
 from pipeline.harvest.cache import crop_path, decode_image, digest, store
 from pipeline.harvest.dedup import DedupIndex
-from pipeline.harvest.filters import ImageEncoder, clip_verdict, vehicle_gate
+from pipeline.harvest.filters import ImageEncoder, clip_verdict
 from pipeline.harvest.licenses import canonical_name, is_allowed, tier_of
 from pipeline.harvest.manifest import HarvestRow, append_row, strip_html
 from pipeline.harvest.queries import ClassQueries
-from pipeline.harvest.redact import redact, redaction_zone
+from pipeline.harvest.redact import redact_frame
 from pipeline.harvest.sources import Candidate, HarvestSource, SourceQuery, basis_of
 from pipeline.harvest.state import (
     HarvestState,
@@ -43,7 +44,7 @@ class HarvestDeps:
 
     source: HarvestSource
     vehicle_detector: Detector
-    plate_detector: Detector
+    plate_detectors: tuple[Detector, ...]
     face_detector: Detector
     encoder: ImageEncoder
     class_matrix: np.ndarray
@@ -94,10 +95,14 @@ def process_candidate(
         return "http", None
     store(deps.root, candidate.source, данные, "jpg")
 
-    машина = vehicle_gate(кадр, deps.vehicle_detector)
-    if машина.box is None:
-        assert машина.reason is not None
-        return машина.reason, None
+    все_боксы = deps.vehicle_detector.detect(кадр)
+    высота, ширина = кадр.shape[:2]
+    решение = select_primary(все_боксы, ширина, высота)
+    if решение.reject_reason is not None:
+        return решение.reject_reason, None
+    if решение.is_multi_car:
+        return "multi_car", None
+    assert решение.box is not None
 
     вердикт = clip_verdict(
         кадр, deps.encoder, deps.class_matrix, deps.negative_matrix, индекс_класса
@@ -105,14 +110,15 @@ def process_candidate(
     if not вердикт.is_car_photo:
         return "not_a_car_photo", None
 
-    кроп, номера, лица, замыто = _замытый_кроп(кадр, машина.box, deps)
+    машины_в_кадре = [d for d in все_боксы if d.cls in VEHICLE_CLASSES and d.conf > 0.5]
+    кроп, номера, лица, замыто = redact_and_crop(кадр, решение.box, машины_в_кадре, deps)
     if not замыто:
         return "redaction_failed", None
 
     хеш = phash_of(кроп)
-    решение = dedup.check(хеш, candidate.class_id)
-    if решение.status != "new":
-        return решение.status, None
+    решение_дедуп = dedup.check(хеш, candidate.class_id)
+    if решение_дедуп.status != "new":
+        return решение_дедуп.status, None
 
     sha = digest(данные)
     путь = crop_path(deps.root, candidate.class_id, sha)
@@ -144,21 +150,21 @@ def process_candidate(
     )
 
 
-def _замытый_кроп(
-    кадр: np.ndarray, бокс: Detection, deps: HarvestDeps
+def redact_and_crop(
+    frame: np.ndarray,
+    primary: Detection,
+    vehicle_boxes: Sequence[Detection],
+    deps: HarvestDeps,
 ) -> tuple[np.ndarray, int, int, bool]:
-    """Замыть зону вокруг машины и вырезать из неё сохраняемый кроп.
+    """Очистить весь кадр, затем вырезать кроп главной машины из очищенного.
 
-    Зона редакции шире сохраняемого кропа (10% против 8%), поэтому кроп целиком лежит
-    внутри уже отредактированных пикселей — номер, срезанный границей кропа, замывается
-    вместе со всем остальным.
+    Кроп — подмножество очищенного кадра, поэтому номер фоновой машины, попавший в кроп
+    краем, уже залит. Зона поиска номеров шире каждого бокса ТС на 15% (§6, `redact.py`).
     """
-    высота, ширина = кадр.shape[:2]
-    x0, y0, x1, y1 = redaction_zone(бокс, ширина, высота)
-    зона = кадр[y0:y1, x0:x1]
-    итог = redact(зона, deps.plate_detector, deps.face_detector)
-    смещённый = Detection(бокс.x - x0, бокс.y - y0, бокс.w, бокс.h, бокс.conf, бокс.cls)
-    return crop_image(итог.image, смещённый), итог.plates, итог.faces, итог.ok
+    итог = redact_frame(frame, vehicle_boxes, deps.plate_detectors, deps.face_detector)
+    if not итог.ok:
+        return frame, итог.plates, итог.faces, False
+    return crop_image(итог.image, primary), итог.plates, итог.faces, True
 
 
 def harvest_class(

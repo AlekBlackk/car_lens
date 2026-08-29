@@ -41,6 +41,18 @@ class ПодставнойИсточник:
         return _jpeg()
 
 
+class СписокДетектор:
+    """Отдаёт заготовленные боксы: по одному списку на каждый вызов detect."""
+
+    def __init__(self, сценарий: list[list[Detection]]) -> None:
+        self.сценарий = list(сценарий)
+        self.вызовы = 0
+
+    def detect(self, image: np.ndarray) -> list[Detection]:
+        self.вызовы += 1
+        return self.сценарий.pop(0) if self.сценарий else []
+
+
 class ФиксированныйДетектор:
     def __init__(self, боксы: list[Detection]) -> None:
         self.боксы = боксы
@@ -57,11 +69,11 @@ class ПостоянныйЭнкодер:
         return self.вектор
 
 
-def _кандидат(**правки: object) -> Candidate:
+def _кандидат(class_id: str = "lada__granta", **правки: object) -> Candidate:
     поля: dict[str, object] = {
         "source": "commons",
         "source_item_id": "12345",
-        "class_id": "lada__granta",
+        "class_id": class_id,
         "page_url": "https://commons.wikimedia.org/wiki/File:X.jpg",
         "file_url": "https://upload.wikimedia.org/X.jpg",
         "license_raw": "CC BY 4.0",
@@ -75,12 +87,16 @@ def _кандидат(**правки: object) -> Candidate:
     return Candidate(**поля)  # type: ignore[arg-type]
 
 
-def _зависимости(tmp_path: Path, источник: ПодставнойИсточник, **правки: object) -> HarvestDeps:
+def _зависимости(
+    tmp_path: Path,
+    источник: ПодставнойИсточник | None = None,
+    **правки: object,
+) -> HarvestDeps:
     машина = Detection(x=100.0, y=100.0, w=700.0, h=500.0, conf=0.9, cls=2)
     поля: dict[str, object] = {
-        "source": источник,
+        "source": источник if источник is not None else ПодставнойИсточник([]),
         "vehicle_detector": ФиксированныйДетектор([машина]),
-        "plate_detector": ФиксированныйДетектор([]),
+        "plate_detectors": (),
         "face_detector": ФиксированныйДетектор([]),
         "encoder": ПостоянныйЭнкодер(np.array([1.0, 0.0], dtype=np.float32)),
         "class_matrix": np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
@@ -93,6 +109,9 @@ def _зависимости(tmp_path: Path, источник: Подставно
     }
     поля.update(правки)
     return HarvestDeps(**поля)  # type: ignore[arg-type]
+
+
+_deps = _зависимости
 
 
 def test_годный_кандидат_принимается(tmp_path: Path) -> None:
@@ -136,10 +155,27 @@ def test_кадр_без_машины_отбраковывается(tmp_path: P
 def test_непробиваемый_номер_отбраковывает_кадр(tmp_path: Path) -> None:
     номер = Detection(x=200.0, y=400.0, w=120.0, h=40.0, conf=0.9, cls=0)
     зависимости = _зависимости(
-        tmp_path, ПодставнойИсточник([]), plate_detector=ФиксированныйДетектор([номер])
+        tmp_path, ПодставнойИсточник([]), plate_detectors=(ФиксированныйДетектор([номер]),)
     )
     причина, _ = process_candidate(_кандидат(), зависимости, DedupIndex())
     assert причина == "redaction_failed"
+
+
+def test_фоновая_машина_в_кропе_очищается(tmp_path: Path) -> None:
+    """Кроп вырезается из уже очищенного кадра — номер второй машины не проскакивает."""
+    главная = Detection(40.0, 40.0, 520.0, 400.0, 0.96, 2)
+    фоновая = Detection(580.0, 60.0, 200.0, 160.0, 0.7, 2)
+    номер_фоновой = Detection(620.0, 200.0, 70.0, 20.0, 0.9, 0)
+
+    deps = _deps(
+        tmp_path,
+        vehicle_detector=ФиксированныйДетектор([главная, фоновая]),
+        plate_detectors=(СписокДетектор([[номер_фоновой], [], [], [], [], []]),),
+        face_detector=СписокДетектор([[]]),
+    )
+    причина, строка = process_candidate(_кандидат("lada__granta"), deps, DedupIndex())
+    assert причина == "accepted"
+    assert строка is not None and строка.plates == 1
 
 
 def test_мусорный_кадр_режется_по_негативам(tmp_path: Path) -> None:
