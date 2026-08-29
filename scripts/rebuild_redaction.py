@@ -31,6 +31,7 @@ from pipeline.harvest.manifest import (
     load_manifest,
 )
 from pipeline.harvest.redact import redact_frame
+from pipeline.paths import harvest_dir
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +54,7 @@ def preflight(rows: Sequence[HarvestRow], root: Path) -> list[str]:
 
 
 def rebuild_row(
-    row: HarvestRow, deps: RebuildDeps, dedup: DedupIndex
+    row: HarvestRow, deps: RebuildDeps, dedup: DedupIndex, keep_audit: bool = False
 ) -> tuple[str, HarvestRow | None]:
     """Прогнать один оригинал через новую редакцию. Причина отказа или новая строка."""
     сырьё = cache_path(deps.root, row.source, row.sha256, "jpg").read_bytes()
@@ -98,7 +99,7 @@ def rebuild_row(
         bbox_h=float(решение.box.h),
         bbox_area_frac=float(решение.area_frac),
         det_conf=float(решение.box.conf),
-        audit="",
+        audit=row.audit if keep_audit else "",
         checked=date.today().isoformat(),
     )
 
@@ -112,8 +113,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="целевой манифест (по умолчанию перезаписывает --manifest)",
     )
-    парсер.add_argument("--models", type=Path, required=True, help="каталог весов детекторов")
-    парсер.add_argument("--data-root", type=Path, required=True, help="~/carlens-data/harvest")
+    парсер.add_argument(
+        "--models",
+        type=Path,
+        default=harvest_dir() / "models",
+        help="каталог весов детекторов",
+    )
+    парсер.add_argument(
+        "--data-root",
+        type=Path,
+        default=harvest_dir(),
+        help="~/carlens-data/harvest",
+    )
+    парсер.add_argument(
+        "--keep-audit",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="сохранять вердикты аудита (Р-11: контур редакции заморожен)",
+    )
     return парсер
 
 
@@ -162,7 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     принято = 0
     причины: dict[str, int] = {}
     for строка in строки:
-        причина, новая = rebuild_row(строка, deps, dedup)
+        причина, новая = rebuild_row(строка, deps, dedup, keep_audit=аргументы.keep_audit)
         if новая is None:
             причины[причина] = причины.get(причина, 0) + 1
             continue

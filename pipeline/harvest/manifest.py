@@ -132,13 +132,13 @@ def load_manifest(path: Path) -> list[HarvestRow]:
             clip_margin=float(с["clip_margin"]),
             plates=int(с["plates"]),
             faces=int(с["faces"]),
-            bbox_x=float(с["bbox_x"]),
-            bbox_y=float(с["bbox_y"]),
-            bbox_w=float(с["bbox_w"]),
-            bbox_h=float(с["bbox_h"]),
-            bbox_area_frac=float(с["bbox_area_frac"]),
-            det_conf=float(с["det_conf"]),
-            audit=с["audit"],
+            bbox_x=float(с.get("bbox_x") or 0.0),
+            bbox_y=float(с.get("bbox_y") or 0.0),
+            bbox_w=float(с.get("bbox_w") or 0.0),
+            bbox_h=float(с.get("bbox_h") or 0.0),
+            bbox_area_frac=float(с.get("bbox_area_frac") or 0.0),
+            det_conf=float(с.get("det_conf") or 0.0),
+            audit=с.get("audit") or "",
         )
         for с in строки
     ]
