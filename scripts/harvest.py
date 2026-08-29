@@ -13,10 +13,13 @@ from __future__ import annotations
 import argparse
 import subprocess
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
+from pipeline.detectors.yolo import YoloDetector
+from pipeline.harvest.audit import apply_audit, audit_counts, load_audit
 from pipeline.harvest.backends import (
     ClipImageEncoder,
     OnnxBoxDetector,
@@ -33,7 +36,11 @@ from pipeline.harvest.detectors import (
 )
 from pipeline.harvest.filters import NEGATIVE_PROMPTS
 from pipeline.harvest.gate import check_gate, render_report
-from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, load_manifest
+from pipeline.harvest.manifest import (
+    DEFAULT_MANIFEST_PATH,
+    load_manifest,
+    write_manifest,
+)
 from pipeline.harvest.notices import DEFAULT_NOTICES_PATH, render_notices
 from pipeline.harvest.queries import (
     DEFAULT_LATIN_NAMES_PATH,
@@ -43,6 +50,7 @@ from pipeline.harvest.queries import (
 )
 from pipeline.harvest.run import HarvestDeps, harvest_class
 from pipeline.harvest.state import load_state, save_state
+from pipeline.harvest.tiling import TiledDetector
 from pipeline.paths import harvest_dir
 
 REPORT_PATH = Path(__file__).resolve().parent.parent / "bench" / "harvest-m0.md"
@@ -56,60 +64,98 @@ def build_parser() -> argparse.ArgumentParser:
     парсер.add_argument("--allow-sa", action="store_true", help="разрешить Tier 3 CC-BY-SA")
     парсер.add_argument("--clip-model", default="ViT-B-32", help="архитектура open_clip")
     парсер.add_argument("--clip-weights", default="laion2b_s34b_b79k", help="веса open_clip")
+    парсер.add_argument("--audit", default=None, help="CSV вердиктов ручного аудита H3 (§14)")
+    парсер.add_argument(
+        "--report-only",
+        action="store_true",
+        help="не собирать, только пересобрать bench/NOTICES из манифеста",
+    )
     return парсер
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Прогнать харвест и записать отчёт, манифест и атрибуцию."""
-    import open_clip  # type: ignore[import-untyped]
-
     аргументы = build_parser().parse_args(argv)
-    корень = harvest_dir()
-    пины = load_detectors_manifest(DEFAULT_DETECTORS_MANIFEST)
-    verify_weights(пины, корень / "models")
-
     каталог = load_catalog(DEFAULT_CATALOG_PATH)
-    запросы = load_queries(DEFAULT_QUERIES_PATH)
-    имена = load_latin_names(DEFAULT_LATIN_NAMES_PATH)
     порядок = tuple(класс.class_id for класс in каталог.classes)
 
-    модель, _, препроцесс = open_clip.create_model_and_transforms(
-        аргументы.clip_model, pretrained=аргументы.clip_weights
-    )
-    токенизатор = open_clip.get_tokenizer(аргументы.clip_model)
-    матрица_классов = build_text_matrix([имена[c] for c in порядок], модель, токенизатор)
-    матрица_негативов = build_text_matrix(
-        [текст.removeprefix("a photo of a ") for текст in NEGATIVE_PROMPTS], модель, токенизатор
-    )
+    if аргументы.report_only:
+        from collections import Counter
 
-    зависимости = HarvestDeps(
-        source=CommonsSource(UrllibTransport(аргументы.contact)),
-        vehicle_detector=__import__(
-            "pipeline.detectors.yolo", fromlist=["YoloDetector"]
-        ).YoloDetector(),
-        plate_detector=OnnxBoxDetector(корень / "models" / "plate.onnx"),
-        face_detector=YuNetFaceDetector(корень / "models" / "face.onnx"),
-        encoder=ClipImageEncoder(модель, препроцесс),
-        class_matrix=матрица_классов,
-        class_order=порядок,
-        negative_matrix=матрица_негативов,
-        allow_sa=аргументы.allow_sa,
-        root=корень,
-        manifest_path=DEFAULT_MANIFEST_PATH,
-        checked=date.today().isoformat(),
-    )
+        from pipeline.harvest.run import ClassOutcome
 
-    состояние = load_state(корень / "state.json")
-    дедуп = DedupIndex()
-    итоги = []
-    for class_id in аргументы.classes or порядок:
-        итоги.append(harvest_class(запросы[class_id], зависимости, состояние, дедуп))
-        save_state(корень / "state.json", состояние)
-        print(f"{class_id}: принято={итоги[-1].accepted} просмотрено={итоги[-1].seen}", flush=True)
+        по_классам = Counter(с.class_id for с in load_manifest(DEFAULT_MANIFEST_PATH))
+        итоги = [
+            ClassOutcome(class_id=c, seen=0, accepted=по_классам.get(c, 0), rejects={})
+            for c in порядок
+        ]
+    else:
+        import open_clip  # type: ignore[import-untyped]
+
+        корень = harvest_dir()
+        пины = load_detectors_manifest(DEFAULT_DETECTORS_MANIFEST)
+        verify_weights(пины, корень / "models")
+
+        запросы = load_queries(DEFAULT_QUERIES_PATH)
+        имена = load_latin_names(DEFAULT_LATIN_NAMES_PATH)
+
+        модель, _, препроцесс = open_clip.create_model_and_transforms(
+            аргументы.clip_model, pretrained=аргументы.clip_weights
+        )
+        токенизатор = open_clip.get_tokenizer(аргументы.clip_model)
+        матрица_классов = build_text_matrix([имена[c] for c in порядок], модель, токенизатор)
+        матрица_негативов = build_text_matrix(
+            [текст.removeprefix("a photo of a ") for текст in NEGATIVE_PROMPTS],
+            модель,
+            токенизатор,
+        )
+
+        plate_detectors = (
+            TiledDetector(OnnxBoxDetector(корень / "models" / f"plate.{пины['plate'].format}")),
+            TiledDetector(
+                YoloDetector(
+                    weights=str(корень / "models" / f"plate_hires.{пины['plate_hires'].format}"),
+                    conf=0.25,
+                )
+            ),
+        )
+        зависимости = HarvestDeps(
+            source=CommonsSource(UrllibTransport(аргументы.contact)),
+            vehicle_detector=YoloDetector(),
+            plate_detectors=plate_detectors,
+            face_detector=YuNetFaceDetector(корень / "models" / "face.onnx"),
+            encoder=ClipImageEncoder(модель, препроцесс),
+            class_matrix=матрица_классов,
+            class_order=порядок,
+            negative_matrix=матрица_негативов,
+            allow_sa=аргументы.allow_sa,
+            root=корень,
+            manifest_path=DEFAULT_MANIFEST_PATH,
+            checked=date.today().isoformat(),
+        )
+
+        состояние = load_state(корень / "state.json")
+        дедуп = DedupIndex()
+        итоги = []
+        for class_id in аргументы.classes or порядок:
+            итоги.append(harvest_class(запросы[class_id], зависимости, состояние, дедуп))
+            save_state(корень / "state.json", состояние)
+            print(
+                f"{class_id}: принято={итоги[-1].accepted} просмотрено={итоги[-1].seen}",
+                flush=True,
+            )
 
     строки = load_manifest(DEFAULT_MANIFEST_PATH)
-    гейт = check_gate(итоги, строки, audited_total=0, audited_dirty=0,
-                      allow_sa=аргументы.allow_sa)
+    audited_total, audited_dirty = 0, 0
+    if аргументы.audit:
+        вердикты = load_audit(Path(аргументы.audit))
+        с_вердиктами = [replace(s, audit=вердикты.get(s.file, s.audit)) for s in строки]
+        audited_total, audited_dirty = audit_counts(с_вердиктами)
+        строки = apply_audit(строки, вердикты)
+        write_manifest(DEFAULT_MANIFEST_PATH, строки)
+    гейт = check_gate(
+        итоги, строки, audited_total, audited_dirty, allow_sa=аргументы.allow_sa
+    )
     sha = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
@@ -118,6 +164,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     DEFAULT_NOTICES_PATH.write_text(render_notices(строки), encoding="utf-8")
     return 0 if гейт.passed else 1
+
 
 
 if __name__ == "__main__":

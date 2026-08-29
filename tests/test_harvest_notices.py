@@ -69,3 +69,12 @@ def test_cli_требует_контакт() -> None:
         assert выход.code == 2
     else:  # pragma: no cover
         raise AssertionError("контакт обязан быть обязательным аргументом")
+
+
+def test_cli_принимает_путь_аудита_и_режим_отчёта() -> None:
+    аргументы = build_parser().parse_args(
+        ["--contact", "m@e.com", "--audit", "verdicts.csv", "--report-only"]
+    )
+    assert аргументы.audit == "verdicts.csv"
+    assert аргументы.report_only is True
+
