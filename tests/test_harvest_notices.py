@@ -75,6 +75,7 @@ def test_cli_принимает_путь_аудита_и_режим_отчёта
     аргументы = build_parser().parse_args(
         ["--contact", "m@e.com", "--audit", "verdicts.csv", "--report-only"]
     )
-    assert аргументы.audit == "verdicts.csv"
+    assert аргументы.audit == ["verdicts.csv"]
     assert аргументы.report_only is True
+
 

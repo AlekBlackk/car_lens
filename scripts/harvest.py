@@ -19,7 +19,7 @@ from pathlib import Path
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
 from pipeline.detectors.yolo import YoloDetector
-from pipeline.harvest.audit import apply_audit, audit_counts, load_audit
+from pipeline.harvest.audit import apply_audit, audit_counts, load_audit, merge_verdicts
 from pipeline.harvest.backends import (
     ClipImageEncoder,
     OnnxBoxDetector,
@@ -64,7 +64,12 @@ def build_parser() -> argparse.ArgumentParser:
     парсер.add_argument("--allow-sa", action="store_true", help="разрешить Tier 3 CC-BY-SA")
     парсер.add_argument("--clip-model", default="ViT-B-32", help="архитектура open_clip")
     парсер.add_argument("--clip-weights", default="laion2b_s34b_b79k", help="веса open_clip")
-    парсер.add_argument("--audit", default=None, help="CSV вердиктов ручного аудита H3 (§14)")
+    парсер.add_argument(
+        "--audit",
+        nargs="*",
+        default=[],
+        help="CSV вердиктов ручного аудита H3 (§14); можно несколько, поздний важнее",
+    )
     парсер.add_argument(
         "--report-only",
         action="store_true",
@@ -148,7 +153,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     строки = load_manifest(DEFAULT_MANIFEST_PATH)
     audited_total, audited_dirty = 0, 0
     if аргументы.audit:
-        вердикты = load_audit(Path(аргументы.audit))
+        вердикты = merge_verdicts(*(load_audit(Path(п)) for п in аргументы.audit))
         с_вердиктами = [replace(s, audit=вердикты.get(s.file, s.audit)) for s in строки]
         audited_total, audited_dirty = audit_counts(с_вердиктами)
         строки = apply_audit(строки, вердикты)

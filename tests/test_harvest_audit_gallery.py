@@ -5,7 +5,12 @@ import cv2
 import numpy as np
 
 from pipeline.harvest.manifest import HarvestRow, append_row
-from scripts.audit_gallery import build_parser, main, render_gallery
+from scripts.audit_gallery import (
+    build_parser,
+    main,
+    render_gallery,
+    отобрать_для_показа,
+)
 
 
 def _строка(
@@ -95,12 +100,30 @@ def test_build_parser() -> None:
     assert args.data_root == Path("data_dir")
     assert args.thumb_px == 480
     assert args.seed == 0
+    assert args.verdicts == []
+    assert args.only_missing is False
 
     args_custom = parser.parse_args(
-        ["--manifest", "m.csv", "--data-root", "d", "--thumb-px", "320", "--seed", "42"]
+        [
+            "--manifest",
+            "m.csv",
+            "--data-root",
+            "d",
+            "--thumb-px",
+            "320",
+            "--seed",
+            "42",
+            "--verdicts",
+            "v1.csv",
+            "v2.csv",
+            "--only-missing",
+        ]
     )
     assert args_custom.thumb_px == 320
     assert args_custom.seed == 42
+    assert args_custom.verdicts == [Path("v1.csv"), Path("v2.csv")]
+    assert args_custom.only_missing is True
+
 
 
 def test_main_ужимает_миниатюры_и_сохраняет_галерею(tmp_path: Path) -> None:
@@ -154,3 +177,16 @@ def test_main_ужимает_миниатюры_и_сохраняет_галер
     saved_thumb1 = cv2.imread(str(thumb1))
     assert saved_thumb1 is not None
     assert max(saved_thumb1.shape[:2]) <= 300
+
+
+def test_показываются_только_кадры_без_вердикта() -> None:
+    строки = [_строка("a.jpg"), _строка("b.jpg")]
+    видно = отобрать_для_показа(строки, {"a.jpg": "ok"}, only_missing=True)
+    assert [с.file for с in видно] == ["b.jpg"]
+
+
+def test_без_флага_показываются_все() -> None:
+    строки = [_строка("a.jpg"), _строка("b.jpg")]
+    видно = отобрать_для_показа(строки, {"a.jpg": "ok"}, only_missing=False)
+    assert [с.file for с in видно] == ["a.jpg", "b.jpg"]
+

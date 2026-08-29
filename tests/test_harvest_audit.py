@@ -9,6 +9,7 @@ from pipeline.harvest.audit import (
     audit_counts,
     audit_gap,
     load_audit,
+    merge_verdicts,
     required_audit_files,
 )
 from pipeline.harvest.manifest import HarvestRow
@@ -116,3 +117,13 @@ def test_недостача_не_считает_лишние_кадры_вне_�
         _строка(f"clean{n}.jpg", audit="ok") for n in range(3)
     ]
     assert audit_gap(строки, seed=0) == set()
+
+
+def test_поздний_вердикт_побеждает_ранний() -> None:
+    итог = merge_verdicts({"a.jpg": "ok"}, {"a.jpg": "drop:plate", "b.jpg": "ok"})
+    assert итог == {"a.jpg": "drop:plate", "b.jpg": "ok"}
+
+
+def test_склейка_без_аргументов_пуста() -> None:
+    assert merge_verdicts() == {}
+

@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import argparse
 import html
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from pipeline.harvest.audit import required_audit_files
+from pipeline.harvest.audit import load_audit, merge_verdicts, required_audit_files
 from pipeline.harvest.manifest import HarvestRow, load_manifest
 
 _HEAD = """<!doctype html><meta charset=utf-8><title>Аудит H3</title><style>
@@ -83,12 +83,38 @@ def render_gallery(
     )
 
 
+def отобрать_для_показа(
+    rows: Sequence[HarvestRow], verdicts: Mapping[str, str], only_missing: bool
+) -> list[HarvestRow]:
+    """Что показать человеку во втором проходе.
+
+    Имя файла кропа — это `sha256` оригинала, оно не меняется между прогонами, поэтому
+    вердикт прошлого прохода относится ровно к тем же пикселям. Пересматривать закрытое
+    — это тысяча лишних кадров в глазах человека и ноль новой информации.
+    """
+    if not only_missing:
+        return list(rows)
+    return [с for с in rows if not verdicts.get(с.file)]
+
+
 def build_parser() -> argparse.ArgumentParser:
     парсер = argparse.ArgumentParser(description="HTML-галерея аудита H3")
     парсер.add_argument("--manifest", type=Path, required=True)
     парсер.add_argument("--data-root", type=Path, required=True)
     парсер.add_argument("--thumb-px", type=int, default=480)
     парсер.add_argument("--seed", type=int, default=0)
+    парсер.add_argument(
+        "--verdicts",
+        type=Path,
+        nargs="*",
+        default=[],
+        help="CSV вердиктов прошлых проходов; поздний файл побеждает ранний",
+    )
+    парсер.add_argument(
+        "--only-missing",
+        action="store_true",
+        help="показать только кадры без вердикта",
+    )
     return парсер
 
 
@@ -98,7 +124,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     аргументы = build_parser().parse_args(argv)
     строки = load_manifest(аргументы.manifest)
-    надо = required_audit_files(строки, seed=аргументы.seed)
+    вердикты = merge_verdicts(*(load_audit(путь) for путь in аргументы.verdicts))
+    надо = required_audit_files(строки, seed=аргументы.seed) - set(вердикты)
+    строки = отобрать_для_показа(строки, вердикты, аргументы.only_missing)
 
     каталог = аргументы.data_root / "audit"
     (каталог / "thumbs").mkdir(parents=True, exist_ok=True)

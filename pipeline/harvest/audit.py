@@ -50,6 +50,19 @@ def load_audit(path: Path) -> dict[str, str]:
     return вердикты
 
 
+def merge_verdicts(*verdicts: Mapping[str, str]) -> dict[str, str]:
+    """Склеить вердикты нескольких проходов; поздний проход побеждает ранний.
+
+    Порядок именно такой: второй проход смотрит кадр повторно только тогда, когда
+    человек решил пересмотреть своё решение, и новый вердикт обязан вытеснить старый,
+    а не потонуть в нём.
+    """
+    итог: dict[str, str] = {}
+    for пачка in verdicts:
+        итог.update(пачка)
+    return итог
+
+
 def apply_audit(
     rows: Sequence[HarvestRow], verdicts: Mapping[str, str]
 ) -> list[HarvestRow]:
