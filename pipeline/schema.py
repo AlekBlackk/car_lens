@@ -28,6 +28,9 @@ SOURCES = frozenset(
         "mobile_de",
         "street",
         "stanford",
+        # Выборка открытого провенанса Р-11 (Wikimedia Commons). Отделена от `street`
+        # намеренно: `street_holdout` §3.5 меряет улицу, `holdout_ru` — каталог.
+        "commons",
         "negatives",
     }
 )
