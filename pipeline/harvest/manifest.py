@@ -86,6 +86,19 @@ def append_row(path: Path, row: HarvestRow) -> None:
         писатель.writerow(asdict(row))
 
 
+def write_manifest(path: Path, rows: Sequence[HarvestRow]) -> None:
+    """Перезаписать манифест целиком. Атомарно — во временный файл и rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    временный = path.with_suffix(path.suffix + ".tmp")
+    with временный.open("w", encoding="utf-8", newline="") as файл:
+        писатель = csv.DictWriter(файл, fieldnames=list(COLUMNS))
+        писатель.writeheader()
+        for строка in rows:
+            писатель.writerow(asdict(строка))
+    временный.replace(path)
+
+
+
 def load_manifest(path: Path) -> list[HarvestRow]:
     """Прочитать манифест целиком, восстановив типы чисел."""
     строки = list(csv.DictReader(path.read_text(encoding="utf-8").splitlines()))

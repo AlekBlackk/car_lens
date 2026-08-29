@@ -107,3 +107,15 @@ def test_неизвестная_отметка_аудита_отвергаетс
 def test_разметка_автора_снимается() -> None:
     """`extmetadata.Artist` приходит с HTML, а манифест — это текст для человека."""
     assert strip_html('<a href="/wiki/User:X" title="X">Иван Петров</a>') == "Иван Петров"
+
+
+def test_write_manifest_перезаписывает_целиком(tmp_path: Path) -> None:
+    from pipeline.harvest.manifest import load_manifest, write_manifest
+
+    путь = tmp_path / "m.csv"
+    строки = [_строка(file="a.jpg"), _строка(file="b.jpg")]
+    write_manifest(путь, строки)
+    write_manifest(путь, строки[:1])  # перезапись, не дозапись
+    назад = load_manifest(путь)
+    assert [с.file for с in назад] == ["a.jpg"]
+
