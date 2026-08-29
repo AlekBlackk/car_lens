@@ -33,6 +33,12 @@ def _строка(**правки: object) -> HarvestRow:
         "clip_margin": 0.12,
         "plates": 1,
         "faces": 0,
+        "bbox_x": 12.0,
+        "bbox_y": 34.0,
+        "bbox_w": 500.0,
+        "bbox_h": 300.0,
+        "bbox_area_frac": 0.42,
+        "det_conf": 0.91,
         "audit": "",
     }
     поля.update(правки)
@@ -118,4 +124,16 @@ def test_write_manifest_перезаписывает_целиком(tmp_path: Pa
     write_manifest(путь, строки[:1])  # перезапись, не дозапись
     назад = load_manifest(путь)
     assert [с.file for с in назад] == ["a.jpg"]
+
+
+def test_манифест_несёт_геометрию_бокса(tmp_path: Path) -> None:
+    строка = _строка()
+    путь = tmp_path / "m.csv"
+    append_row(путь, строка)
+    прочитано = load_manifest(путь)[0]
+    assert прочитано.bbox_x == строка.bbox_x
+    assert прочитано.bbox_w == строка.bbox_w
+    assert прочитано.bbox_area_frac == строка.bbox_area_frac
+    assert прочитано.det_conf == строка.det_conf
+
 

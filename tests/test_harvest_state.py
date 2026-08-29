@@ -52,5 +52,5 @@ def test_класс_закрыт_по_набранным_фото() -> None:
 
 
 def test_недобранный_класс_не_закрыт() -> None:
-    состояние = HarvestState({"lada__granta": 399}, {"lada__granta": 29}, {}, set())
+    состояние = HarvestState({"lada__granta": 199}, {"lada__granta": 14}, {}, set())
     assert not is_class_done(состояние, "lada__granta")

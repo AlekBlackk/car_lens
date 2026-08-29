@@ -92,6 +92,12 @@ def rebuild_row(
         phash=хеш,
         plates=итог.plates,
         faces=итог.faces,
+        bbox_x=float(решение.box.x),
+        bbox_y=float(решение.box.y),
+        bbox_w=float(решение.box.w),
+        bbox_h=float(решение.box.h),
+        bbox_area_frac=float(решение.area_frac),
+        det_conf=float(решение.box.conf),
         audit="",
         checked=date.today().isoformat(),
     )

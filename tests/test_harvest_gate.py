@@ -29,13 +29,19 @@ def _строка(номер: int) -> HarvestRow:
         clip_margin=0.1,
         plates=1,
         faces=0,
+        bbox_x=12.0,
+        bbox_y=34.0,
+        bbox_w=500.0,
+        bbox_h=300.0,
+        bbox_area_frac=0.42,
+        det_conf=0.91,
         audit="ok",
     )
 
 
 def _полный_прогон(добравших: int) -> list[ClassOutcome]:
-    итоги = [_итог(f"класс_{n}", 30 if n < добравших else 4) for n in range(150 - 4)]
-    итоги += [_итог(class_id, 30) for class_id in H2_CORE_CLASSES]
+    итоги = [_итог(f"класс_{n}", 15 if n < добравших else 4) for n in range(150 - 4)]
+    итоги += [_итог(class_id, 15) for class_id in H2_CORE_CLASSES]
     return итоги
 
 
@@ -100,16 +106,16 @@ def test_низкое_покрытие_не_блокирует() -> None:
 
 
 def test_недобор_ядрового_класса_не_блокирует_но_виден() -> None:
-    итоги = [_итог(f"класс_{n}", 30) for n in range(146)]
+    итоги = [_итог(f"класс_{n}", 15) for n in range(146)]
     итоги += [_итог(H2_CORE_CLASSES[0], 3)]
-    итоги += [_итог(class_id, 30) for class_id in H2_CORE_CLASSES[1:]]
+    итоги += [_итог(class_id, 15) for class_id in H2_CORE_CLASSES[1:]]
     гейт = check_gate(итоги, [_строка(1)], audited_total=100, audited_dirty=0, allow_sa=False)
     assert гейт.passed
     assert any("H2" in причина for причина in гейт.advisory_failures)
 
 
 def test_отчёт_называет_дефицитные_классы() -> None:
-    итоги = [_итог("lada__2107", 4), _итог("uaz__patriot", 30)]
+    итоги = [_итог("lada__2107", 4), _итог("uaz__patriot", 15)]
     отчёт = render_report(
         итоги,
         [_строка(1)],

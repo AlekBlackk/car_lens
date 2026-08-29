@@ -41,6 +41,12 @@ def _строка(
         clip_margin=0.0,
         plates=plates,
         faces=faces,
+        bbox_x=12.0,
+        bbox_y=34.0,
+        bbox_w=500.0,
+        bbox_h=300.0,
+        bbox_area_frac=0.42,
+        det_conf=0.91,
         audit=audit,
     )
 

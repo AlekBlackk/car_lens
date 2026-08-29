@@ -46,6 +46,12 @@ def _строка(sha: str, class_id: str = "lada__granta") -> HarvestRow:
         clip_margin=0.0,
         plates=0,
         faces=0,
+        bbox_x=12.0,
+        bbox_y=34.0,
+        bbox_w=500.0,
+        bbox_h=300.0,
+        bbox_area_frac=0.42,
+        det_conf=0.91,
         audit="ok",
     )
 

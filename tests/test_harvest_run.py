@@ -12,7 +12,7 @@ from pipeline.harvest.manifest import load_manifest
 from pipeline.harvest.queries import ClassQueries
 from pipeline.harvest.run import HarvestDeps, harvest_class, process_candidate
 from pipeline.harvest.sources import Candidate, SearchPage, SourceQuery
-from pipeline.harvest.state import HarvestState
+from pipeline.harvest.state import ACCEPTED_TARGET, HarvestState
 
 
 def _jpeg(ширина: int = 1200, высота: int = 900, seed: int = 0) -> bytes:
@@ -220,7 +220,7 @@ def test_прогон_класса_останавливается_на_бюдж�
     assert итог.rejects["too_small_file"] == 200
 
 
-def test_прогон_класса_останавливается_на_пятнадцати(tmp_path: Path) -> None:
+def test_прогон_класса_останавливается_на_цели(tmp_path: Path) -> None:
     class РазныеИсточник(ПодставнойИсточник):
         def fetch(self, candidate: Candidate) -> bytes:
             self.скачано += 1
@@ -233,9 +233,9 @@ def test_прогон_класса_останавливается_на_пятн�
     итог = harvest_class(
         ClassQueries("lada__granta", ("Lada Granta",), ()), зависимости, состояние, DedupIndex()
     )
-    assert итог.accepted == 15
-    assert состояние.accepted["lada__granta"] == 15
-    assert len(load_manifest(зависимости.manifest_path)) == 15
+    assert итог.accepted == ACCEPTED_TARGET
+    assert состояние.accepted["lada__granta"] == ACCEPTED_TARGET
+    assert len(load_manifest(зависимости.manifest_path)) == ACCEPTED_TARGET
 
 
 def test_обработанный_элемент_не_берётся_дважды(tmp_path: Path) -> None:
@@ -259,3 +259,17 @@ def test_класс_вне_каталога_это_ошибка(tmp_path: Path) 
             _зависимости(tmp_path, ПодставнойИсточник([])),
             DedupIndex(),
         )
+
+
+def test_принятая_строка_несёт_бокс_и_уверенность(tmp_path: Path) -> None:
+    источник = ПодставнойИсточник([])
+    причина, строка = process_candidate(
+        _кандидат(), _зависимости(tmp_path, источник), DedupIndex()
+    )
+    assert причина == "accepted"
+    assert строка is not None
+    assert строка.det_conf == pytest.approx(0.9)
+    assert (строка.bbox_x, строка.bbox_y) == (100.0, 100.0)
+    assert (строка.bbox_w, строка.bbox_h) == (700.0, 500.0)
+    assert 0.0 < строка.bbox_area_frac <= 1.0
+

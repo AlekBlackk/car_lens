@@ -45,7 +45,12 @@ class ManifestError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class HarvestRow:
-    """Одна принятая фотография с полным провенансом и числами конвейера."""
+    """Одна принятая фотография с полным провенансом и числами конвейера.
+
+    Геометрия бокса главной машины хранится в пикселях исходного кадра, а не кропа: кроп
+    — это уже вырезанный бокс, и внутри него координаты вырождаются в рамку самого файла.
+    §13.1 просит рамку в системе координат исходной фотографии.
+    """
 
     file: str
     class_id: str
@@ -64,6 +69,12 @@ class HarvestRow:
     clip_margin: float
     plates: int
     faces: int
+    bbox_x: float
+    bbox_y: float
+    bbox_w: float
+    bbox_h: float
+    bbox_area_frac: float
+    det_conf: float
     audit: str
 
 
@@ -121,6 +132,12 @@ def load_manifest(path: Path) -> list[HarvestRow]:
             clip_margin=float(с["clip_margin"]),
             plates=int(с["plates"]),
             faces=int(с["faces"]),
+            bbox_x=float(с["bbox_x"]),
+            bbox_y=float(с["bbox_y"]),
+            bbox_w=float(с["bbox_w"]),
+            bbox_h=float(с["bbox_h"]),
+            bbox_area_frac=float(с["bbox_area_frac"]),
+            det_conf=float(с["det_conf"]),
             audit=с["audit"],
         )
         for с in строки
