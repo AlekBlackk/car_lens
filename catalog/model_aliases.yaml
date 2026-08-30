@@ -1,0 +1,310 @@
+# Иглы моделей: что в имени файла Commons подтверждает класс каталога.
+#
+# Таблица ведётся РУКАМИ. Черновик снят scripts/gen_model_aliases.py из терминов
+# поиска, и этого мало: кузовные коды (21310, 315195), экспортные имена (cressida,
+# 1500 sl, outlander sport) и разведение соседей из терминов не выводятся.
+#
+# Полнота по каталогу и отсутствие взаимно неразличимых игл держатся тестом
+# tests/test_model_aliases_table.py — это гейт G_AL1 задачи B.
+version: 1
+classes:
+  audi__a4:
+    needles: ["a4"]
+  audi__a6:
+    needles: ["a6"]
+  audi__q5:
+    needles: ["q5"]
+  bmw__3_series:
+    needles: ["3 series", "3er", "e30", "e36", "e46", "e90", "f30", "g20"]
+  bmw__5_series:
+    needles: ["5 series", "5er", "e28", "e34", "e39", "e60", "f10", "g30"]
+  bmw__x5:
+    needles: ["e53", "e70", "f15", "g05", "x5"]
+  changan__cs35_plus:
+    needles: ["cs35 plus"]
+  changan__cs55_plus:
+    needles: ["cs55 plus"]
+  chery__amulet:
+    needles: ["a15", "amulet", "cowin"]
+  chery__tiggo_4:
+    needles: ["tiggo 4", "tiggo 5x"]
+  chery__tiggo_8:
+    needles: ["tiggo 8"]
+  chevrolet__aveo:
+    needles: ["aveo", "kalos", "sonic"]
+  chevrolet__captiva:
+    needles: ["captiva", "winstorm"]
+  chevrolet__cruze:
+    needles: ["cruze", "lacetti premiere"]
+  chevrolet__lacetti:
+    needles: ["lacetti", "optra"]
+  chevrolet__lanos:
+    needles: ["chevrolet lanos"]
+  chevrolet__niva:
+    needles: ["2123", "chevrolet niva", "vaz 2123"]
+  citroen__berlingo:
+    needles: ["berlingo"]
+  citroen__c4:
+    needles: ["c4"]
+  daewoo__lanos:
+    needles: ["lanos"]
+  daewoo__matiz:
+    needles: ["matiz"]
+  daewoo__nexia:
+    needles: ["nexia"]
+  datsun__on_do:
+    needles: ["on do", "ondo"]
+  exeed__txl:
+    needles: ["txl"]
+  fiat__albea:
+    needles: ["albea", "siena"]
+  ford__fiesta:
+    needles: ["fiesta"]
+  ford__focus:
+    needles: ["focus"]
+  ford__kuga:
+    needles: ["escape", "kuga"]
+  ford__mondeo:
+    needles: ["fusion", "mondeo"]
+  ford__transit:
+    needles: ["tourneo custom", "transit", "transit custom"]
+  gaz__gazel:
+    needles: ["gazel", "gazel next", "gazelle", "gazelle next"]
+  gaz__sobol:
+    needles: ["sobol", "sobol nn"]
+  gaz__volga_3110:
+    needles: ["3110", "31105", "volga", "volga 3110 31105"]
+  geely__emgrand:
+    needles: ["ec7", "emgrand"]
+  geely__monjaro:
+    needles: ["monjaro", "xingyue l"]
+  great_wall__hover:
+    needles: ["haval h3", "haval h5", "hover"]
+  grp__atlas_pro:
+    needles: ["belgee x70", "geely atlas pro"]
+  grp__coolray:
+    needles: ["belgee x50", "geely coolray"]
+  grp__jac_js4:
+    needles: ["jac js4", "moskvich 3", "moskvitch 3"]
+  grp__solaris_hs:
+    needles: ["hyundai solaris", "solaris", "solaris hs"]
+  grp__tiggo7:
+    needles: ["chery tiggo 7", "chery tiggo 7 pro", "tiggo 7", "xcite x cross 7"]
+  haval__dargo:
+    needles: ["big dog", "dargo"]
+  haval__f7:
+    needles: ["f7", "f7x"]
+  haval__jolion:
+    needles: ["first love", "jolion"]
+  honda__accord:
+    needles: ["accord", "inspire"]
+  honda__civic:
+    needles: ["civic"]
+  honda__cr_v:
+    needles: ["cr v", "crv"]
+  hyundai__accent:
+    needles: ["accent", "verna"]
+  hyundai__creta:
+    needles: ["cantus", "creta", "ix25"]
+  hyundai__elantra:
+    needles: ["avante", "elantra", "i35"]
+  hyundai__getz:
+    needles: ["click", "getz"]
+  hyundai__santa_fe:
+    needles: ["ix45", "santa fe"]
+  hyundai__tucson:
+    needles: ["ix35", "tucson"]
+  infiniti__fx:
+    needles: ["fx"]
+  iveco__daily:
+    needles: ["daily"]
+  jeep__grand_cherokee:
+    needles: ["grand cherokee"]
+  kia__ceed:
+    needles: ["cee d", "ceed", "pro cee d", "xceed"]
+  kia__cerato:
+    needles: ["cerato", "forte", "k3"]
+  kia__optima:
+    needles: ["k5", "magentis", "optima"]
+  kia__rio:
+    needles: ["k2", "rio", "rio x", "rio x line"]
+  kia__sorento:
+    needles: ["sorento"]
+  kia__soul:
+    needles: ["soul"]
+  kia__spectra:
+    needles: ["sephia", "spectra"]
+  kia__sportage:
+    needles: ["sportage"]
+  lada__2101:
+    needles: ["2101", "21011", "21013", "kopeika", "vaz 2101"]
+  lada__2104:
+    needles: ["2104", "21043", "21047", "vaz 2104"]
+  lada__2106:
+    needles: ["2106", "21061", "21063", "21065", "vaz 2106"]
+  lada__2107:
+    needles: ["2107", "21074", "vaz 2107"]
+  lada__2110:
+    needles: ["110", "111", "112", "2110", "2111", "2112", "vaz 2110", "vaz 2111", "vaz 2112"]
+  lada__granta:
+    needles: ["2190", "2191", "2192", "2194", "granta", "vaz 2190"]
+  lada__kalina:
+    needles: ["1117", "1118", "1119", "kalina", "vaz 1118"]
+  lada__largus:
+    needles: ["largus", "largus cross"]
+  lada__niva_2121:
+    needles: ["2121", "21213", "21214", "4x4", "niva", "niva legend", "vaz 2121"]
+  lada__niva_2131:
+    needles: ["2131", "21310", "lada 4x4 5d", "niva 2131", "vaz 2131"]
+  lada__niva_travel:
+    needles: ["niva travel"]
+  lada__priora:
+    needles: ["2170", "2171", "2172", "priora", "vaz 2170"]
+  lada__samara:
+    needles: ["2108", "2109", "21099", "samara hanseat", "vaz 2108", "vaz 2109", "vaz 21099"]
+  lada__samara_2:
+    needles: ["2113", "2114", "2115", "samara 2", "vaz 2113", "vaz 2114", "vaz 2115"]
+  lada__vesta:
+    needles: ["vesta", "vesta cross", "vesta sw"]
+  lada__xray:
+    needles: ["xray", "xray cross"]
+  land_rover__discovery:
+    needles: ["discovery"]
+  lexus__lx:
+    needles: ["lx"]
+  lexus__nx:
+    needles: ["nx"]
+  lexus__rx:
+    needles: ["harrier", "rx"]
+  lifan__solano:
+    needles: ["620", "solano"]
+  lifan__x60:
+    needles: ["x60"]
+  mazda__3:
+    needles: ["axela", "mazda 3", "mazda3"]
+  mazda__6:
+    needles: ["atenza", "mazda 6", "mazda6"]
+  mazda__cx5:
+    needles: ["cx 5", "cx5"]
+  mercedes_benz__c_class:
+    needles: ["c class", "c klasse", "w202", "w203", "w204", "w205", "w206"]
+  mercedes_benz__e_class:
+    needles: ["e class", "e klasse", "w124", "w210", "w211", "w212", "w213"]
+  mercedes_benz__gle:
+    needles: ["c167", "c292", "gle", "gle class", "v167", "w166"]
+  mercedes_benz__sprinter:
+    needles: ["sprinter"]
+  mitsubishi__asx:
+    needles: ["asx", "outlander sport", "rvr"]
+  mitsubishi__lancer:
+    needles: ["lancer"]
+  mitsubishi__outlander:
+    needles: ["airtrek", "outlander"]
+  mitsubishi__pajero:
+    needles: ["montero", "pajero", "shogun"]
+  moskvich__2140:
+    needles: ["1500 sl", "2140", "azlk 2140", "moskvitch 2140"]
+  moskvich__2141:
+    needles: ["2141", "aleko", "azlk 2141", "moskvitch 2141", "svyatogor"]
+  nissan__almera:
+    needles: ["almera", "almera classic", "bluebird sylphy"]
+  nissan__juke:
+    needles: ["juke"]
+  nissan__murano:
+    needles: ["murano"]
+  nissan__qashqai:
+    needles: ["qashqai", "rogue sport"]
+  nissan__terrano:
+    needles: ["terrano"]
+  nissan__x_trail:
+    needles: ["rogue", "x trail", "xtrail"]
+  omoda__c5:
+    needles: ["c5", "omoda 5", "omoda c5"]
+  opel__astra:
+    needles: ["astra"]
+  opel__zafira:
+    needles: ["zafira"]
+  peugeot__206:
+    needles: ["206"]
+  peugeot__308:
+    needles: ["308"]
+  peugeot__408:
+    needles: ["408"]
+  porsche__cayenne:
+    needles: ["cayenne"]
+  ravon__nexia_r3:
+    needles: ["nexia r3", "ravon nexia"]
+  renault__duster:
+    needles: ["dacia duster", "duster"]
+  renault__kaptur:
+    needles: ["captur", "kaptur"]
+  renault__logan:
+    needles: ["dacia logan", "logan"]
+  renault__logan_mcv:
+    needles: ["dacia logan mcv", "logan combi", "logan mcv", "logan sw"]
+  renault__megane:
+    needles: ["megane"]
+  renault__sandero:
+    needles: ["dacia sandero", "sandero"]
+  skoda__fabia:
+    needles: ["fabia"]
+  skoda__kodiaq:
+    needles: ["kodiaq"]
+  skoda__octavia:
+    needles: ["octavia"]
+  skoda__rapid:
+    needles: ["rapid"]
+  ssangyong__actyon:
+    needles: ["actyon", "korando"]
+  ssangyong__kyron:
+    needles: ["kyron"]
+  ssangyong__rexton:
+    needles: ["rexton"]
+  subaru__forester:
+    needles: ["forester"]
+  subaru__impreza:
+    needles: ["impreza", "wrx"]
+  subaru__outback:
+    needles: ["legacy outback", "outback"]
+  suzuki__grand_vitara:
+    needles: ["escudo", "grand vitara"]
+  suzuki__sx4:
+    needles: ["sx4"]
+  toyota__avensis:
+    needles: ["avensis", "corona premio"]
+  toyota__camry:
+    needles: ["aurion", "camry"]
+  toyota__corolla:
+    needles: ["auris", "corolla", "corolla fielder", "fielder"]
+  toyota__highlander:
+    needles: ["highlander", "kluger"]
+  toyota__land_cruiser:
+    needles: ["land cruiser", "landcruiser"]
+  toyota__land_cruiser_prado:
+    needles: ["land cruiser prado", "landcruiser prado", "prado"]
+  toyota__mark_2:
+    needles: ["cressida", "mark 2", "mark ii"]
+  toyota__rav4:
+    needles: ["rav4", "vanguard"]
+  uaz__bukhanka:
+    needles: ["2206", "3741", "3909", "452", "bukhanka"]
+  uaz__hunter:
+    needles: ["3151", "315195", "hunter"]
+  uaz__patriot:
+    needles: ["3163", "patriot"]
+  uaz__pickup:
+    needles: ["23632", "patriot pickup", "uaz pickup"]
+  volkswagen__golf:
+    needles: ["golf", "vw golf"]
+  volkswagen__passat:
+    needles: ["passat", "vw passat"]
+  volkswagen__polo:
+    needles: ["polo", "vw polo"]
+  volkswagen__tiguan:
+    needles: ["tiguan", "vw tiguan"]
+  volkswagen__touareg:
+    needles: ["touareg", "vw touareg"]
+  volkswagen__transporter:
+    needles: ["caravelle", "multivan", "transporter", "vw t4", "vw t5", "vw t6", "vw transporter"]
+  volvo__xc60:
+    needles: ["xc60"]
