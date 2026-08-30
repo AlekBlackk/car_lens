@@ -116,8 +116,8 @@ def process_candidate(
     # проверка идёт по метаданным выдачи, до единого байта трафика, как и лицензия выше.
     if candidate.basis.startswith("search:"):
         имя = normalize_filename(candidate.title or candidate.page_url)
-        вердикт = alias_verdict(имя, candidate.class_id, deps.alias_table)
-        if вердикт.kind != "own":
+        вердикт_иглы = alias_verdict(имя, candidate.class_id, deps.alias_table)
+        if вердикт_иглы.kind != "own":
             append_reject(
                 deps.alias_rejects_path,
                 AliasReject(
@@ -127,8 +127,8 @@ def process_candidate(
                     source_item_id=candidate.source_item_id,
                     title=candidate.title,
                     normalized=имя,
-                    verdict=вердикт.kind,
-                    foreign=";".join(вердикт.foreign),
+                    verdict=вердикт_иглы.kind,
+                    foreign=";".join(вердикт_иглы.foreign),
                 ),
             )
             return "alias_mismatch", None
@@ -176,8 +176,14 @@ def process_candidate(
     sha = digest(данные)
     путь = crop_path(deps.root, candidate.class_id, sha)
     путь.parent.mkdir(parents=True, exist_ok=True)
+    # `cv2.imwrite` отдаёт False на путях с не-ASCII символами: имя уходит в системную
+    # кодировку, а под Windows это не UTF-8. Фолбэк кодирует в память и пишет байты сам.
+    # Флаг `imencode` проверяется: без проверки на диск лёг бы файл в нуль байт, а строка
+    # манифеста ушла бы как `accepted` — провенанс указывал бы на битый кроп.
     if not cv2.imwrite(str(путь), кроп):
-        _, буфер = cv2.imencode(".jpg", кроп)
+        удалось, буфер = cv2.imencode(".jpg", кроп)
+        if not удалось:
+            return "write_failed", None
         путь.write_bytes(буфер.tobytes())
     dedup.add(хеш, candidate.class_id, путь.name)
 

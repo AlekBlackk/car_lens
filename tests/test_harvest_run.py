@@ -3,6 +3,7 @@ import csv
 import io
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 from PIL import Image
@@ -356,3 +357,31 @@ def test_журнал_получает_строку_об_отказе(tmp_path: 
     assert записи[0]["verdict"] == "foreign"
     assert записи[0]["foreign"] == "uaz__patriot"
     assert записи[0]["normalized"] == "uaz patriot 2019 front"
+
+
+def test_свой_поисковый_кандидат_проходит_и_журнал_остаётся_пустым(tmp_path: Path) -> None:
+    """Ложный отказ дороже пропуска: `done_items` жжёт выдачу класса безвозвратно."""
+    журнал = tmp_path / "alias_rejects.csv"
+    кандидат = _кандидат(basis="search:Lada Granta", title="File:Lada_Granta_2019_front.jpg")
+    причина, строка = process_candidate(
+        кандидат,
+        _зависимости(tmp_path, ПодставнойИсточник([]), alias_rejects_path=журнал),
+        DedupIndex(),
+    )
+    assert причина == "accepted"
+    assert строка is not None
+    assert not журнал.exists(), "своё имя не оставляет следа в журнале отказов"
+
+
+def test_неудача_кодирования_кропа_не_оставляет_битого_файла(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Иначе на диск лёг бы кроп в нуль байт, а строка манифеста ушла бы как `accepted`."""
+    monkeypatch.setattr(cv2, "imwrite", lambda *_: False)
+    monkeypatch.setattr(cv2, "imencode", lambda *_: (False, None))
+    причина, строка = process_candidate(
+        _кандидат(), _зависимости(tmp_path, ПодставнойИсточник([])), DedupIndex()
+    )
+    assert причина == "write_failed"
+    assert строка is None
+    assert not list((tmp_path / "crops").rglob("*.jpg")), "битого кропа на диске нет"

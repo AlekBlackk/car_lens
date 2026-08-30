@@ -129,3 +129,23 @@ def test_отчёт_называет_дефицитные_классы() -> None
     assert "deadbee" in отчёт
     assert "дефицит" in отчёт
     assert "аудит H3: проверено 100, с дефектами 0" in отчёт
+
+
+def test_отчёт_печатает_разбор_причин_отказа() -> None:
+    """Причины без своего журнала видны только здесь: отказ необратим."""
+    итоги = [
+        replace(_итог("lada__2107", 4), rejects={"over_redacted": 7, "alias_mismatch": 2}),
+        replace(_итог("uaz__patriot", 15), rejects={"over_redacted": 1}),
+    ]
+    отчёт = render_report(
+        итоги,
+        [_строка(1)],
+        check_gate(итоги, [_строка(1)], 100, 0, allow_sa=False),
+        git_sha="deadbee",
+        ran_at="2026-08-28",
+        audited_total=100,
+        audited_dirty=0,
+    )
+    assert "## Причины отказа" in отчёт
+    assert "| `over_redacted` | 8 |" in отчёт, "числа складываются по всем классам"
+    assert "| `alias_mismatch` | 2 |" in отчёт

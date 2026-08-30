@@ -19,6 +19,7 @@ dirty-кадр и **незакрытый охват**. Второй повод �
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -96,7 +97,17 @@ def render_report(
     audited_dirty: int,
     class_target: int = CLASS_TARGET,
 ) -> str:
-    """Собрать `bench/harvest-m0.md`: числа прогона в отслеживаемом git месте."""
+    """Собрать `bench/harvest-m0.md`: числа прогона в отслеживаемом git месте.
+
+    Разбор причин отказа печатается потому, что отказ необратим: метка кандидата уходит
+    в `state.done_items` и обратно не возвращается. У `alias_mismatch` есть собственный
+    журнал (`alias_rejects.csv`), у остальных причин — `over_redacted`, `not_a_car_photo`,
+    `redaction_failed` — нет ничего, и без этих чисел массовый отказ по новой причине
+    выглядел бы как «в Commons просто нет фотографий».
+    """
+    отказы: Counter[str] = Counter()
+    for итог in outcomes:
+        отказы.update(итог.rejects)
     дефицитные = sorted(
         (итог for итог in outcomes if итог.accepted < class_target),
         key=lambda итог: итог.accepted,
@@ -121,6 +132,12 @@ def render_report(
         "## Измеренный дефицит (не блокирует)",
         "",
         *([f"- {причина}" for причина in gate.advisory_failures] or ["Нет."]),
+        "",
+        "## Причины отказа",
+        "",
+        "| Причина | Кандидатов |",
+        "|---|---|",
+        *[f"| `{причина}` | {число} |" for причина, число in отказы.most_common()],
         "",
         "## Дефицитные классы",
         "",
