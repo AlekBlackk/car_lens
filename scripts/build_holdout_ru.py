@@ -8,14 +8,14 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pandas as pd
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, Catalog, class_index, load_catalog
 from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, HarvestRow, load_manifest
-from pipeline.holdout import HOLDOUT_MIN, HOLDOUT_TARGET, listing_id_of, select_holdout
+from pipeline.holdout import HOLDOUT_MIN, HOLDOUT_TARGET, select_holdout
 from pipeline.paths import splits_dir
 from pipeline.schema import empty_frame, write_split
 from pipeline.split import check_invariants
@@ -26,7 +26,9 @@ from pipeline.split import check_invariants
 MIN_LISTINGS_ДЛЯ_FEW_SHOT = 5
 
 
-def строки_в_кадр(rows: Sequence[HarvestRow], catalog: Catalog) -> pd.DataFrame:
+def строки_в_кадр(
+    rows: Sequence[HarvestRow], catalog: Catalog, unit_of_file: Mapping[str, str]
+) -> pd.DataFrame:
     """Манифест харвеста в схему §13.1.
 
     `model_id` группы `grp__*` — её первый участник: какой именно ребейдж на фотографии,
@@ -43,7 +45,7 @@ def строки_в_кадр(rows: Sequence[HarvestRow], catalog: Catalog) -> pd
         записи.append(
             {
                 "photo_id": строка.sha256,
-                "listing_id": listing_id_of(строка),
+                "listing_id": unit_of_file[строка.file],
                 "source": строка.source,
                 "crop_path": f"{строка.class_id}/{строка.file}",
                 "brand": catalog.by_id(model_id).brand,
@@ -84,8 +86,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         строки, target=аргументы.target, minimum=аргументы.minimum, seed=аргументы.seed
     )
 
-    эталон = строки_в_кадр([с for с in строки if с.file in выбор.files], каталог)
-    пул = строки_в_кадр([с for с in строки if с.file not in выбор.files], каталог)
+    единицы = dict(выбор.units)
+    эталон = строки_в_кадр([с for с in строки if с.file in выбор.files], каталог, единицы)
+    пул = строки_в_кадр([с for с in строки if с.file not in выбор.files], каталог, единицы)
 
     check_invariants(
         {"holdout_ru": эталон, "pool": пул},
@@ -95,6 +98,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     write_split(пул, splits_dir() / "pool.parquet")
 
     print(f"holdout_ru: {len(эталон)} кадров, pool: {len(пул)} кадров")
+    print(f"дроблено по pHash: {len(выбор.refined_classes)} классов")
+    for class_id in выбор.refined_classes:
+        print(f"  ~ {class_id}")
     print(f"классов без эталона (меньше {аргументы.minimum}): {len(выбор.short_classes)}")
     for class_id in выбор.short_classes:
         print(f"  - {class_id}")
