@@ -19,6 +19,7 @@ from pathlib import Path
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
 from pipeline.detectors.yolo import YoloDetector
+from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, load_alias_table
 from pipeline.harvest.audit import apply_audit, audit_counts, load_audit, merge_verdicts
 from pipeline.harvest.backends import (
     ClipImageEncoder,
@@ -103,6 +104,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         запросы = load_queries(DEFAULT_QUERIES_PATH)
         имена = load_latin_names(DEFAULT_LATIN_NAMES_PATH)
+        иглы = load_alias_table(DEFAULT_ALIASES_PATH)
+        без_игл = [c for c in (аргументы.classes or порядок) if c not in иглы]
+        if без_игл:
+            перечень = ", ".join(без_игл)
+            print(f"нет игл у классов: {перечень}. Шлюз забракует их целиком. Останов.")
+            return 2
 
         модель, _, препроцесс = open_clip.create_model_and_transforms(
             аргументы.clip_model, pretrained=аргументы.clip_weights
@@ -137,6 +144,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             root=корень,
             manifest_path=DEFAULT_MANIFEST_PATH,
             checked=date.today().isoformat(),
+            alias_table=иглы,
+            alias_rejects_path=корень / "alias_rejects.csv",
         )
 
         состояние = load_state(корень / "state.json")

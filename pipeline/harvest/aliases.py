@@ -17,10 +17,11 @@ Cruiser в классе `lexus__lx` для текстового энкодера
 
 from __future__ import annotations
 
+import csv
 import re
 import urllib.parse
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Literal
 
@@ -248,3 +249,38 @@ def broad_needles(table: AliasTable) -> list[tuple[str, str, str]]:
                 if накрывает:
                     широкие.append((класс, игла, сосед))
     return широкие
+
+
+@dataclass(frozen=True, slots=True)
+class AliasReject:
+    """Строка журнала отказов приёма: чем именно кандидат не подошёл классу."""
+
+    class_id: str
+    basis: str
+    source: str
+    source_item_id: str
+    title: str
+    normalized: str
+    verdict: str
+    foreign: str
+
+
+REJECT_COLUMNS = tuple(поле.name for поле in fields(AliasReject))
+
+
+def append_reject(path: Path, reject: AliasReject) -> None:
+    """Дописать строку журнала, создав файл с шапкой при первом вызове.
+
+    Журнал существует потому, что отказ на приёме необратим: в `run.py` метка кандидата
+    уходит в `state.done_items` безусловно и раньше цепочки решений, а состояние пишется
+    на диск после каждого класса. Эвристика по имени файла ошибается — `vaz 21310` это
+    Нива 2131, `toyota cressida` это Mark II, — и без следа такая ошибка не находится
+    никогда. По журналу задача C чистит `state.json` и пополняет иглы.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    новый = not path.exists()
+    with path.open("a", encoding="utf-8", newline="") as файл:
+        писатель = csv.DictWriter(файл, fieldnames=list(REJECT_COLUMNS))
+        if новый:
+            писатель.writeheader()
+        писатель.writerow(asdict(reject))

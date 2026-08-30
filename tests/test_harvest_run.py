@@ -1,4 +1,5 @@
 # tests/test_harvest_run.py
+import csv
 import io
 from pathlib import Path
 
@@ -7,10 +8,17 @@ import pytest
 from PIL import Image
 
 from pipeline.crop import Detection
+from pipeline.harvest.aliases import REJECT_COLUMNS
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.manifest import load_manifest
 from pipeline.harvest.queries import ClassQueries
-from pipeline.harvest.run import HarvestDeps, harvest_class, process_candidate
+from pipeline.harvest.run import (
+    MAX_BLACK_PIXEL_FRAC,
+    HarvestDeps,
+    harvest_class,
+    is_crop_over_redacted,
+    process_candidate,
+)
 from pipeline.harvest.sources import Candidate, SearchPage, SourceQuery
 from pipeline.harvest.state import ACCEPTED_TARGET, SEEN_BUDGET, HarvestState
 
@@ -106,6 +114,8 @@ def _зависимости(
         "root": tmp_path,
         "manifest_path": tmp_path / "harvest_manifest.csv",
         "checked": "2026-08-28",
+        "alias_table": {"lada__granta": ("granta",), "uaz__patriot": ("patriot",)},
+        "alias_rejects_path": tmp_path / "alias_rejects.csv",
     }
     поля.update(правки)
     return HarvestDeps(**поля)  # type: ignore[arg-type]
@@ -270,3 +280,79 @@ def test_принятая_строка_несёт_бокс_и_увереннос
     assert (строка.bbox_x, строка.bbox_y) == (100.0, 100.0)
     assert (строка.bbox_w, строка.bbox_h) == (700.0, 500.0)
     assert 0.0 < строка.bbox_area_frac <= 1.0
+
+
+def test_is_crop_over_redacted_порог() -> None:
+    черный = np.zeros((100, 100, 3), dtype=np.uint8)
+    светлый = np.full((100, 100, 3), 128, dtype=np.uint8)
+    assert is_crop_over_redacted(черный)
+    assert not is_crop_over_redacted(светлый)
+
+    # 51% черного при пороге 50%
+    смешанный_брак = np.full((100, 100, 3), 128, dtype=np.uint8)
+    смешанный_брак[:51, :] = 0
+    assert is_crop_over_redacted(смешанный_брак, max_black_frac=MAX_BLACK_PIXEL_FRAC)
+
+    # 49% черного при пороге 50%
+    смешанный_годный = np.full((100, 100, 3), 128, dtype=np.uint8)
+    смешанный_годный[:49, :] = 0
+    assert not is_crop_over_redacted(смешанный_годный, max_black_frac=MAX_BLACK_PIXEL_FRAC)
+
+
+def test_залитый_чёрным_кроп_отбраковывается_на_приёме(tmp_path: Path) -> None:
+    """Огромный бокс номера заливает всю машину черным -> отказ over_redacted."""
+    гигантский_номер = Detection(x=100.0, y=100.0, w=700.0, h=500.0, conf=0.9, cls=0)
+    зависимости = _зависимости(
+        tmp_path,
+        ПодставнойИсточник([]),
+        plate_detectors=(СписокДетектор([[гигантский_номер], []]),),
+    )
+    причина, строка = process_candidate(_кандидат(), зависимости, DedupIndex())
+    assert причина == "over_redacted"
+    assert строка is None
+
+
+def test_поисковый_кандидат_с_чужим_именем_бракуется_до_скачивания(tmp_path: Path) -> None:
+    """21 строка `lexus__lx`, названная Land Cruiser, — ровно этот случай."""
+    источник = ПодставнойИсточник([])
+    кандидат = _кандидат(basis="search:Lada Granta", title="File:UAZ_Patriot_2019_front.jpg")
+    причина, строка = process_candidate(кандидат, _зависимости(tmp_path, источник), DedupIndex())
+    assert причина == "alias_mismatch"
+    assert строка is None
+    assert источник.скачано == 0, "проверка идёт по метаданным, трафик нулевой"
+
+
+def test_имя_без_единого_совпадения_тоже_бракуется(tmp_path: Path) -> None:
+    """`unknown` на поисковом пути так же жёсток, как `foreign` (§9 дизайна)."""
+    кандидат = _кандидат(basis="search:Lada Granta", title="File:IMG_0412.jpg")
+    причина, _ = process_candidate(
+        кандидат, _зависимости(tmp_path, ПодставнойИсточник([])), DedupIndex()
+    )
+    assert причина == "alias_mismatch"
+
+
+def test_кандидат_из_категории_с_мусорным_именем_проходит(tmp_path: Path) -> None:
+    """Категория Commons размечена людьми — это принятое решение проекта."""
+    кандидат = _кандидат(basis="category:Lada Granta", title="File:IMG_0412.jpg")
+    причина, строка = process_candidate(
+        кандидат, _зависимости(tmp_path, ПодставнойИсточник([])), DedupIndex()
+    )
+    assert причина == "accepted"
+    assert строка is not None
+
+
+def test_журнал_получает_строку_об_отказе(tmp_path: Path) -> None:
+    """Без журнала ложный отказ невосстановим: `done_items` помнит кандидата вечно."""
+    кандидат = _кандидат(basis="search:Lada Granta", title="File:UAZ_Patriot_2019_front.jpg")
+    журнал = tmp_path / "alias_rejects.csv"
+    process_candidate(
+        кандидат,
+        _зависимости(tmp_path, ПодставнойИсточник([]), alias_rejects_path=журнал),
+        DedupIndex(),
+    )
+    записи = list(csv.DictReader(журнал.read_text(encoding="utf-8").splitlines()))
+    assert len(записи) == 1
+    assert tuple(записи[0]) == REJECT_COLUMNS
+    assert записи[0]["verdict"] == "foreign"
+    assert записи[0]["foreign"] == "uaz__patriot"
+    assert записи[0]["normalized"] == "uaz patriot 2019 front"

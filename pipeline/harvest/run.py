@@ -21,6 +21,13 @@ import numpy as np
 
 from pipeline.clean import phash_of
 from pipeline.crop import VEHICLE_CLASSES, Detection, Detector, crop_image, select_primary
+from pipeline.harvest.aliases import (
+    AliasReject,
+    AliasTable,
+    alias_verdict,
+    append_reject,
+    normalize_filename,
+)
 from pipeline.harvest.cache import crop_path, decode_image, digest, store
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.filters import ImageEncoder, clip_verdict
@@ -36,6 +43,25 @@ from pipeline.harvest.state import (
 
 MIN_SIDE = 640
 PAGE_LIMIT = 50
+MAX_BLACK_PIXEL_FRAC = 0.50
+BLACK_PIXEL_THRESHOLD = 8
+
+
+def is_crop_over_redacted(
+    crop: np.ndarray,
+    max_black_frac: float = MAX_BLACK_PIXEL_FRAC,
+    black_threshold: int = BLACK_PIXEL_THRESHOLD,
+) -> bool:
+    """Проверить, не съела ли заливка редакции машину целиком.
+
+    Если доля почти чёрных пикселей (яркость < black_threshold) превышает max_black_frac,
+    кадр бракуется с причиной over_redacted.
+    """
+    if crop.size == 0:
+        return True
+    серый = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    доля = float((серый < black_threshold).mean())
+    return доля > max_black_frac
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +80,8 @@ class HarvestDeps:
     root: Path
     manifest_path: Path
     checked: str
+    alias_table: AliasTable
+    alias_rejects_path: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +110,28 @@ def process_candidate(
         return "license_tier", None
     if min(candidate.width, candidate.height) < MIN_SIDE:
         return "too_small_file", None
+
+    # Шлюз принадлежности классу. Только поисковый путь: категория Commons размечена
+    # людьми и проходит даже с именем IMG_0412.jpg. Место в цепочке не случайно —
+    # проверка идёт по метаданным выдачи, до единого байта трафика, как и лицензия выше.
+    if candidate.basis.startswith("search:"):
+        имя = normalize_filename(candidate.title or candidate.page_url)
+        вердикт = alias_verdict(имя, candidate.class_id, deps.alias_table)
+        if вердикт.kind != "own":
+            append_reject(
+                deps.alias_rejects_path,
+                AliasReject(
+                    class_id=candidate.class_id,
+                    basis=candidate.basis,
+                    source=candidate.source,
+                    source_item_id=candidate.source_item_id,
+                    title=candidate.title,
+                    normalized=имя,
+                    verdict=вердикт.kind,
+                    foreign=";".join(вердикт.foreign),
+                ),
+            )
+            return "alias_mismatch", None
 
     try:
         данные = deps.source.fetch(candidate)
@@ -114,8 +164,11 @@ def process_candidate(
     кроп, номера, лица, замыто = redact_and_crop(кадр, решение.box, машины_в_кадре, deps)
     if not замыто:
         return "redaction_failed", None
+    if is_crop_over_redacted(кроп):
+        return "over_redacted", None
 
     хеш = phash_of(кроп)
+
     решение_дедуп = dedup.check(хеш, candidate.class_id)
     if решение_дедуп.status != "new":
         return решение_дедуп.status, None
@@ -123,7 +176,9 @@ def process_candidate(
     sha = digest(данные)
     путь = crop_path(deps.root, candidate.class_id, sha)
     путь.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(путь), кроп)
+    if not cv2.imwrite(str(путь), кроп):
+        _, буфер = cv2.imencode(".jpg", кроп)
+        путь.write_bytes(буфер.tobytes())
     dedup.add(хеш, candidate.class_id, путь.name)
 
     тир = tier_of(candidate.license_raw)
