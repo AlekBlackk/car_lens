@@ -13,6 +13,11 @@ from __future__ import annotations
 
 import re
 import urllib.parse
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+import yaml
 
 from pipeline.normalize import strip_diacritics
 
@@ -71,3 +76,42 @@ def matches_needle(name: str, needle: str) -> bool:
             if остаток.isdigit():
                 return True
     return False
+
+
+_КОРЕНЬ = Path(__file__).resolve().parent.parent.parent
+DEFAULT_ALIASES_PATH = _КОРЕНЬ / "catalog" / "model_aliases.yaml"
+SUPPORTED_VERSION = 1
+
+AliasTable = Mapping[str, tuple[str, ...]]
+
+
+class AliasesError(ValueError):
+    """Таблица игл не проходит валидацию."""
+
+
+def load_alias_table(path: Path) -> dict[str, tuple[str, ...]]:
+    """Прочитать таблицу игл и провалидировать её целиком.
+
+    Иглы нормализуются тем же нормализатором, что и имя файла: сравнивать «Mark II» с
+    «mark ii» иначе пришлось бы в каждом вызове, и рано или поздно кто-нибудь забудет.
+    """
+    сырое: Any = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if сырое.get("version") != SUPPORTED_VERSION:
+        raise AliasesError(f"{path}: поддерживается только version: {SUPPORTED_VERSION}")
+    таблица = сырое.get("classes")
+    if not isinstance(таблица, dict):
+        raise AliasesError(f"{path}: classes должно быть отображением")
+
+    итог: dict[str, tuple[str, ...]] = {}
+    for class_id, тело in таблица.items():
+        if not isinstance(тело, dict):
+            raise AliasesError(f"{path}: {class_id} должен быть отображением")
+        иглы = tuple(
+            нормальная
+            for игла in (тело.get("needles") or [])
+            if (нормальная := normalize_filename(str(игла)))
+        )
+        if not иглы:
+            raise AliasesError(f"{path}: у {class_id} нет ни одной годной иглы")
+        итог[str(class_id)] = иглы
+    return итог

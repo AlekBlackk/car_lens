@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from pipeline.harvest.aliases import matches_needle, normalize_filename
+from pipeline.harvest.aliases import (
+    AliasesError,
+    load_alias_table,
+    matches_needle,
+    normalize_filename,
+)
 
 
 @pytest.mark.parametrize(
@@ -46,3 +53,36 @@ def test_нормализация_имени(сырое: str, ожидание: 
 )
 def test_правило_совпадения(игла: str, имя: str, ожидание: bool) -> None:
     assert matches_needle(имя, игла) is ожидание
+
+
+_ДВЕ_ИГЛЫ = 'version: 1\nclasses:\n  toyota__mark_2:\n    needles: ["Mark II", "Cressida"]\n'
+
+
+def _таблица(tmp_path: Path, тело: str) -> Path:
+    путь = tmp_path / "model_aliases.yaml"
+    путь.write_text(тело, encoding="utf-8")
+    return путь
+
+
+def test_загрузка_нормализует_иглы(tmp_path: Path) -> None:
+    таблица = load_alias_table(_таблица(tmp_path, _ДВЕ_ИГЛЫ))
+    assert таблица["toyota__mark_2"] == ("mark ii", "cressida")
+
+
+def test_чужая_версия_отвергается(tmp_path: Path) -> None:
+    путь = _таблица(tmp_path, "version: 2\nclasses: {}\n")
+    with pytest.raises(AliasesError, match="version"):
+        load_alias_table(путь)
+
+
+def test_класс_без_игл_отвергается(tmp_path: Path) -> None:
+    """Класс без игл превращает поисковый путь в глухую стену — молча этого нельзя."""
+    путь = _таблица(tmp_path, "version: 1\nclasses:\n  lada__granta:\n    needles: []\n")
+    with pytest.raises(AliasesError, match="lada__granta"):
+        load_alias_table(путь)
+
+
+def test_игла_из_одной_пунктуации_отвергается(tmp_path: Path) -> None:
+    тело = 'version: 1\nclasses:\n  lada__granta:\n    needles: ["---"]\n'
+    with pytest.raises(AliasesError, match="lada__granta"):
+        load_alias_table(_таблица(tmp_path, тело))
