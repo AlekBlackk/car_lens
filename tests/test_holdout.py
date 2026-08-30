@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from pipeline.harvest.manifest import HarvestRow
-from pipeline.holdout import HOLDOUT_MIN, listing_id_of, select_holdout
+from pipeline.holdout import (
+    HOLDOUT_MIN,
+    POOL_RESERVE,
+    listing_id_of,
+    phash_components,
+    select_holdout,
+)
+from pipeline.split import DEFAULT_PHASH_HAMMING
 
 
 def _строка(файл: str, класс: str, автор: str, вердикт: str = "ok") -> HarvestRow:
@@ -98,3 +107,62 @@ def test_группа_со_смешанными_вердиктами_не_раз
     строки = смешанная + _класс("lada__2107", 20)
     выбор = select_holdout(строки)
     assert not (выбор.files & {с.file for с in смешанная})
+
+
+def test_серия_дробится_когда_класс_иначе_без_эталона() -> None:
+    """Один автор, 30 визуально разных кадров: класс обязан получить эталон."""
+    серия = [_строка(f"g{n}.jpg", "lada__granta", "галерейщик") for n in range(30)]
+    выбор = select_holdout(серия)
+    assert выбор.short_classes == ()
+    assert len(выбор.files) == 10
+    assert выбор.refined_classes == ("lada__granta",)
+
+
+def test_дробление_не_включается_когда_грубый_ключ_справился() -> None:
+    выбор = select_holdout(_класс("kia__rio", 30))
+    assert выбор.refined_classes == ()
+    assert all("#" not in ключ for _, ключ in выбор.units)
+
+
+def test_conflict_внутри_дроблёной_серии_остаётся_в_пуле() -> None:
+    серия = [
+        _строка(f"x{n}.jpg", "bmw__x5", "галерейщик", "conflict" if n == 0 else "ok")
+        for n in range(30)
+    ]
+    выбор = select_holdout(серия)
+    assert выбор.refined_classes == ("bmw__x5",)
+    assert "x0.jpg" not in выбор.files
+    assert len(выбор.files) == 10
+
+
+def test_близкие_по_phash_кадры_не_расходятся_по_сплитам() -> None:
+    """Компонента связности неделима даже при дроблении серии."""
+    близкие = [_строка(f"n{n}.jpg", "lada__kalina", "галерейщик") for n in range(2)]
+    близкие = [replace(близкие[0], phash=1024), replace(близкие[1], phash=1025)]
+    остальные = [_строка(f"d{n}.jpg", "lada__kalina", "галерейщик") for n in range(28)]
+    выбор = select_holdout(близкие + остальные)
+    попало = {с.file for с in близкие} & выбор.files
+    assert попало in ({"n0.jpg", "n1.jpg"}, set())
+
+
+def test_класс_оставляет_пулу_резерв_под_центроиды() -> None:
+    """Двенадцать кадров: эталон не имеет права забрать больше восьми."""
+    выбор = select_holdout(_класс("uaz__patriot", 12))
+    assert len(выбор.files) == 12 - POOL_RESERVE
+
+
+def test_класс_без_запаса_на_резерв_объявлен_дефицитным() -> None:
+    выбор = select_holdout(_класс("peugeot__308", HOLDOUT_MIN + POOL_RESERVE - 1))
+    assert выбор.files == frozenset()
+    assert выбор.short_classes == ("peugeot__308",)
+
+
+def test_компоненты_склеивают_близкие_и_разделяют_далёкие() -> None:
+    строки = [
+        replace(_строка("a.jpg", "kia__rio", "автор"), phash=0b1010),
+        replace(_строка("b.jpg", "kia__rio", "автор"), phash=0b1011),
+        replace(_строка("c.jpg", "kia__rio", "автор"), phash=~0b1010),
+    ]
+    номера = phash_components(строки, DEFAULT_PHASH_HAMMING)
+    assert номера["a.jpg"] == номера["b.jpg"]
+    assert номера["c.jpg"] != номера["a.jpg"]
