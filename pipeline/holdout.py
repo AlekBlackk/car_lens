@@ -46,27 +46,35 @@ def select_holdout(
     minimum: int = HOLDOUT_MIN,
     seed: int = 1337,
 ) -> HoldoutSelection:
-    """Выбрать до `target` эталонных кадров на класс, не разрывая серии автора."""
+    """Выбрать до `target` эталонных кадров на класс, не разрывая серии автора.
+
+    Группа (listing_id) неделима: если в серии автора есть кадры без вердикта `ok`
+    (например, `conflict`), вся группа остаётся в пуле, чтобы не допустить утечки
+    автора между эталоном и обучением (§13.1, инвариант 1).
+    """
     по_классам: dict[str, dict[str, list[HarvestRow]]] = defaultdict(
         lambda: defaultdict(list)
     )
     все_классы: set[str] = set()
     for строка in rows:
         все_классы.add(строка.class_id)
-        if строка.audit != "ok":
-            continue
         по_классам[строка.class_id][listing_id_of(строка)].append(строка)
 
     выбранные: set[str] = set()
     короткие: list[str] = []
     for class_id in sorted(все_классы):
         группы = по_классам.get(class_id, {})
-        порядок = sorted(группы, key=lambda ключ: bucket_of(ключ, seed))
+        чистые_группы = {
+            ключ: группа
+            for ключ, группа in группы.items()
+            if all(строка.audit == "ok" for строка in группа)
+        }
+        порядок = sorted(чистые_группы, key=lambda ключ: bucket_of(ключ, seed))
         набрано: list[str] = []
         for ключ in порядок:
             if len(набрано) >= target:
                 break
-            группа = группы[ключ]
+            группа = чистые_группы[ключ]
             if len(набрано) + len(группа) > target + OVERSHOOT:
                 continue
             набрано += [строка.file for строка in группа]
