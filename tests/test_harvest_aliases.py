@@ -86,3 +86,59 @@ def test_игла_из_одной_пунктуации_отвергается(tm
     тело = 'version: 1\nclasses:\n  lada__granta:\n    needles: ["---"]\n'
     with pytest.raises(AliasesError, match="lada__granta"):
         load_alias_table(_таблица(tmp_path, тело))
+
+
+def test_needles_скаляром_отвергается(tmp_path: Path) -> None:
+    """`needles: "Mark II"` без дефиса — законный YAML, но иглами стали бы буквы."""
+    тело = 'version: 1\nclasses:\n  toyota__mark_2:\n    needles: "Mark II"\n'
+    with pytest.raises(AliasesError, match="toyota__mark_2"):
+        load_alias_table(_таблица(tmp_path, тело))
+
+
+def test_needles_отображением_отвергается(tmp_path: Path) -> None:
+    тело = 'version: 1\nclasses:\n  toyota__mark_2:\n    needles:\n      ru: "Марк 2"\n'
+    with pytest.raises(AliasesError, match="toyota__mark_2"):
+        load_alias_table(_таблица(tmp_path, тело))
+
+
+def test_needles_числом_отвергается(tmp_path: Path) -> None:
+    тело = "version: 1\nclasses:\n  lada__granta:\n    needles: 5\n"
+    with pytest.raises(AliasesError, match="lada__granta"):
+        load_alias_table(_таблица(tmp_path, тело))
+
+
+def test_игла_null_отвергается(tmp_path: Path) -> None:
+    """`str(игла)` превратил бы `null` в живую иглу `none` рядом с настоящей."""
+    тело = 'version: 1\nclasses:\n  toyota__mark_2:\n    needles: [null, "Mark II"]\n'
+    with pytest.raises(AliasesError, match=r"None.+toyota__mark_2"):
+        load_alias_table(_таблица(tmp_path, тело))
+
+
+def test_игла_числом_отвергается(tmp_path: Path) -> None:
+    тело = "version: 1\nclasses:\n  lada__granta:\n    needles: [2114]\n"
+    with pytest.raises(AliasesError, match=r"2114.+lada__granta"):
+        load_alias_table(_таблица(tmp_path, тело))
+
+
+def test_битый_yaml_отвергается(tmp_path: Path) -> None:
+    """Шлюз ловит объявленный контрактом тип: трейсбек из PyYAML оборвал бы прогон."""
+    with pytest.raises(AliasesError, match="YAML"):
+        load_alias_table(_таблица(tmp_path, 'version: "1\n'))
+
+
+@pytest.mark.parametrize("тело", ["- version: 1\n", "просто строка\n"])
+def test_корень_не_отображение_отвергается(tmp_path: Path, тело: str) -> None:
+    with pytest.raises(AliasesError, match="корень"):
+        load_alias_table(_таблица(tmp_path, тело))
+
+
+def test_classes_не_отображение_отвергается(tmp_path: Path) -> None:
+    тело = "version: 1\nclasses:\n  - lada__granta\n"
+    with pytest.raises(AliasesError, match="classes"):
+        load_alias_table(_таблица(tmp_path, тело))
+
+
+def test_тело_класса_не_отображение_отвергается(tmp_path: Path) -> None:
+    тело = 'version: 1\nclasses:\n  lada__granta: "Granta"\n'
+    with pytest.raises(AliasesError, match="lada__granta"):
+        load_alias_table(_таблица(tmp_path, тело))
