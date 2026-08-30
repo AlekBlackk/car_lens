@@ -13,9 +13,7 @@ from pipeline.harvest.detectors import (
 
 ШАПКА = "name,format,url,revision,license,checked,sha256,derived_from\n"
 ЛИЦО = (
-    "face,onnx,https://example.invalid/yunet.onnx,2023mar,apache-2.0,2026-08-28,"
-    + "a" * 64
-    + ",\n"
+    "face,onnx,https://example.invalid/yunet.onnx,2023mar,apache-2.0,2026-08-28," + "a" * 64 + ",\n"
 )
 НОМЕР = (
     "plate,onnx,https://example.invalid/plate.onnx,r1,apache-2.0,2026-08-28,"

@@ -77,9 +77,7 @@ class CommonsSource:
 
     name = "commons"
 
-    def __init__(
-        self, transport: Transport, sleep: Callable[[float], None] = time.sleep
-    ) -> None:
+    def __init__(self, transport: Transport, sleep: Callable[[float], None] = time.sleep) -> None:
         self._transport = transport
         self._sleep = sleep
         self._последний_запрос = 0.0
@@ -107,9 +105,7 @@ class CommonsSource:
         if прошло < MIN_INTERVAL_SECONDS:
             self._sleep(MIN_INTERVAL_SECONDS - прошло)
         try:
-            ответ = request_with_backoff(
-                self._transport, candidate.file_url, {}, sleep=self._sleep
-            )
+            ответ = request_with_backoff(self._transport, candidate.file_url, {}, sleep=self._sleep)
         except HarvestHttpError:
             self._последний_запрос = time.monotonic()
             return b""

@@ -158,9 +158,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         audited_total, audited_dirty = audit_counts(с_вердиктами)
         строки = apply_audit(строки, вердикты)
         write_manifest(DEFAULT_MANIFEST_PATH, строки)
-    гейт = check_gate(
-        итоги, строки, audited_total, audited_dirty, allow_sa=аргументы.allow_sa
-    )
+    гейт = check_gate(итоги, строки, audited_total, audited_dirty, allow_sa=аргументы.allow_sa)
     sha = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
@@ -178,7 +176,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     DEFAULT_NOTICES_PATH.write_text(render_notices(строки), encoding="utf-8")
     return 0 if гейт.passed else 1
-
 
 
 if __name__ == "__main__":

@@ -83,5 +83,3 @@ def test_cli_принимает_путь_аудита_и_режим_отчёта
     )
     assert аргументы.audit == ["verdicts.csv"]
     assert аргументы.report_only is True
-
-

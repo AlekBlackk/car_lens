@@ -81,8 +81,9 @@ def test_номер_меньше_порога_игнорируется() -> None
 
 
 def test_лицо_меньше_порога_игнорируется() -> None:
-    мелкое = Detection(x=400.0, y=60.0, w=MIN_FACE_SIDE_PX - 4, h=MIN_FACE_SIDE_PX - 4,
-                       conf=0.9, cls=0)
+    мелкое = Detection(
+        x=400.0, y=60.0, w=MIN_FACE_SIDE_PX - 4, h=MIN_FACE_SIDE_PX - 4, conf=0.9, cls=0
+    )
     итог = redact_frame(_кадр(), [МАШИНА], [СписокДетектор([[]])], СписокДетектор([[мелкое]]))
     assert итог.ok
     assert итог.faces == 0
@@ -132,4 +133,3 @@ def test_номер_вне_боксов_машин_но_в_кадре_ловит
     assert итог.ok
     assert итог.plates == 1
     assert int(итог.image[25, 520].max()) == 0
-

@@ -161,9 +161,7 @@ def test_build_parser() -> None:
     assert args.data_root == Path("data_dir")
     assert args.out is None
 
-    args_out = parser.parse_args(
-        ["--models", "m", "--data-root", "d", "--out", "custom.csv"]
-    )
+    args_out = parser.parse_args(["--models", "m", "--data-root", "d", "--out", "custom.csv"])
     assert args_out.out == Path("custom.csv")
 
 

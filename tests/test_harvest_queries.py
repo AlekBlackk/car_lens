@@ -25,7 +25,7 @@ def test_класс_с_категорией_и_терминами(tmp_path: Path
         "classes:\n"
         "  lada__granta:\n"
         "    categories: [Lada Granta]\n"
-        "    terms: [\"Lada Granta\"]\n",
+        '    terms: ["Lada Granta"]\n',
     )
     запросы = load_queries(путь)
     assert запросы["lada__granta"].categories == ("Lada Granta",)

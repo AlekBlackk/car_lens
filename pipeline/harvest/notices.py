@@ -15,9 +15,7 @@ from pathlib import Path
 
 from pipeline.harvest.manifest import HarvestRow
 
-DEFAULT_NOTICES_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "provenance" / "NOTICES.md"
-)
+DEFAULT_NOTICES_PATH = Path(__file__).resolve().parent.parent.parent / "provenance" / "NOTICES.md"
 
 
 def _раздел(заголовок: str, строки: Sequence[HarvestRow]) -> list[str]:

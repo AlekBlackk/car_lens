@@ -135,9 +135,6 @@ def redact_frame(
             break
         for бокс in лица:
             _замыть_лицо(рабочая, бокс, заливкой)
-        лица = _крупные(
-            face_detector.detect(рабочая), MIN_FACE_SIDE_PX, MIN_FACE_SIDE_PX
-        )
+        лица = _крупные(face_detector.detect(рабочая), MIN_FACE_SIDE_PX, MIN_FACE_SIDE_PX)
     ok = not лица
     return RedactionResult(рабочая, len(номера), лица_число, ok)
-

@@ -57,8 +57,12 @@ def test_дубли_из_перекрытия_снимаются_nms() -> None:
             ys, xs = np.where(маска)
             return [
                 Detection(
-                    float(xs.min()), float(ys.min()),
-                    float(xs.max() - xs.min()), float(ys.max() - ys.min()), 0.9, 0,
+                    float(xs.min()),
+                    float(ys.min()),
+                    float(xs.max() - xs.min()),
+                    float(ys.max() - ys.min()),
+                    0.9,
+                    0,
                 )
             ]
 

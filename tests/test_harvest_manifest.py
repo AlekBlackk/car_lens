@@ -135,5 +135,3 @@ def test_манифест_несёт_геометрию_бокса(tmp_path: Pat
     assert прочитано.bbox_w == строка.bbox_w
     assert прочитано.bbox_area_frac == строка.bbox_area_frac
     assert прочитано.det_conf == строка.det_conf
-
-

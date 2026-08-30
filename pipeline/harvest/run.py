@@ -231,7 +231,6 @@ def _запросы(queries: ClassQueries) -> list[SourceQuery]:
         for категория in queries.categories
     ]
     из_текста = [
-        SourceQuery(queries.class_id, None, термин, PAGE_LIMIT, None)
-        for термин in queries.terms
+        SourceQuery(queries.class_id, None, термин, PAGE_LIMIT, None) for термин in queries.terms
     ]
     return из_категорий + из_текста

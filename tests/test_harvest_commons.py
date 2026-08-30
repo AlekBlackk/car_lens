@@ -95,9 +95,7 @@ def test_ошибка_не_из_списка_не_повторяется() -> No
 
 def test_поиск_по_категории_отдаёт_кандидатов_и_токен() -> None:
     источник = CommonsSource(ЗаписанныйТранспорт([_ок(ОТВЕТ)]), sleep=lambda _: None)
-    страница = источник.search(
-        SourceQuery("lada__granta", "Lada Granta", None, 50, None)
-    )
+    страница = источник.search(SourceQuery("lada__granta", "Lada Granta", None, 50, None))
     assert страница.continue_token == "page|0810|999"
     assert len(страница.candidates) == 1, "кандидат под NC обязан отсеяться до скачивания"
     кандидат = страница.candidates[0]

@@ -131,7 +131,6 @@ def test_build_parser() -> None:
     assert args_custom.only_missing is True
 
 
-
 def test_main_ужимает_миниатюры_и_сохраняет_галерею(tmp_path: Path) -> None:
     data_root = tmp_path / "data"
     manifest_path = tmp_path / "manifest.csv"
@@ -195,4 +194,3 @@ def test_без_флага_показываются_все() -> None:
     строки = [_строка("a.jpg"), _строка("b.jpg")]
     видно = отобрать_для_показа(строки, {"a.jpg": "ok"}, only_missing=False)
     assert [с.file for с in видно] == ["a.jpg", "b.jpg"]
-

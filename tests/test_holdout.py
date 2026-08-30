@@ -68,8 +68,7 @@ def test_серия_одного_автора_не_разрывается() -> N
 
 def test_кадр_без_вердикта_в_эталон_не_идёт() -> None:
     строки = [
-        _строка(f"a{n}.jpg", "uaz__patriot", f"автор{n}", "ok" if n % 2 else "")
-        for n in range(30)
+        _строка(f"a{n}.jpg", "uaz__patriot", f"автор{n}", "ok" if n % 2 else "") for n in range(30)
     ]
     без_вердикта = {с.file for с in строки if not с.audit}
     выбор = select_holdout(строки)

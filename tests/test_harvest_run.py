@@ -263,13 +263,10 @@ def test_класс_вне_каталога_это_ошибка(tmp_path: Path) 
 
 def test_принятая_строка_несёт_бокс_и_уверенность(tmp_path: Path) -> None:
     источник = ПодставнойИсточник([])
-    причина, строка = process_candidate(
-        _кандидат(), _зависимости(tmp_path, источник), DedupIndex()
-    )
+    причина, строка = process_candidate(_кандидат(), _зависимости(tmp_path, источник), DedupIndex())
     assert причина == "accepted"
     assert строка is not None
     assert строка.det_conf == pytest.approx(0.9)
     assert (строка.bbox_x, строка.bbox_y) == (100.0, 100.0)
     assert (строка.bbox_w, строка.bbox_h) == (700.0, 500.0)
     assert 0.0 < строка.bbox_area_frac <= 1.0
-

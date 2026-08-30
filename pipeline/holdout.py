@@ -190,8 +190,7 @@ def select_holdout(
         if цель >= minimum and len(набрано) < minimum:
             компонента = phash_components(свои, max_distance)
             тонкие_ключи = {
-                строка.file: f"{listing_id_of(строка)}#{компонента[строка.file]}"
-                for строка in свои
+                строка.file: f"{listing_id_of(строка)}#{компонента[строка.file]}" for строка in свои
             }
             тонкие: dict[str, list[HarvestRow]] = defaultdict(list)
             for строка in свои:

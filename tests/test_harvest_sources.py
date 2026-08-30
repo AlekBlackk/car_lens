@@ -4,15 +4,17 @@ from pipeline.harvest.sources import Candidate, SearchPage, SourceQuery, basis_o
 
 
 def test_basis_у_категории() -> None:
-    запрос = SourceQuery("lada__granta", category="Lada Granta", text=None, limit=50,
-                         continue_token=None)
+    запрос = SourceQuery(
+        "lada__granta", category="Lada Granta", text=None, limit=50, continue_token=None
+    )
     assert basis_of(запрос) == "category:Lada Granta"
 
 
 def test_basis_у_поиска() -> None:
     """Строки поиска аудируются в первую очередь, поэтому происхождение метки видно."""
-    запрос = SourceQuery("lada__granta", category=None, text="Lada Granta", limit=50,
-                         continue_token=None)
+    запрос = SourceQuery(
+        "lada__granta", category=None, text="Lada Granta", limit=50, continue_token=None
+    )
     assert basis_of(запрос) == "search:Lada Granta"
 
 

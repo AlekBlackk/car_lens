@@ -49,9 +49,7 @@ class UrllibTransport:
             return HttpResponse(код or 599, b"")
 
 
-def decode_ssd_output(
-    raw: np.ndarray, frame_w: int, frame_h: int, conf: float
-) -> list[Detection]:
+def decode_ssd_output(raw: np.ndarray, frame_w: int, frame_h: int, conf: float) -> list[Detection]:
     """Разобрать выход SSD-детектора формы (1, 1, N, 7) в боксы исходного кадра."""
     боксы: list[Detection] = []
     for _, класс, уверенность, x0, y0, x1, y1 in raw.reshape(-1, 7):

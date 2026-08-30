@@ -25,9 +25,7 @@ def topk_hits(
     return np.any(порядок == метки[:, None], axis=1)
 
 
-def accuracy_by_class(
-    попадания: np.ndarray, метки: np.ndarray, классов: int
-) -> dict[int, float]:
+def accuracy_by_class(попадания: np.ndarray, метки: np.ndarray, классов: int) -> dict[int, float]:
     """Доля попаданий по каждому классу. Классы без единого фото в результат не входят."""
     результат: dict[int, float] = {}
     for класс in range(классов):

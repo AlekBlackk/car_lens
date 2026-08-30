@@ -63,9 +63,7 @@ def merge_verdicts(*verdicts: Mapping[str, str]) -> dict[str, str]:
     return итог
 
 
-def apply_audit(
-    rows: Sequence[HarvestRow], verdicts: Mapping[str, str]
-) -> list[HarvestRow]:
+def apply_audit(rows: Sequence[HarvestRow], verdicts: Mapping[str, str]) -> list[HarvestRow]:
     """Проставить колонку `audit` и выкинуть строки с любым `drop:*`."""
     итог: list[HarvestRow] = []
     for строка in rows:

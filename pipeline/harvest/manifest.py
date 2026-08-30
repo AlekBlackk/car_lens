@@ -109,7 +109,6 @@ def write_manifest(path: Path, rows: Sequence[HarvestRow]) -> None:
     временный.replace(path)
 
 
-
 def load_manifest(path: Path) -> list[HarvestRow]:
     """Прочитать манифест целиком, восстановив типы чисел."""
     строки = list(csv.DictReader(path.read_text(encoding="utf-8").splitlines()))
@@ -154,9 +153,7 @@ def validate(rows: Sequence[HarvestRow], allow_sa: bool) -> None:
         if not is_allowed(строка.license, allow_sa=True):
             raise ManifestError(f"строка {номер}: лицензия {строка.license!r} не разрешена Р-11")
         if not is_allowed(строка.license, allow_sa=allow_sa):
-            raise ManifestError(
-                f"строка {номер}: {строка.license} требует флага --allow-sa"
-            )
+            raise ManifestError(f"строка {номер}: {строка.license} требует флага --allow-sa")
         тир = tier_of(строка.license)
         assert тир is not None  # проверено выше
         if int(тир) != строка.license_tier:
