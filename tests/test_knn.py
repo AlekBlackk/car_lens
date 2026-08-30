@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from pipeline.knn import top5_by_centroids
+from pipeline.knn import ranked_by_centroids, top5_by_centroids
 
 
 def test_top5_ставит_свой_класс_первым() -> None:
@@ -61,3 +62,37 @@ def test_модуль_не_тянет_torch() -> None:
     )
     assert результат.returncode == 0, результат.stderr
     assert not any(имя.startswith("torch") for имя in vars(pipeline.knn))
+
+
+def test_ranked_отдаёт_запрошенное_число_классов() -> None:
+    генератор = np.random.default_rng(1)
+    сырые = генератор.normal(size=(9, 4, 16))
+    центроиды = (сырые / np.linalg.norm(сырые, axis=2, keepdims=True)).astype(np.float32)
+    эмбеддинги = центроиды[:, 0, :]
+    for k in (1, 3, 5, 9):
+        результат = ranked_by_centroids(эмбеддинги, центроиды, k)
+        assert all(len(строка) == k for строка in результат)
+        assert all(len(set(строка)) == k for строка in результат)
+
+
+def test_ranked_согласован_с_top5() -> None:
+    """Обёртка обязана быть обёрткой, а не второй реализацией."""
+    генератор = np.random.default_rng(2)
+    сырые = генератор.normal(size=(7, 4, 8))
+    центроиды = (сырые / np.linalg.norm(сырые, axis=2, keepdims=True)).astype(np.float32)
+    эмбеддинги = центроиды[:, 1, :]
+    assert top5_by_centroids(эмбеддинги, центроиды) == ranked_by_centroids(эмбеддинги, центроиды, 5)
+
+
+def test_ranked_отвергает_k_больше_числа_классов() -> None:
+    центроиды = np.zeros((3, 2, 4), dtype=np.float32)
+    центроиды[:, :, 0] = 1.0
+    with pytest.raises(ValueError, match="k=4"):
+        ranked_by_centroids(np.zeros((1, 4), dtype=np.float32), центроиды, 4)
+
+
+def test_ranked_отвергает_нулевой_k() -> None:
+    центроиды = np.zeros((3, 2, 4), dtype=np.float32)
+    центроиды[:, :, 0] = 1.0
+    with pytest.raises(ValueError, match="k=0"):
+        ranked_by_centroids(np.zeros((1, 4), dtype=np.float32), центроиды, 0)

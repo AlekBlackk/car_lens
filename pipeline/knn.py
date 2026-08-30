@@ -13,17 +13,28 @@ import numpy as np
 from training.metrics import TOP_K
 
 
-def top5_by_centroids(embeddings: np.ndarray, centroids: np.ndarray) -> list[list[int]]:
-    """Индексы top-5 классов по максимуму косинуса к их центроидам.
+def ranked_by_centroids(
+    embeddings: np.ndarray, centroids: np.ndarray, k: int = TOP_K
+) -> list[list[int]]:
+    """Индексы `k` ближайших классов по максимуму косинуса к их центроидам.
 
-    `centroids` — `(классы, центроиды, измерения)`, всё нормализовано, поэтому
-    косинус — скалярное произведение. Максимум по центроидам берётся до сортировки:
-    top-5 — это пять разных классов, а не пять ближайших центроидов, которые могут
-    принадлежать одному.
+    `centroids` — `(классы, центроиды, измерения)`, всё нормализовано, поэтому косинус —
+    скалярное произведение. Максимум по центроидам берётся до сортировки: результат — это
+    `k` разных классов, а не `k` ближайших центроидов, которые могут принадлежать одному.
+
+    `k` проверяется явно. `argsort`-срез длиннее числа классов молча вернул бы короткие
+    строки, а вызывающий (метрика) считал бы по ним попадание в top-k, которого нет.
     """
     классов, _, размерность = centroids.shape
+    if not 1 <= k <= классов:
+        raise ValueError(f"k={k} вне диапазона 1..{классов}")
     плоские = centroids.reshape(-1, размерность)
     сходства = embeddings @ плоские.T
     по_классам = сходства.reshape(len(embeddings), классов, -1).max(axis=2)
-    порядок = np.argsort(-по_классам, axis=1)[:, :TOP_K]
+    порядок = np.argsort(-по_классам, axis=1)[:, :k]
     return [[int(класс) for класс in строка] for строка in порядок]
+
+
+def top5_by_centroids(embeddings: np.ndarray, centroids: np.ndarray) -> list[list[int]]:
+    """top-5 классов: имя, на которое опираются M-1.3 и сверка паритета M-1.4 (§13.2)."""
+    return ranked_by_centroids(embeddings, centroids, TOP_K)
