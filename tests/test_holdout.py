@@ -166,3 +166,13 @@ def test_компоненты_склеивают_близкие_и_раздел�
     номера = phash_components(строки, DEFAULT_PHASH_HAMMING)
     assert номера["a.jpg"] == номера["b.jpg"]
     assert номера["c.jpg"] != номера["a.jpg"]
+
+
+def test_дроблёный_отбор_не_зависит_от_порядка_строк() -> None:
+    """Переderivация манифеста тасует строки — эталон дробимого класса тасоваться не смеет."""
+    серия = [_строка(f"g{n}.jpg", "lada__granta", "галерейщик") for n in range(30)]
+    прямой = select_holdout(серия)
+    обратный = select_holdout(list(reversed(серия)))
+    assert прямой.refined_classes == ("lada__granta",), "класс обязан пройти дробление"
+    assert прямой.files == обратный.files
+    assert прямой.units == обратный.units
