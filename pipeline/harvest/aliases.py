@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 import urllib.parse
 
+from pipeline.normalize import strip_diacritics
+
 _РАСШИРЕНИЕ = re.compile(r"\.(jpe?g|png|tiff?|webp|gif)$", re.IGNORECASE)
 _НЕ_БУКВА_И_НЕ_ЦИФРА = re.compile(r"[^0-9a-zа-я]+")
 
@@ -25,16 +27,22 @@ def normalize_filename(raw: str) -> str:
     (`.../wiki/File:X.jpg` с процент-кодированием): колонки `title` в манифесте нет, а
     имя нужно обоим контурам — приёму и триажу.
 
+    Диакритика сворачивается общим с загрузчиком `catalog/aliases.yaml` хелпером
+    `strip_diacritics` — буквально той же функцией, а не похожей: класс «всё, кроме букв и
+    цифр, → пробел» (§6) не знает `é` и `š`, и без сворачивания `Mégane` распалось бы на
+    `m gane`, где никакая игла уже не совпадёт. `catalog/harvest_queries.yaml` тянет оба
+    написания (`Citroen C4` и `Citroën C4`), и сходиться они обязаны в одну строку.
+    Побочный эффект NFKD принят: `й` тоже сводится к `и` — иглы проходят через эту же
+    функцию, поэтому обе стороны сравнения искажаются одинаково.
+
     Кириллица сохраняется: на Commons есть `ВАЗ-2114`, и таблица игл имеет право на
-    кириллическую иглу. `ё` сводится к `е` той же подготовкой, что у загрузчика
-    `catalog/aliases.yaml`, — иначе одинаковые по смыслу ключи в двух местах проекта
-    вели бы себя по-разному.
+    кириллическую иглу.
     """
     текст = urllib.parse.unquote(raw)
     текст = текст.rsplit("/wiki/", 1)[-1]
     текст = текст.removeprefix("File:")
     текст = _РАСШИРЕНИЕ.sub("", текст)
-    текст = текст.lower().replace("ё", "е")
+    текст = strip_diacritics(текст).lower()
     return " ".join(_НЕ_БУКВА_И_НЕ_ЦИФРА.sub(" ", текст).split())
 
 
@@ -58,7 +66,8 @@ def matches_needle(name: str, needle: str) -> bool:
             continue
         if окно[-1] == последний:
             return True
-        остаток = окно[-1][len(последний) :]
-        if хвост_разрешён and окно[-1].startswith(последний) and остаток.isdigit():
-            return True
+        if хвост_разрешён and окно[-1].startswith(последний):
+            остаток = окно[-1][len(последний) :]
+            if остаток.isdigit():
+                return True
     return False

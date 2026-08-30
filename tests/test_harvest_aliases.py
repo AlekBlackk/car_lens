@@ -1,3 +1,7 @@
+"""Тесты нормализатора имён файлов Commons и правила совпадения игл моделей."""
+
+from __future__ import annotations
+
 import pytest
 
 from pipeline.harvest.aliases import matches_needle, normalize_filename
@@ -13,6 +17,9 @@ from pipeline.harvest.aliases import matches_needle, normalize_filename
         ),
         ("File:ВАЗ-2114_ёлка.JPEG", "ваз 2114 елка"),
         ("File:Chery_A15__front..png", "chery a15 front"),
+        ("File:Renault_M%C3%A9gane_II.jpg", "renault megane ii"),
+        ("File:Škoda_Octavia_III.jpg", "skoda octavia iii"),
+        ("File:Citro%C3%ABn_C4_front.jpg", "citroen c4 front"),
     ],
 )
 def test_нормализация_имени(сырое: str, ожидание: str) -> None:
@@ -32,6 +39,9 @@ def test_нормализация_имени(сырое: str, ожидание: 
         ("2114", "lada 21145 tuning", False),
         ("samara 2", "lada samara baltic blue", False),
         ("cressida", "1984 toyota cressida mx73 glx", True),
+        ("", "lada 2114 tuning", False),
+        ("lada samara sedan", "lada samara", False),
+        ("ваз 2114", "ваз 2114 елка", True),
     ],
 )
 def test_правило_совпадения(игла: str, имя: str, ожидание: bool) -> None:

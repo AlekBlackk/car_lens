@@ -150,13 +150,19 @@ def _карта_по_подготовленным_ключам(таблица: M
     return карта
 
 
-def _снять_диакритику(текст: str) -> str:
+def strip_diacritics(текст: str) -> str:
+    """Снять диакритику: `Mégane` → `Megane`, `ё` → `е`, `й` → `и` (правило 1 §3.3).
+
+    Публичная, а не приватная: той же подготовкой обязан пользоваться нормализатор имён
+    файлов Commons (`pipeline/harvest/aliases.py`), иначе ключ таблицы игл и имя файла
+    сворачивались бы по-разному и `Citroën` не нашёлся бы по игле `citroen`.
+    """
     return "".join(c for c in unicodedata.normalize("NFKD", текст) if not unicodedata.combining(c))
 
 
 def _подготовить(сырое: str) -> str:
     """Правило 1 §3.3: нижний регистр, диакритика, схлопывание пробелов."""
-    текст = _снять_диакритику(сырое).lower()
+    текст = strip_diacritics(сырое).lower()
     текст = re.sub(r"[_/]+", " ", текст)
     return re.sub(r"\s+", " ", текст).strip()
 
@@ -223,7 +229,7 @@ def model_core(raw: str) -> tuple[str, str | None]:
 
 def _ключ_сравнения(текст: str) -> str:
     """Свести к сравнимому виду: только буквы и цифры."""
-    return re.sub(r"[^a-z0-9]+", "", _снять_диакритику(текст).lower())
+    return re.sub(r"[^a-z0-9]+", "", strip_diacritics(текст).lower())
 
 
 def _варианты_ключа(подготовленное: str, ядро: str) -> Iterator[str]:
