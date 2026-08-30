@@ -20,7 +20,9 @@ from __future__ import annotations
 import re
 import urllib.parse
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
@@ -150,3 +152,87 @@ def _иглы_класса(path: Path, class_id: str, сырые_иглы: objec
     if not иглы:
         raise AliasesError(f"{path}: у {class_id} нет ни одной годной иглы")
     return tuple(иглы)
+
+
+@dataclass(frozen=True, slots=True)
+class AliasVerdict:
+    """Что имя файла говорит о принадлежности кадра классу."""
+
+    kind: Literal["own", "foreign", "unknown"]
+    foreign: tuple[str, ...] = ()
+
+
+def alias_verdict(name: str, class_id: str, table: AliasTable) -> AliasVerdict:
+    """Три состояния, а не `bool`.
+
+    Разница между «имя молчит» и «имя называет соседний класс каталога» — это разница
+    между работой человека и работой программы: во втором случае свидетельство
+    однозначно, и человеку нечего добавить к слову `cressida` в имени файла.
+
+    Своя игла старше чужой: имя, называющее оба класса, остаётся своим — соседнее имя
+    рядом со своим не свидетельство, а контекст («lx570 против land cruiser»).
+
+    Класс вне таблицы роняет `KeyError`, а не считается `unknown`: молчаливый пропуск
+    означал бы фильтр, посчитанный не по тому классу.
+    """
+    if any(matches_needle(name, игла) for игла in table[class_id]):
+        return AliasVerdict("own")
+    чужие = tuple(
+        сосед
+        for сосед, иглы in sorted(table.items())
+        if сосед != class_id and any(matches_needle(name, игла) for игла in иглы)
+    )
+    return AliasVerdict("foreign", чужие) if чужие else AliasVerdict("unknown")
+
+
+def needle_conflicts(table: AliasTable) -> list[tuple[str, str, str]]:
+    """Взаимно неразличимые иглы двух классов. Пустой список — таблица годна (`G_AL1`).
+
+    Блокирует только симметрия: если игла одного класса ловит иглу другого И наоборот,
+    классы неразличимы по имени, и вердикт `foreign` теряет смысл в обе стороны.
+
+    Асимметрия сюда не попадает намеренно, и это не поблажка. ASX в США зовут «Outlander
+    Sport», а Outlander — отдельный класс каталога: игла «outlander» ловит «outlander
+    sport», но не наоборот. Запрет асимметрии заставил бы выкинуть более конкретную иглу
+    и потерять живые кадры ASX, тогда как при живой игле своя всё равно старше чужой
+    (`alias_verdict`), и вердикт получается верным без всякого запрета. Асимметричные
+    пары попадают в `broad_needles` — на глаз человеку, не в блокировку.
+    """
+    конфликты: list[tuple[str, str, str]] = []
+    имена = sorted(table)
+    for i, первый in enumerate(имена):
+        for второй in имена[i + 1 :]:
+            for игла in table[первый]:
+                if any(
+                    matches_needle(игла, чужая) and matches_needle(чужая, игла)
+                    for чужая in table[второй]
+                ):
+                    конфликты.append((первый, второй, игла))
+    return конфликты
+
+
+def broad_needles(table: AliasTable) -> list[tuple[str, str, str]]:
+    """Иглы, накрывающие более конкретную иглу соседа. Не блокируют, но требуют взгляда.
+
+    Голая «niva» у Chevrolet накрывает «niva 2131» у Lada. Само по себе это законно —
+    своя игла старше чужой, — но опасно в паре с неполнотой: если у `lada__niva_2131`
+    иглы не покрывают файл «lada niva 32545538318», сработает чужая «niva», и живой
+    кадр уйдёт в автоматический дроп. Ровно так выглядели 23 строки этого класса в
+    прогоне `b51eb38`. Список идёт в отчёт, чтобы человек проверил полноту своей
+    стороны, а не чтобы запретить широкую иглу.
+    """
+    широкие: list[tuple[str, str, str]] = []
+    for класс, иглы in sorted(table.items()):
+        for игла in иглы:
+            for сосед, чужие in sorted(table.items()):
+                if сосед == класс:
+                    continue
+                накрывает = any(
+                    чужая != игла
+                    and matches_needle(чужая, игла)
+                    and not matches_needle(игла, чужая)
+                    for чужая in чужие
+                )
+                if накрывает:
+                    широкие.append((класс, игла, сосед))
+    return широкие

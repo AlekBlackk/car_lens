@@ -8,8 +8,12 @@ import pytest
 
 from pipeline.harvest.aliases import (
     AliasesError,
+    AliasVerdict,
+    alias_verdict,
+    broad_needles,
     load_alias_table,
     matches_needle,
+    needle_conflicts,
     normalize_filename,
 )
 
@@ -142,3 +146,74 @@ def test_тело_класса_не_отображение_отвергаетс�
     тело = 'version: 1\nclasses:\n  lada__granta: "Granta"\n'
     with pytest.raises(AliasesError, match="lada__granta"):
         load_alias_table(_таблица(tmp_path, тело))
+
+
+_ТАБЛИЦА = {
+    "lexus__lx": ("lx", "lx570"),
+    "toyota__land_cruiser": ("land cruiser", "fj62v"),
+    "lada__samara": ("2108", "2109"),
+    "lada__samara_2": ("2113", "2114", "2115"),
+}
+
+
+def test_вердикт_свой_класс() -> None:
+    вердикт = alias_verdict("2019 lexus lx570 front", "lexus__lx", _ТАБЛИЦА)
+    assert вердикт.kind == "own"
+    assert вердикт.foreign == ()
+
+
+def test_вердикт_чужой_класс_называет_его_поимённо() -> None:
+    """Ровно этот случай — 21 строка `lexus__lx`, названная Land Cruiser."""
+    вердикт = alias_verdict("1982 toyota land cruiser bj41", "lexus__lx", _ТАБЛИЦА)
+    assert вердикт.kind == "foreign"
+    assert вердикт.foreign == ("toyota__land_cruiser",)
+
+
+def test_вердикт_ничего_не_совпало() -> None:
+    вердикт = alias_verdict("img 0412", "lexus__lx", _ТАБЛИЦА)
+    assert вердикт.kind == "unknown"
+    assert вердикт.foreign == ()
+
+
+def test_своя_игла_побеждает_чужую() -> None:
+    """Имя, называющее оба класса, остаётся своим: чужое имя рядом со своим — контекст."""
+    вердикт = alias_verdict("lexus lx570 vs land cruiser", "lexus__lx", _ТАБЛИЦА)
+    assert вердикт.kind == "own"
+
+
+def test_класс_вне_таблицы_это_ошибка() -> None:
+    with pytest.raises(KeyError):
+        alias_verdict("что угодно", "нет__такого", _ТАБЛИЦА)
+
+
+def test_конфликтов_в_чистой_таблице_нет() -> None:
+    assert needle_conflicts(_ТАБЛИЦА) == []
+    assert broad_needles(_ТАБЛИЦА) == []
+
+
+def test_одинаковая_игла_у_двух_классов_это_конфликт() -> None:
+    """Взаимно неразличимые иглы делают вердикт `foreign` бессмысленным в обе стороны."""
+    таблица = {"chevrolet__niva": ("niva",), "lada__niva_2121": ("niva",)}
+    assert needle_conflicts(таблица) == [("chevrolet__niva", "lada__niva_2121", "niva")]
+
+
+def test_широкая_игла_соседа_не_блокирует_но_видна() -> None:
+    """Голая «niva» накрывает «niva 2131»: не симметрия, а повод человеку взглянуть."""
+    таблица = {"chevrolet__niva": ("niva",), "lada__niva_2131": ("niva 2131", "21310")}
+    assert needle_conflicts(таблица) == []
+    assert broad_needles(таблица) == [("chevrolet__niva", "niva", "lada__niva_2131")]
+
+
+def test_более_конкретная_игла_соседа_законна() -> None:
+    """ASX в США зовут Outlander Sport. Запрещать это значило бы терять живые кадры."""
+    таблица = {
+        "mitsubishi__asx": ("asx", "outlander sport"),
+        "mitsubishi__outlander": ("outlander",),
+    }
+    assert needle_conflicts(таблица) == []
+    assert (
+        alias_verdict("2012 mitsubishi outlander sport es", "mitsubishi__asx", таблица).kind
+        == "own"
+    )
+    чужой = alias_verdict("mitsubishi outlander phev", "mitsubishi__asx", таблица)
+    assert чужой == AliasVerdict("foreign", ("mitsubishi__outlander",))
