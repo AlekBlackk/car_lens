@@ -12,7 +12,7 @@ from pipeline.harvest.manifest import load_manifest
 from pipeline.harvest.queries import ClassQueries
 from pipeline.harvest.run import HarvestDeps, harvest_class, process_candidate
 from pipeline.harvest.sources import Candidate, SearchPage, SourceQuery
-from pipeline.harvest.state import ACCEPTED_TARGET, HarvestState
+from pipeline.harvest.state import ACCEPTED_TARGET, SEEN_BUDGET, HarvestState
 
 
 def _jpeg(ширина: int = 1200, высота: int = 900, seed: int = 0) -> bytes:
@@ -199,7 +199,7 @@ def test_повтор_отсекается_дедупом(tmp_path: Path) -> Non
 
 
 def test_прогон_класса_останавливается_на_бюджете(tmp_path: Path) -> None:
-    """Стоп по 200 просмотренным: источник бесконечен, прогон — нет."""
+    """Стоп по бюджету просмотренных: источник бесконечен, прогон — нет."""
     страницы = [
         SearchPage(
             tuple(_кандидат(source_item_id=f"{p}_{n}", width=400) for n in range(50)),
@@ -215,9 +215,9 @@ def test_прогон_класса_останавливается_на_бюдж�
         состояние,
         DedupIndex(),
     )
-    assert итог.seen == 200
+    assert итог.seen == SEEN_BUDGET
     assert итог.accepted == 0
-    assert итог.rejects["too_small_file"] == 200
+    assert итог.rejects["too_small_file"] == SEEN_BUDGET
 
 
 def test_прогон_класса_останавливается_на_цели(tmp_path: Path) -> None:
