@@ -73,6 +73,20 @@ def test_загрузка_нормализует_иглы(tmp_path: Path) -> Non
     assert таблица["toyota__mark_2"] == ("mark ii", "cressida")
 
 
+def test_загрузка_дедуплицирует_иглы_совпавшие_после_нормализации(tmp_path: Path) -> None:
+    """Две записи, отличающиеся только регистром или диакритикой, — законная ручная правка.
+
+    Без дедупликации одна и та же тройка попадает в отчёты `needle_conflicts` и
+    `broad_needles` дважды. Порядок первых появлений сохраняется: он идёт человеку.
+    """
+    тело = (
+        "version: 1\nclasses:\n  citroen__c4:\n"
+        '    needles: ["Citroen C4", "C4 Picasso", "Citroën C4", "CITROEN C4"]\n'
+    )
+    таблица = load_alias_table(_таблица(tmp_path, тело))
+    assert таблица["citroen__c4"] == ("citroen c4", "c4 picasso")
+
+
 def test_чужая_версия_отвергается(tmp_path: Path) -> None:
     путь = _таблица(tmp_path, "version: 2\nclasses: {}\n")
     with pytest.raises(AliasesError, match="version"):
@@ -217,3 +231,46 @@ def test_более_конкретная_игла_соседа_законна() 
     )
     чужой = alias_verdict("mitsubishi outlander phev", "mitsubishi__asx", таблица)
     assert чужой == AliasVerdict("foreign", ("mitsubishi__outlander",))
+
+
+def test_вердикт_foreign_полон_и_упорядочен() -> None:
+    """Неполный `foreign` дал бы автодроп задачи 6 на неоднозначной строке.
+
+    Автоматический дроп разрешён только при `foreign` ровно с одним чужим классом, поэтому
+    потерянный второй класс превратил бы неоднозначное имя в основание для дропа. Порядок
+    кортежа лексикографический, а не порядок правок в YAML: он идёт человеку в отчёт.
+    """
+    таблица = {
+        "toyota__land_cruiser": ("land cruiser",),
+        "lada__niva_2121": ("niva 2121",),
+        "lexus__lx": ("lx570",),
+    }
+    вердикт = alias_verdict("lada niva 2121 vs toyota land cruiser", "lexus__lx", таблица)
+    assert вердикт.kind == "foreign"
+    assert вердикт.foreign == ("lada__niva_2121", "toyota__land_cruiser")
+
+
+def test_три_класса_с_одной_иглой_дают_все_три_пары() -> None:
+    """Выдача полная и упорядочена лексикографически по паре классов."""
+    таблица = {
+        "lada__niva_2121": ("niva",),
+        "chevrolet__niva": ("niva",),
+        "vaz__niva_travel": ("niva",),
+    }
+    assert needle_conflicts(таблица) == [
+        ("chevrolet__niva", "lada__niva_2121", "niva"),
+        ("chevrolet__niva", "vaz__niva_travel", "niva"),
+        ("lada__niva_2121", "vaz__niva_travel", "niva"),
+    ]
+
+
+def test_вердикт_пустого_имени_это_unknown() -> None:
+    """Пустое имя не ошибка, а `unknown`: свидетельствовать ему нечем."""
+    assert alias_verdict("", "lexus__lx", _ТАБЛИЦА) == AliasVerdict("unknown", ())
+
+
+def test_таблица_из_одного_класса_чиста() -> None:
+    """Сравнивать не с кем: ни конфликтов, ни широких игл."""
+    таблица = {"chevrolet__niva": ("niva",)}
+    assert needle_conflicts(таблица) == []
+    assert broad_needles(таблица) == []
