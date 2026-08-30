@@ -146,8 +146,13 @@ def sha256_of_file(path: Path) -> str:
     return хеш.hexdigest()
 
 
-def _kmeans_factory(seed: int) -> Callable[[np.ndarray, int], np.ndarray]:
-    """k-means с фиксированным сидом: две сборки на одних весах дают один файл."""
+def kmeans_factory(seed: int) -> Callable[[np.ndarray, int], np.ndarray]:
+    """k-means с фиксированным сидом: две сборки на одних весах дают один файл.
+
+    Функция публичная потому, что тот же детерминированный k-means нужен few-shot сборке
+    индекса (`scripts/build_fewshot_index.py`): вторая копия сравнивала бы заодно две
+    реализации кластеризации.
+    """
     from sklearn.cluster import KMeans
 
     def kmeans(эмбеддинги: np.ndarray, k: int) -> np.ndarray:
@@ -225,7 +230,7 @@ def main() -> None:
         метки,
         num_classes=len(индекс),
         centroids_per_class=CENTROIDS_PER_CLASS,
-        kmeans=_kmeans_factory(int(конфиг["seed"])),
+        kmeans=kmeans_factory(int(конфиг["seed"])),
     )
 
     каталог_вывода = аргументы.out or аргументы.checkpoint.parent / "index"
