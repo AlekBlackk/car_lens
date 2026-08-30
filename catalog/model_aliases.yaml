@@ -21,9 +21,9 @@ classes:
   bmw__x5:
     needles: ["e53", "e70", "f15", "g05", "x5"]
   changan__cs35_plus:
-    needles: ["cs35 plus"]
+    needles: ["cs35 plus", "cs35plus"]
   changan__cs55_plus:
-    needles: ["cs55 plus"]
+    needles: ["cs55 plus", "cs55plus"]
   chery__amulet:
     needles: ["a15", "amulet", "cowin"]
   chery__tiggo_4:
@@ -69,11 +69,11 @@ classes:
   ford__transit:
     needles: ["tourneo custom", "transit", "transit custom"]
   gaz__gazel:
-    needles: ["gazel", "gazel next", "gazelle", "gazelle next"]
+    needles: ["3302", "330232", "gazel", "gazel next", "gazelle", "gazelle next"]
   gaz__sobol:
-    needles: ["sobol", "sobol nn"]
+    needles: ["2752", "sobol", "sobol nn"]
   gaz__volga_3110:
-    needles: ["3110", "31105", "volga", "volga 3110 31105"]
+    needles: ["3110", "31105", "volga"]
   geely__emgrand:
     needles: ["ec7", "emgrand"]
   geely__monjaro:
@@ -141,11 +141,11 @@ classes:
   lada__2104:
     needles: ["2104", "21043", "21047", "vaz 2104"]
   lada__2106:
-    needles: ["2106", "21061", "21063", "21065", "vaz 2106"]
+    needles: ["2106", "21060", "21061", "21063", "21065", "vaz 2106"]
   lada__2107:
     needles: ["2107", "21074", "vaz 2107"]
   lada__2110:
-    needles: ["110", "111", "112", "2110", "2111", "2112", "vaz 2110", "vaz 2111", "vaz 2112"]
+    needles: ["2110", "21101", "21104", "21104m", "21108", "21108040", "2111", "21112", "2112", "21121", "21124", "vaz 2110", "vaz 2111", "vaz 2112"]
   lada__granta:
     needles: ["2190", "2191", "2192", "2194", "granta", "vaz 2190"]
   lada__kalina:
@@ -159,11 +159,11 @@ classes:
   lada__niva_travel:
     needles: ["niva travel"]
   lada__priora:
-    needles: ["2170", "2171", "2172", "priora", "vaz 2170"]
+    needles: ["2170", "217030", "217050", "2171", "2172", "217230", "priora", "vaz 2170"]
   lada__samara:
-    needles: ["2108", "2109", "21099", "samara hanseat", "vaz 2108", "vaz 2109", "vaz 21099"]
+    needles: ["2108", "21083", "2109", "21099", "samara 1 5l", "samara 1500", "samara 1500s", "samara hanseat", "vaz 2108", "vaz 2109", "vaz 21099"]
   lada__samara_2:
-    needles: ["2113", "2114", "2115", "samara 2", "vaz 2113", "vaz 2114", "vaz 2115"]
+    needles: ["2113", "21130", "211340", "2114", "21140", "2115", "samara 2", "vaz 2113", "vaz 2114", "vaz 2115"]
   lada__vesta:
     needles: ["vesta", "vesta cross", "vesta sw"]
   lada__xray:
@@ -173,9 +173,9 @@ classes:
   lexus__lx:
     needles: ["lx"]
   lexus__nx:
-    needles: ["nx"]
+    needles: ["nx", "nx200t", "nx300h"]
   lexus__rx:
-    needles: ["harrier", "rx"]
+    needles: ["harrier", "rx", "rx400h", "rx450h"]
   lifan__solano:
     needles: ["620", "solano"]
   lifan__x60:
@@ -203,7 +203,7 @@ classes:
   mitsubishi__pajero:
     needles: ["montero", "pajero", "shogun"]
   moskvich__2140:
-    needles: ["1500 sl", "2140", "azlk 2140", "moskvitch 2140"]
+    needles: ["1500 sl", "2140", "azlk 2140", "moskvich 1 5 sl", "moskvich 1500", "moskvitch 2140"]
   moskvich__2141:
     needles: ["2141", "aleko", "azlk 2141", "moskvitch 2141", "svyatogor"]
   nissan__almera:
@@ -293,7 +293,7 @@ classes:
   uaz__patriot:
     needles: ["3163", "patriot"]
   uaz__pickup:
-    needles: ["23632", "patriot pickup", "uaz pickup"]
+    needles: ["23632", "patriot pickup", "uaz 2363", "uaz pickup"]
   volkswagen__golf:
     needles: ["golf", "vw golf"]
   volkswagen__passat:
