@@ -201,8 +201,6 @@ def process_candidate(
         return "conflict", None
     if решение_дедуп.status == "duplicate":
         return "duplicate", None
-    if решение_дедуп.status == "supersede":
-        _записать_вердикт(deps.dedup_verdicts_path, решение_дедуп.other, "drop:superseded")
 
     sha = digest(данные)
     путь = crop_path(deps.root, candidate.class_id, sha)
@@ -216,6 +214,11 @@ def process_candidate(
         if not удалось:
             return "write_failed", None
         путь.write_bytes(буфер.tobytes())
+    if решение_дедуп.status == "supersede":
+        # После записи файла, не до: если бы `imwrite`/`imencode` оба провалились и функция
+        # вернула `write_failed`, старая строка уже была бы приговорена `drop:superseded`,
+        # а новой строки взамен не появилось бы — потеря обеих сторон вместо одной.
+        _записать_вердикт(deps.dedup_verdicts_path, решение_дедуп.other, "drop:superseded")
     dedup.add(хеш, candidate.class_id, путь.name, candidate.basis)
 
     тир = tier_of(candidate.license_raw)

@@ -254,6 +254,27 @@ def test_спор_двух_категорий_помечает_старую_ст
     assert load_audit(вердикты) == {"a.jpg": "conflict"}
 
 
+def test_провал_записи_после_вытеснения_не_теряет_обе_строки(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Если кроп не записался, вердикт `drop:superseded` не должен ставиться заранее:
+    иначе `write_failed` терял бы и старую строку (снесена вердиктом), и новую
+    (не появилась) вместо одной.
+    """
+    вердикты = tmp_path / "verdicts.dedup.csv"
+    хеш = _хеш_кадра(tmp_path)
+    monkeypatch.setattr(cv2, "imwrite", lambda *_: False)
+    monkeypatch.setattr(cv2, "imencode", lambda *_: (False, None))
+    deps = _зависимости(tmp_path, dedup_verdicts_path=вердикты)
+    дедуп = DedupIndex()
+    дедуп.add(хеш, "daewoo__lanos", "a.jpg", "search:lanos")
+
+    причина, строка = process_candidate(_кандидат(basis="category:Chevrolet Lanos"), deps, дедуп)
+
+    assert (причина, строка) == ("write_failed", None)
+    assert not вердикты.exists(), "старую строку нельзя приговаривать без новой взамен"
+
+
 def test_прогон_класса_останавливается_на_бюджете(tmp_path: Path) -> None:
     """Стоп по бюджету просмотренных: источник бесконечен, прогон — нет."""
     страницы = [

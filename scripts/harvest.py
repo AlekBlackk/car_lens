@@ -56,6 +56,9 @@ from pipeline.harvest.tiling import TiledDetector
 from pipeline.paths import harvest_dir
 
 REPORT_PATH = Path(__file__).resolve().parent.parent / "bench" / "harvest-m0.md"
+# Имя файла завязано в двух местах: сборщик пишет решения дедупа сюда (`HarvestDeps`),
+# аудит читает их отсюда же (§8 дизайна). Разные литералы разошлись бы молча.
+DEDUP_VERDICTS_FILENAME = "verdicts.dedup.csv"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,7 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
     парсер.add_argument(
         "--report-only",
         action="store_true",
-        help="не собирать, только пересобрать bench/NOTICES из манифеста",
+        help=(
+            "не собирать; пересобрать bench/NOTICES из манифеста, применив накопленные "
+            "вердикты дедупа и --audit к манифесту"
+        ),
     )
     return парсер
 
@@ -159,7 +165,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             alias_rejects_path=корень / "alias_rejects.csv",
             reject_log_path=корень / "reject_log.csv",
             expand_categories=развернуть,
-            dedup_verdicts_path=корень / "verdicts.dedup.csv",
+            dedup_verdicts_path=корень / DEDUP_VERDICTS_FILENAME,
         )
 
         состояние = load_state(корень / "state.json")
@@ -186,7 +192,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # бы автоматика шла последней, она перебивала бы человека, и кадр, снесённый дедупом
     # (`drop:superseded`), человек не смог бы вернуть своим `ok` — тот переписывался бы на
     # каждом прогоне.
-    файл_дедупа = корень / "verdicts.dedup.csv"
+    файл_дедупа = корень / DEDUP_VERDICTS_FILENAME
     пути_вердиктов = [файл_дедупа] if файл_дедупа.exists() else []
     пути_вердиктов += [Path(п) for п in (аргументы.audit or [])]
     if пути_вердиктов:

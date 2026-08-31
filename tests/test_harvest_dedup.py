@@ -95,6 +95,36 @@ def test_свой_класс_остаётся_дублем() -> None:
     assert индекс.check(0, "kia__rio", "category:Kia Rio").status == "duplicate"
 
 
+def test_тот_же_снимок_в_двух_классах_это_конфликт() -> None:
+    """Одна фотография в двух классах — улика ошибки разметки, а не дубль."""
+    индекс = DedupIndex()
+    индекс.add(0, "lada__granta", "a.jpg", "category:Lada Granta")
+    вердикт = индекс.check(0b11, "uaz__patriot", "category:UAZ Patriot")
+    assert вердикт.status == "conflict"
+    assert вердикт.other == "a.jpg"
+
+
+def test_оба_поисковых_спорят_и_уходят_человеку() -> None:
+    индекс = DedupIndex()
+    индекс.add(0, "daewoo__lanos", "a.jpg", "search:Daewoo Lanos")
+
+    вердикт = индекс.check(0, "chevrolet__lanos", "search:Chevrolet Lanos")
+
+    assert (вердикт.status, вердикт.other) == ("conflict", "a.jpg")
+
+
+def test_свой_класс_выигрывает_у_чужеклассового_supersede() -> None:
+    """После `supersede` в индексе рядом лежат старая чужая запись и новая своя: следующий
+    свой дубль обязан упереться в свою запись, а не вечно вытеснять чужую."""
+    индекс = DedupIndex()
+    индекс.add(0, "daewoo__lanos", "a.jpg", "search:Daewoo Lanos")
+    индекс.add(0, "chevrolet__lanos", "b.jpg", "category:Chevrolet Lanos")
+
+    вердикт = индекс.check(0, "chevrolet__lanos", "category:Chevrolet Lanos")
+
+    assert (вердикт.status, вердикт.other) == ("duplicate", "b.jpg")
+
+
 def test_засев_из_манифеста_видит_прошлые_прогоны() -> None:
     строка = _строка(file="a.jpg", class_id="daewoo__lanos", phash=0, basis="search:lanos")
 
