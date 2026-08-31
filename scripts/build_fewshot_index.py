@@ -80,19 +80,22 @@ def check_full_coverage(
     groups: Sequence[tuple[int, list[Path]]],
     num_classes: int,
     idx_to_class_id: Mapping[int, str],
-) -> None:
+    *,
+    allow_missing: bool = False,
+) -> tuple[str, ...]:
     """Все классы каталога представлены в сплите.
 
     Отказ с именами, а не молчаливый пустой слот: `stack_centroids` упал бы на номере
     класса, по которому не понять, какой класс чинить и чем.
     """
     есть = {номер for номер, _ in groups}
-    нет = [idx_to_class_id[номер] for номер in range(num_classes) if номер not in есть]
-    if нет:
+    нет = tuple(idx_to_class_id[номер] for номер in range(num_classes) if номер not in есть)
+    if нет and not allow_missing:
         raise BuildFewShotError(
             f"классов без кадров в сплите: {len(нет)} ({', '.join(нет[:5])}); "
             "эталон забрал всё — поднимать POOL_RESERVE в `pipeline/holdout.py`"
         )
+    return нет
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -119,7 +122,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     кадр = read_split(splits_dir() / f"{аргументы.split}.parquet")
     группы = crops_by_class(кадр, harvest_dir() / "crops")
-    check_full_coverage(группы, len(индекс), по_индексу)
+    дефицитные = check_full_coverage(группы, len(индекс), по_индексу, allow_missing=True)
+    if дефицитные:
+        print(f"дефицит (уходят в синтетический слой): {', '.join(дефицитные)}", flush=True)
 
     модель, _, препроцесс = open_clip.create_model_and_transforms(
         ENCODER_ARCH, pretrained=ENCODER_WEIGHTS
@@ -142,6 +147,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         num_classes=len(индекс),
         centroids_per_class=CENTROIDS_PER_CLASS,
         kmeans=kmeans_factory(int(аргументы.seed)),
+        allow_empty=True,
     )
 
     вывод = аргументы.out or index_dir()

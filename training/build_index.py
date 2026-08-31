@@ -63,6 +63,7 @@ def stack_centroids(
     num_classes: int,
     centroids_per_class: int,
     kmeans: Callable[[np.ndarray, int], np.ndarray],
+    allow_empty: bool = False,
 ) -> np.ndarray:
     """Центроиды всех классов: `(num_classes, centroids_per_class, dim)`."""
     вне_диапазона = [метка for метка in np.unique(labels) if not 0 <= int(метка) < num_classes]
@@ -72,6 +73,8 @@ def stack_centroids(
     for класс in range(num_classes):
         свои = embeddings[labels == класс]
         if len(свои) == 0:
+            if allow_empty:
+                continue
             raise BuildIndexError(f"класс {класс} без эталонов в выборке")
         сложенные[класс] = centroids_for_class(
             свои, centroids_per_class=centroids_per_class, kmeans=kmeans
