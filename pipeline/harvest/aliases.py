@@ -335,7 +335,7 @@ def append_reject(path: Path, reject: AliasReject) -> None:
     никогда. По журналу задача C чистит `state.json` и пополняет иглы.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    новый = not path.exists()
+    новый = not path.exists() or path.stat().st_size == 0
     with path.open("a", encoding="utf-8", newline="") as файл:
         писатель = csv.DictWriter(файл, fieldnames=list(REJECT_COLUMNS))
         if новый:

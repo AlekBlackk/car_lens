@@ -89,7 +89,7 @@ def strip_html(value: str) -> str:
 def append_row(path: Path, row: HarvestRow) -> None:
     """Дописать строку, создав файл с шапкой при первом вызове."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    новый = not path.exists()
+    новый = not path.exists() or path.stat().st_size == 0
     with path.open("a", encoding="utf-8", newline="") as файл:
         писатель = csv.DictWriter(файл, fieldnames=list(COLUMNS))
         if новый:

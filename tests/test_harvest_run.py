@@ -457,3 +457,11 @@ def test_отказ_попадает_в_журнал(tmp_path: Path) -> None:
     harvest_class(ClassQueries("lada__granta", (), ("Lada Granta",)), deps, состояние, DedupIndex())
 
     assert [с.reason for с in load_rejects(журнал)] == ["too_small_file"]
+    # Basis в строке — кандидата, а не запроса: запрос здесь текстовый (`search:Lada Granta`),
+    # и подмена одного другим прошла бы проверку одной причины молча.
+    отказ = load_rejects(журнал)[0]
+    assert (отказ.class_id, отказ.basis, отказ.checked) == (
+        "lada__granta",
+        "category:Lada Granta",
+        "2026-08-28",
+    )

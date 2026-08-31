@@ -51,3 +51,34 @@ def test_счётчик_причин_складывает_прогоны(tmp_pat
         )
 
     assert reason_counts(load_rejects(путь)) == {"http": 2, "not_a_car_photo": 1}
+
+
+def test_запись_в_обрезанный_журнал_не_теряет_строку(tmp_path: Path) -> None:
+    """Ротации у журнала нет, и укорачивают его `> reject_log.csv`: файл есть, шапки нет.
+
+    Без проверки размера первая же дописанная строка стала бы шапкой, а `load_rejects` вернул
+    бы пустой список без единой ошибки — ровно та непродиагностируемая пустота, против которой
+    журнал и заведён.
+    """
+    путь = tmp_path / "reject_log.csv"
+    путь.touch()
+
+    append_reject_row(
+        путь,
+        Reject(
+            class_id="kia__rio",
+            basis="category:Kia Rio",
+            source="commons",
+            source_item_id="1",
+            reason="http",
+            checked="2026-08-31",
+        ),
+    )
+
+    assert [с.reason for с in load_rejects(путь)] == ["http"]
+    assert путь.read_text(encoding="utf-8").splitlines()[0].startswith("class_id,")
+
+
+def test_отсутствующий_журнал_читается_пустым(tmp_path: Path) -> None:
+    """До первого отказа файла нет, и это не ошибка чтения."""
+    assert load_rejects(tmp_path / "reject_log.csv") == []

@@ -66,6 +66,19 @@ def test_шапка_пишется_один_раз(tmp_path: Path) -> None:
     assert путь.read_text(encoding="utf-8").count("class_id") == 1
 
 
+def test_запись_в_обрезанный_манифест_не_теряет_строку(tmp_path: Path) -> None:
+    """Файл нулевой длины — файл без шапки: провенанс не должен терять строки молча."""
+    путь = tmp_path / "harvest_manifest.csv"
+    путь.touch()
+
+    append_row(путь, _строка())
+
+    assert [c.strip() for c in путь.read_text(encoding="utf-8").splitlines()[0].split(",")] == list(
+        COLUMNS
+    )
+    assert [с.file for с in load_manifest(путь)] == ["ab.jpg"]
+
+
 def test_повтор_sha256_отвергается() -> None:
     with pytest.raises(ManifestError, match="повтор"):
         validate([_строка(), _строка(file="cd.jpg")], allow_sa=False)

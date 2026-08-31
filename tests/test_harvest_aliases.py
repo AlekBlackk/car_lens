@@ -7,9 +7,12 @@ from pathlib import Path
 import pytest
 
 from pipeline.harvest.aliases import (
+    REJECT_COLUMNS,
     AliasesError,
+    AliasReject,
     AliasVerdict,
     alias_verdict,
+    append_reject,
     broad_needles,
     load_alias_table,
     matches_needle,
@@ -274,3 +277,32 @@ def test_таблица_из_одного_класса_чиста() -> None:
     таблица = {"chevrolet__niva": ("niva",)}
     assert needle_conflicts(таблица) == []
     assert broad_needles(таблица) == []
+
+
+def test_запись_в_обрезанный_журнал_не_теряет_строку(tmp_path: Path) -> None:
+    """Файл нулевой длины (`> alias_rejects.csv`) — это файл без шапки.
+
+    Иначе первая дописанная строка молча становится шапкой, и по журналу, которым задача C
+    чистит `state.json`, нельзя восстановить ни один отказ.
+    """
+    путь = tmp_path / "alias_rejects.csv"
+    путь.touch()
+
+    append_reject(
+        путь,
+        AliasReject(
+            class_id="lada__granta",
+            basis="search:Lada Granta",
+            source="commons",
+            source_item_id="12345",
+            title="File:UAZ_Patriot_2019_front.jpg",
+            normalized="uaz patriot 2019 front",
+            verdict="foreign",
+            foreign="uaz__patriot",
+        ),
+    )
+
+    строки = путь.read_text(encoding="utf-8").splitlines()
+    assert tuple(строки[0].split(",")) == REJECT_COLUMNS
+    assert len(строки) == 2
+    assert строки[1].startswith("lada__granta,search:Lada Granta,")

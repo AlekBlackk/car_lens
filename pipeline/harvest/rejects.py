@@ -6,9 +6,11 @@
 стало нечем — §2.5 дизайна C1.
 
 Формат — CSV рядом с `alias_rejects.csv`. Дублирование с ним намеренное: там подробности
-вердикта игл, здесь единая линейка причин для отчёта. Тело `append_reject_row` тоже
-намеренно повторяет `aliases.append_reject`: выносить общий писатель значило бы связать два
-модуля обёрткой вокруг `csv.DictWriter` ради трёх строк.
+вердикта игл, здесь единая линейка причин для отчёта. Тело `append_reject_row` — третья копия
+одного и того же писателя (семь строк, как в `aliases.append_reject` и `manifest.append_row`):
+общий писатель здесь не выносится, чтобы не связывать модули обёрткой вокруг `csv.DictWriter`
+посреди этой задачи, но дублирование не бесплатно — сведение всех трёх в один модуль
+заведено отдельной задачей.
 """
 
 from __future__ import annotations
@@ -38,7 +40,9 @@ REJECT_COLUMNS = tuple(поле.name for поле in fields(Reject))
 def append_reject_row(path: Path, reject: Reject) -> None:
     """Дописать строку журнала, создав файл с шапкой при первом вызове."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    новый = not path.exists()
+    # Файл нулевой длины — файл без шапки: журнал укорачивают `> reject_log.csv`, и без
+    # проверки размера первая дописанная строка молча стала бы шапкой.
+    новый = not path.exists() or path.stat().st_size == 0
     with path.open("a", encoding="utf-8", newline="") as файл:
         писатель = csv.DictWriter(файл, fieldnames=list(REJECT_COLUMNS))
         if новый:
