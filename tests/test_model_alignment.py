@@ -56,16 +56,16 @@ def test_чужой_класс_ровно_один_уходит_в_автодр�
     строки = [_строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser_BJ41.jpg", "search:Lexus LX")]
     вердикты = triage(строки, _ТАБЛИЦА)
     assert [в.kind for в in вердикты] == ["foreign"]
-    assert [в.file for в in auto_drops(вердикты)] == ["a.jpg"]
-    assert review_queue(вердикты) == []
+    assert [в.file for в in auto_drops(вердикты, _ТАБЛИЦА)] == ["a.jpg"]
+    assert review_queue(вердикты, _ТАБЛИЦА) == []
 
 
 def test_молчащее_имя_уходит_человеку() -> None:
     строки = [_строка("b.jpg", "lexus__lx", "IMG_0412.jpg", "search:Lexus LX")]
     вердикты = triage(строки, _ТАБЛИЦА)
     assert [в.kind for в in вердикты] == ["unknown"]
-    assert auto_drops(вердикты) == []
-    assert [в.file for в in review_queue(вердикты)] == ["b.jpg"]
+    assert auto_drops(вердикты, _ТАБЛИЦА) == []
+    assert [в.file for в in review_queue(вердикты, _ТАБЛИЦА)] == ["b.jpg"]
 
 
 def test_два_чужих_класса_уходят_человеку() -> None:
@@ -73,16 +73,16 @@ def test_два_чужих_класса_уходят_человеку() -> None:
     строки = [_строка("c.jpg", "lexus__lx", "Lada_2108_and_2113_meet.jpg", "search:Lexus LX")]
     вердикты = triage(строки, _ТАБЛИЦА)
     assert вердикты[0].foreign == ("lada__samara", "lada__samara_2")
-    assert auto_drops(вердикты) == []
-    assert [в.file for в in review_queue(вердикты)] == ["c.jpg"]
+    assert auto_drops(вердикты, _ТАБЛИЦА) == []
+    assert [в.file for в in review_queue(вердикты, _ТАБЛИЦА)] == ["c.jpg"]
 
 
 def test_своё_имя_не_попадает_ни_в_один_список() -> None:
     строки = [_строка("d.jpg", "lexus__lx", "2019_Lexus_LX570.jpg", "search:Lexus LX")]
     вердикты = triage(строки, _ТАБЛИЦА)
     assert [в.kind for в in вердикты] == ["own"]
-    assert auto_drops(вердикты) == []
-    assert review_queue(вердикты) == []
+    assert auto_drops(вердикты, _ТАБЛИЦА) == []
+    assert review_queue(вердикты, _ТАБЛИЦА) == []
 
 
 def test_пустой_манифест_даёт_пустой_вердикт() -> None:
@@ -115,3 +115,47 @@ def test_порядок_вердиктов_повторяет_порядок_м�
         _строка("d.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX"),
     ]
     assert [в.file for в in triage(строки, _ТАБЛИЦА)] == ["c.jpg", "a.jpg", "d.jpg"]
+
+
+_ТАБЛИЦА_НИВЫ = {
+    "lada__niva_2121": ("2121", "niva", "vaz 2121"),
+    "lada__niva_2131": ("2131", "niva 2131", "vaz 2131"),
+}
+
+
+def test_широкая_игла_соседа_не_даёт_автомату_права() -> None:
+    """`Lada_Niva_2.jpg` в классе 2131: голая `niva` соседа шире всех своих игл."""
+    строки = [_строка("a.jpg", "lada__niva_2131", "Lada_Niva_2.jpg", "search:Lada Niva 2131")]
+    вердикты = triage(строки, _ТАБЛИЦА_НИВЫ)
+    assert (вердикты[0].kind, вердикты[0].foreign, вердикты[0].needle) == (
+        "foreign",
+        ("lada__niva_2121",),
+        "niva",
+    )
+    assert auto_drops(вердикты, _ТАБЛИЦА_НИВЫ) == []
+    assert [в.file for в in review_queue(вердикты, _ТАБЛИЦА_НИВЫ)] == ["a.jpg"]
+
+
+def test_узкая_чужая_игла_автомат_не_останавливает() -> None:
+    """Свидетельство однозначно: имя называет кузов соседа, а не общее слово."""
+    строки = [_строка("b.jpg", "lada__niva_2131", "VAZ_2121_Niva.jpg", "search:Lada Niva 2131")]
+    вердикты = triage(строки, _ТАБЛИЦА_НИВЫ)
+    assert вердикты[0].needle == "2121"
+    assert [в.file for в in auto_drops(вердикты, _ТАБЛИЦА_НИВЫ)] == ["b.jpg"]
+    assert review_queue(вердикты, _ТАБЛИЦА_НИВЫ) == []
+
+
+def test_три_списка_дают_полный_охват() -> None:
+    """`own` плюс автомат плюс очередь — все вердикты: иначе `G_AL2` нечем закрыть."""
+    строки = [
+        _строка("a.jpg", "lexus__lx", "2019_Lexus_LX570.jpg", "search:Lexus LX"),
+        _строка("b.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX"),
+        _строка("c.jpg", "lexus__lx", "IMG_0412.jpg", "search:Lexus LX"),
+        _строка("d.jpg", "lexus__lx", "Lada_2108_and_2113_meet.jpg", "search:Lexus LX"),
+    ]
+    вердикты = triage(строки, _ТАБЛИЦА)
+    свои = [в for в in вердикты if в.kind == "own"]
+    покрытие = (
+        len(свои) + len(auto_drops(вердикты, _ТАБЛИЦА)) + len(review_queue(вердикты, _ТАБЛИЦА))
+    )
+    assert покрытие == len(вердикты) == 4

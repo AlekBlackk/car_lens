@@ -167,10 +167,17 @@ AliasKind = Literal["own", "foreign", "unknown"]
 
 @dataclass(frozen=True, slots=True)
 class AliasVerdict:
-    """Что имя файла говорит о принадлежности кадра классу."""
+    """Что имя файла говорит о принадлежности кадра классу.
+
+    `needle` — игла, решившая вердикт: своя для `own`, игла первого чужого класса для
+    `foreign`, пустая строка для `unknown`. Без неё «почему сработало» приходится
+    восстанавливать руками, а именно этот вопрос и задаёт человек, разбирая очередь:
+    §14 спеки просит измерить качество таблицы игл, а не только число дропов.
+    """
 
     kind: AliasKind
     foreign: tuple[str, ...] = ()
+    needle: str = ""
 
 
 def alias_verdict(name: str, class_id: str, table: AliasTable) -> AliasVerdict:
@@ -191,14 +198,26 @@ def alias_verdict(name: str, class_id: str, table: AliasTable) -> AliasVerdict:
     Класс вне таблицы роняет `KeyError`, а не считается `unknown`: молчаливый пропуск
     означал бы фильтр, посчитанный не по тому классу.
     """
-    if any(matches_needle(name, игла) for игла in table[class_id]):
-        return AliasVerdict("own")
-    чужие = tuple(
-        сосед
-        for сосед, иглы in sorted(table.items())
-        if сосед != class_id and any(matches_needle(name, игла) for игла in иглы)
-    )
-    return AliasVerdict("foreign", чужие) if чужие else AliasVerdict("unknown")
+    своя = _первая_совпавшая(name, table[class_id])
+    if своя:
+        return AliasVerdict("own", (), своя)
+    чужие: list[str] = []
+    чужая_игла = ""
+    for сосед, иглы in sorted(table.items()):
+        if сосед == class_id:
+            continue
+        совпала = _первая_совпавшая(name, иглы)
+        if совпала:
+            чужие.append(сосед)
+            чужая_игла = чужая_игла or совпала
+    if чужие:
+        return AliasVerdict("foreign", tuple(чужие), чужая_игла)
+    return AliasVerdict("unknown")
+
+
+def _первая_совпавшая(имя: str, иглы: tuple[str, ...]) -> str:
+    """Первая совпавшая игла или пустая строка. Порядок игл в таблице нормализован."""
+    return next((игла for игла in иглы if matches_needle(имя, игла)), "")
 
 
 def needle_conflicts(table: AliasTable) -> list[tuple[str, str, str]]:

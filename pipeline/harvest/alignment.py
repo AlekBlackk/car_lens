@@ -23,6 +23,7 @@ from pipeline.harvest.aliases import (
     AliasKind,
     AliasTable,
     alias_verdict,
+    broad_needles,
     normalize_filename,
 )
 from pipeline.harvest.manifest import HarvestRow
@@ -39,6 +40,7 @@ class RowVerdict:
     class_id: str
     kind: AliasKind
     foreign: tuple[str, ...]
+    needle: str
 
 
 def triage(rows: Sequence[HarvestRow], table: AliasTable) -> list[RowVerdict]:
@@ -68,17 +70,47 @@ def triage(rows: Sequence[HarvestRow], table: AliasTable) -> list[RowVerdict]:
                 f"{строка.file}: класса {строка.class_id} нет в таблице игл "
                 f"(catalog/model_aliases.yaml)"
             ) from ошибка
-        итог.append(RowVerdict(строка.file, строка.class_id, вердикт.kind, вердикт.foreign))
+        итог.append(
+            RowVerdict(строка.file, строка.class_id, вердикт.kind, вердикт.foreign, вердикт.needle)
+        )
     return итог
 
 
-def auto_drops(verdicts: Sequence[RowVerdict]) -> list[RowVerdict]:
-    """Строки, которые программа вправе выкинуть сама: ровно один чужой класс."""
-    return [в for в in verdicts if в.kind == "foreign" and len(в.foreign) == 1]
+def auto_drops(verdicts: Sequence[RowVerdict], table: AliasTable) -> list[RowVerdict]:
+    """Строки, которые программа вправе выкинуть сама.
+
+    Три условия: чужой класс ровно один, своя игла не совпала (это уже `kind`), и
+    сработавшая чужая игла не шире собственных игл класса.
+
+    Третье условие добавлено после ревью и стоило половины автомата. На заполненной
+    таблице 67 автодропов из 131 держались на широкой игле соседа: `Lada_Niva_2.jpg` в
+    классе `lada__niva_2131` ловится голой иглой `niva` соседнего `lada__niva_2121`, а
+    своя игла (`niva 2131`, `2131`) совпасть с таким именем не может по устройству. §11
+    дизайна оправдывает автомат тем, что «человеку нечего добавить к слову `cressida` в
+    имени файла» — но к слову `niva` человеку есть что добавить: он посмотрит на кадр и
+    посчитает двери. Такие строки уходят в очередь, а не под нож.
+    """
+    широкие = _широкие_пары(table)
+    return [в for в in verdicts if _автомат_вправе(в, широкие)]
 
 
-def review_queue(verdicts: Sequence[RowVerdict]) -> list[RowVerdict]:
-    """Строки на глаз человеку: имя молчит либо иглы спорят между собой."""
-    return [
-        в for в in verdicts if в.kind == "unknown" or (в.kind == "foreign" and len(в.foreign) > 1)
-    ]
+def review_queue(verdicts: Sequence[RowVerdict], table: AliasTable) -> list[RowVerdict]:
+    """Строки на глаз человеку: всё, что не своё и не отдано автомату.
+
+    Дополнение считается, а не перечисляется: `own` плюс автодропы плюс очередь обязаны
+    давать полный список вердиктов, иначе охват `G_AL2` закрыть нечем.
+    """
+    широкие = _широкие_пары(table)
+    return [в for в in verdicts if в.kind != "own" and not _автомат_вправе(в, широкие)]
+
+
+def _широкие_пары(table: AliasTable) -> frozenset[tuple[str, str, str]]:
+    """Тройки «сосед, его широкая игла, наш класс» — на них автомат не допускается."""
+    return frozenset(broad_needles(table))
+
+
+def _автомат_вправе(verdict: RowVerdict, широкие: frozenset[tuple[str, str, str]]) -> bool:
+    """Один предикат на два списка: разойтись им нельзя."""
+    if verdict.kind != "foreign" or len(verdict.foreign) != 1:
+        return False
+    return (verdict.foreign[0], verdict.needle, verdict.class_id) not in широкие

@@ -230,7 +230,7 @@ def test_более_конкретная_игла_соседа_законна() 
         == "own"
     )
     чужой = alias_verdict("mitsubishi outlander phev", "mitsubishi__asx", таблица)
-    assert чужой == AliasVerdict("foreign", ("mitsubishi__outlander",))
+    assert чужой == AliasVerdict("foreign", ("mitsubishi__outlander",), "outlander")
 
 
 def test_вердикт_foreign_полон_и_упорядочен() -> None:
