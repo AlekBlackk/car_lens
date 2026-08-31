@@ -6,8 +6,10 @@
 категории, старые файлы, ноль новых строк (§2.6 дизайна C1).
 
 Прополка не выборочная, и это не лень: причин отказа за прошлые прогоны не существует
-(§2.5), выбирать не из чего. `accepted` остаётся — это счётчик набранного, а не журнал
-просмотра; обнулив его, мы попросили бы добрать поверх уже добранного.
+(§2.5), выбирать не из чего. `accepted` пересобирается из манифеста: счётчик монотонный —
+`run.py` растит его на каждой принятой строке, а `--audit` выкидывает строки, состояния не
+касаясь, — и после аудита сумма 4220 против 3270 живых строк перестала быть счётчиком
+набранного. Пересборка считает фактически лежащее в манифесте (§7 дизайна C1).
 
 Операция разовая, поэтому скрипт, а не флаг харвеста.
 """
@@ -15,19 +17,25 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
 from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, HarvestRow, load_manifest
-from pipeline.harvest.state import HarvestState, load_state, save_state
+from pipeline.harvest.state import ACCEPTED_TARGET, HarvestState, load_state, save_state
 from pipeline.paths import harvest_dir
 
 
 def prune(state: HarvestState, rows: Sequence[HarvestRow]) -> HarvestState:
-    """Пересобрать состояние: в `done_items` остаются только принятые строки."""
+    """Пересобрать состояние по манифесту: и `done_items`, и `accepted` считаются по строкам.
+
+    `state` не читается ни одним полем: после поправки 2026-09-01 прополотое состояние целиком
+    выводится из манифеста. Параметр оставлен, чтобы подпись читалась как «прежнее → новое» и
+    вызов оставался проверяемым на идемпотентность.
+    """
     return HarvestState(
         seen={},
-        accepted=dict(state.accepted),
+        accepted=dict(Counter(строка.class_id for строка in rows)),
         tokens={},
         done_items={f"{строка.source}:{строка.source_item_id}" for строка in rows},
         categories={},
@@ -57,6 +65,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"done_items: было {len(состояние.done_items)}, станет {len(новое.done_items)}")
     print(f"удаляется меток: {len(состояние.done_items - новое.done_items)}")
     print(f"seen обнуляется у {len(состояние.seen)} классов, tokens — {len(состояние.tokens)}")
+    # Классы, теряющие статус «добрал цель», считаются поимённо, а не разностью двух
+    # количеств: пересборка может и открыть класс, и закрыть его, если строк в манифесте
+    # больше, чем насчитало состояние.
+    теряют_цель = sum(
+        1
+        for класс, набрано in состояние.accepted.items()
+        if набрано >= ACCEPTED_TARGET and новое.accepted.get(класс, 0) < ACCEPTED_TARGET
+    )
+    закрыто = sum(1 for набрано in состояние.accepted.values() if набрано >= ACCEPTED_TARGET)
+    станет_закрыто = sum(1 for набрано in новое.accepted.values() if набрано >= ACCEPTED_TARGET)
+    print(
+        f"accepted: сумма было {sum(состояние.accepted.values())}, "
+        f"станет {sum(новое.accepted.values())}"
+    )
+    print(
+        f"добравших цель ({ACCEPTED_TARGET}) классов: было {закрыто}, станет {станет_закрыто}; "
+        f"теряют статус {теряют_цель}"
+    )
     if not аргументы.write:
         print("сухой прогон; для записи повторить с --write")
         return 0

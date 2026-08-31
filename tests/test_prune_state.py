@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.harvest.manifest import HarvestRow, write_manifest
-from pipeline.harvest.state import HarvestState, load_state, save_state
+from pipeline.harvest.state import HarvestState, is_class_done, load_state, save_state
 from scripts.prune_state import main, prune
 
 
@@ -70,7 +70,32 @@ def test_остаются_только_принятые() -> None:
     assert итог.seen == {}
     assert итог.tokens == {}
     assert итог.categories == {}
-    assert итог.accepted == {"kia__rio": 26}
+    # Единственная строка манифеста принадлежит `lada__granta`, поэтому счётчик пересобирается
+    # на неё, а `kia__rio`, чьих строк в манифесте нет, из него исчезает.
+    assert итог.accepted == {"lada__granta": 1}
+
+
+def test_завышенный_счётчик_снова_открывает_класс() -> None:
+    состояние = HarvestState({}, {"lada__granta": 30}, {}, set())
+    строки = [
+        _строка(source="commons", source_item_id="2"),
+        _строка(source="commons", source_item_id="3"),
+    ]
+
+    итог = prune(состояние, строки)
+
+    assert итог.accepted == {"lada__granta": 2}
+    assert is_class_done(итог, "lada__granta") is False
+
+
+def test_класс_без_строк_в_манифесте_исчезает_из_счётчика() -> None:
+    состояние = HarvestState({}, {"chevrolet__lanos": 30, "lada__granta": 30}, {}, set())
+    строки = [_строка(source="commons", source_item_id="2")]
+
+    итог = prune(состояние, строки)
+
+    assert "chevrolet__lanos" not in итог.accepted
+    assert итог.accepted == {"lada__granta": 1}
 
 
 def test_прополка_идемпотентна() -> None:
@@ -94,6 +119,7 @@ def test_сухой_прогон_ничего_не_пишет(tmp_path: Path, ca
     assert not (tmp_path / "state.json.bak").exists()
     вывод = capsys.readouterr().out
     assert "было 3, станет 1" in вывод
+    assert "accepted: сумма было 26, станет 1" in вывод
     assert "сухой прогон" in вывод
 
 
@@ -113,7 +139,7 @@ def test_write_пишет_прополотое_и_кладёт_прежнее_в
     assert записанное.seen == {}
     assert записанное.tokens == {}
     assert записанное.categories == {}
-    assert записанное.accepted == {"kia__rio": 26}
+    assert записанное.accepted == {"lada__granta": 1}
 
 
 def test_write_без_файла_состояния_не_падает(tmp_path: Path) -> None:
