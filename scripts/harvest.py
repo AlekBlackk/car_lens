@@ -28,6 +28,7 @@ from pipeline.harvest.backends import (
     YuNetFaceDetector,
     build_text_matrix,
 )
+from pipeline.harvest.categories import ExpandResult, expand
 from pipeline.harvest.commons import CommonsSource
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.detectors import (
@@ -131,8 +132,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             ),
         )
+        # Транспорт один на источник и на обход: вежливость к хранилищу считается по
+        # процессу, а не по вызывающему коду.
+        транспорт = UrllibTransport(аргументы.contact)
+
+        def развернуть(
+            категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
+        ) -> ExpandResult:
+            return expand(транспорт, категория, глубина, include, exclude)
+
         зависимости = HarvestDeps(
-            source=CommonsSource(UrllibTransport(аргументы.contact)),
+            source=CommonsSource(транспорт),
             vehicle_detector=YoloDetector(),
             plate_detectors=plate_detectors,
             face_detector=YuNetFaceDetector(корень / "models" / "face.onnx"),
@@ -146,6 +156,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             checked=date.today().isoformat(),
             alias_table=иглы,
             alias_rejects_path=корень / "alias_rejects.csv",
+            expand_categories=развернуть,
         )
 
         состояние = load_state(корень / "state.json")

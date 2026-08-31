@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +29,7 @@ from pipeline.harvest.aliases import (
     normalize_filename,
 )
 from pipeline.harvest.cache import crop_path, decode_image, digest, store
+from pipeline.harvest.categories import ExpandResult
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.filters import ImageEncoder, clip_verdict
 from pipeline.harvest.licenses import canonical_name, is_allowed, tier_of
@@ -51,6 +52,10 @@ MIN_SIDE = 640
 PAGE_LIMIT = 50
 MAX_BLACK_PIXEL_FRAC = 0.50
 BLACK_PIXEL_THRESHOLD = 8
+
+# Аргументы: категория, глубина, include, exclude — ровно то, чем `expand` управляется из
+# таблицы запросов.
+CategoryExpander = Callable[[str, int, tuple[str, ...], tuple[str, ...]], ExpandResult]
 
 
 def is_crop_over_redacted(
@@ -88,6 +93,9 @@ class HarvestDeps:
     checked: str
     alias_table: AliasTable
     alias_rejects_path: Path
+    # Обход категорий приходит вызываемым объектом, а не транспортом: `run.py` не должен
+    # знать ни про Commons, ни про сеть — в тестах сюда подставляется функция без запросов.
+    expand_categories: CategoryExpander
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,13 +251,17 @@ def redact_and_crop(
 def harvest_class(
     queries: ClassQueries, deps: HarvestDeps, state: HarvestState, dedup: DedupIndex
 ) -> ClassOutcome:
-    """Собрать один класс до стоп-критерия: 200 просмотренных или 15 принятых."""
+    """Собрать один класс до стоп-критерия.
+
+    Стоп-критерий — `SEEN_BUDGET` просмотренных или `ACCEPTED_TARGET` принятых; названия, а
+    не числа, чтобы описание не разошлось с `state.py` при следующей правке бюджета.
+    """
     class_id = queries.class_id
     отказы: Counter[str] = Counter()
     начальный_просмотр = state.seen.get(class_id, 0)
     начальный_приём = state.accepted.get(class_id, 0)
 
-    for запрос in _запросы(queries):
+    for запрос in _запросы(queries, deps, state):
         while not is_class_done(state, class_id):
             ключ = f"{class_id}|{basis_of(запрос)}"
             try:
@@ -291,11 +303,33 @@ def harvest_class(
     )
 
 
-def _запросы(queries: ClassQueries) -> list[SourceQuery]:
+def _категории(queries: ClassQueries, deps: HarvestDeps, state: HarvestState) -> list[str]:
+    """Развернуть заявленные категории, помня результат в состоянии.
+
+    Дерево категорий меняется на Commons редко, а стоит запросов: перечитывать его на
+    каждом рестарте значит платить чужому хранилищу за то, что уже известно. Чтобы
+    пересобрать дерево, ключ удаляют из `state.json` — той же рукой, что правит
+    `harvest_queries.yaml`.
+    """
+    развёрнутые: list[str] = []
+    for категория in queries.categories:
+        ключ = f"{queries.class_id}|{категория}"
+        известное = state.categories.get(ключ)
+        if известное is None:
+            итог = deps.expand_categories(
+                категория, queries.depth, queries.include, queries.exclude
+            )
+            известное = итог.categories
+            state.categories[ключ] = известное
+        развёрнутые.extend(известное)
+    return развёрнутые
+
+
+def _запросы(queries: ClassQueries, deps: HarvestDeps, state: HarvestState) -> list[SourceQuery]:
     """Категории первыми, текстовый поиск добором: категория размечена людьми."""
     из_категорий = [
         SourceQuery(queries.class_id, категория, None, PAGE_LIMIT, None)
-        for категория in queries.categories
+        for категория in _категории(queries, deps, state)
     ]
     из_текста = [
         SourceQuery(queries.class_id, None, термин, PAGE_LIMIT, None) for термин in queries.terms

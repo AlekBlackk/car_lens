@@ -10,12 +10,14 @@ from PIL import Image
 
 from pipeline.crop import Detection
 from pipeline.harvest.aliases import REJECT_COLUMNS
+from pipeline.harvest.categories import ExpandResult
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.manifest import load_manifest
 from pipeline.harvest.queries import ClassQueries
 from pipeline.harvest.run import (
     MAX_BLACK_PIXEL_FRAC,
     HarvestDeps,
+    _запросы,
     harvest_class,
     is_crop_over_redacted,
     process_candidate,
@@ -96,6 +98,13 @@ def _кандидат(class_id: str = "lada__granta", **правки: object) ->
     return Candidate(**поля)  # type: ignore[arg-type]
 
 
+def _обход_без_сети(
+    категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
+) -> ExpandResult:
+    """Заглушка обхода по умолчанию: категория сама себе дерево, ни одного запроса."""
+    return ExpandResult((категория,), 1, 0, 0, False)
+
+
 def _зависимости(
     tmp_path: Path,
     источник: ПодставнойИсточник | None = None,
@@ -117,6 +126,7 @@ def _зависимости(
         "checked": "2026-08-28",
         "alias_table": {"lada__granta": ("granta",), "uaz__patriot": ("patriot",)},
         "alias_rejects_path": tmp_path / "alias_rejects.csv",
+        "expand_categories": _обход_без_сети,
     }
     поля.update(правки)
     return HarvestDeps(**поля)  # type: ignore[arg-type]
@@ -385,3 +395,42 @@ def test_неудача_кодирования_кропа_не_оставляе�
     assert причина == "write_failed"
     assert строка is None
     assert not list((tmp_path / "crops").rglob("*.jpg")), "битого кропа на диске нет"
+
+
+def test_обход_подставляет_подкатегории_перед_терминами(tmp_path: Path) -> None:
+    вызовы: list[str] = []
+
+    def обход(
+        категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
+    ) -> ExpandResult:
+        вызовы.append(категория)
+        return ExpandResult((категория, f"{категория} (DC)"), 1, 0, 0, False)
+
+    queries = ClassQueries("kia__rio", ("Kia Rio",), ("Kia Rio",))
+    состояние = HarvestState({}, {}, {}, set())
+    deps = _зависимости(tmp_path, expand_categories=обход)
+
+    список = _запросы(queries, deps, состояние)
+
+    assert [(з.category, з.text) for з in список] == [
+        ("Kia Rio", None),
+        ("Kia Rio (DC)", None),
+        (None, "Kia Rio"),
+    ]
+    assert вызовы == ["Kia Rio"]
+
+
+def test_дерево_из_состояния_не_перезапрашивается(tmp_path: Path) -> None:
+    def обход(
+        категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
+    ) -> ExpandResult:
+        raise AssertionError("обход не должен вызываться при кэше в состоянии")
+
+    queries = ClassQueries("kia__rio", ("Kia Rio",), ())
+    состояние = HarvestState({}, {}, {}, set())
+    состояние.categories["kia__rio|Kia Rio"] = ("Kia Rio", "Kia Rio (QB)")
+    deps = _зависимости(tmp_path, expand_categories=обход)
+
+    список = _запросы(queries, deps, состояние)
+
+    assert [з.category for з in список] == ["Kia Rio", "Kia Rio (QB)"]
