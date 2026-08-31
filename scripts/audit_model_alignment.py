@@ -75,8 +75,10 @@ def проверить_категории(
 ) -> dict[str, bool]:
     """Классы без принятых строк из категорий: жива ли хоть одна заявленная категория.
 
-    Пауза между запросами — та же, что у харвеста (§3.2 SPEC): чужое хранилище не должно
-    отличать нашу диагностику от вежливого прогона.
+    Пауза держится перед каждым запросом, а не раз в класс: больше одной категории
+    заявлено у 23 классов из 82 подлежащих опросу, и их запросы уходили встык. Интервал
+    тот же, что у харвеста (§3.2 SPEC): чужое хранилище не должно отличать нашу
+    диагностику от вежливого прогона.
     """
     from pipeline.harvest.backends import UrllibTransport
     from pipeline.harvest.commons import MIN_INTERVAL_SECONDS, category_is_populated
@@ -85,15 +87,16 @@ def проверить_категории(
     из_категорий = {с.class_id for с in rows if с.basis.startswith("category:")}
     запросы = load_queries(queries_path)
     транспорт = UrllibTransport(contact)
+
+    def спросить(категория: str) -> bool:
+        sleep(MIN_INTERVAL_SECONDS)
+        return category_is_populated(транспорт, категория, sleep=sleep)
+
     итог: dict[str, bool] = {}
     for class_id, запрос in sorted(запросы.items()):
         if class_id in из_категорий:
             continue
-        итог[class_id] = any(
-            category_is_populated(транспорт, категория, sleep=sleep)
-            for категория in запрос.categories
-        )
-        sleep(MIN_INTERVAL_SECONDS)
+        итог[class_id] = any(спросить(категория) for категория in запрос.categories)
     return итог
 
 

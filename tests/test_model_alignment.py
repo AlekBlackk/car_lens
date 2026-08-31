@@ -15,6 +15,7 @@ from pipeline.harvest.alignment import (
     review_queue,
     triage,
 )
+from pipeline.harvest.commons import MIN_INTERVAL_SECONDS
 from pipeline.harvest.manifest import HarvestRow, write_manifest
 from scripts.audit_model_alignment import main as триаж_main
 from scripts.audit_model_alignment import проверить_категории
@@ -432,3 +433,35 @@ def test_проверить_категории_пропускает_классы
     assert итог == {"toyota__land_cruiser": True}
     assert опрошенные == ["Toyota Land Cruiser"]
     assert len(паузы) == 1
+
+
+def test_проверить_категории_держит_интервал_перед_каждым_запросом(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Класс с двумя категориями отправлял два запроса встык: пауза была одна на класс."""
+    запросы_файл = tmp_path / "harvest_queries.yaml"
+    запросы_файл.write_text(
+        "version: 1\nclasses:\n"
+        "  chery__amulet:\n"
+        "    terms: [amulet]\n"
+        "    categories: [Chery Amulet, Chery A15]\n",
+        encoding="utf-8",
+    )
+    опрошенные: list[str] = []
+
+    def mock_populated(transport: object, category: str, sleep: object = None) -> bool:
+        опрошенные.append(category)
+        return category == "Chery A15"
+
+    monkeypatch.setattr("pipeline.harvest.commons.category_is_populated", mock_populated)
+    паузы: list[float] = []
+    итог = проверить_категории(
+        [],
+        contact="user@test.org",
+        queries_path=запросы_файл,
+        sleep=паузы.append,
+    )
+
+    assert итог == {"chery__amulet": True}
+    assert опрошенные == ["Chery Amulet", "Chery A15"]
+    assert паузы == [MIN_INTERVAL_SECONDS, MIN_INTERVAL_SECONDS], "два запроса — две паузы"
