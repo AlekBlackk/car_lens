@@ -18,10 +18,17 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from pipeline.harvest.aliases import AliasTable, alias_verdict, normalize_filename
+from pipeline.harvest.aliases import (
+    AliasesError,
+    AliasKind,
+    AliasTable,
+    alias_verdict,
+    normalize_filename,
+)
 from pipeline.harvest.manifest import HarvestRow
+from pipeline.harvest.sources import SEARCH_BASIS_PREFIX
 
-SEARCH_BASIS_PREFIX = "search:"
+__all__ = ["SEARCH_BASIS_PREFIX", "RowVerdict", "auto_drops", "review_queue", "triage"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +37,7 @@ class RowVerdict:
 
     file: str
     class_id: str
-    kind: str
+    kind: AliasKind
     foreign: tuple[str, ...]
 
 
@@ -38,13 +45,29 @@ def triage(rows: Sequence[HarvestRow], table: AliasTable) -> list[RowVerdict]:
     """Вердикт на каждую строку поискового базиса. Строки из категорий не трогаются.
 
     Имя берётся из `page_url`: колонки `title` в манифесте нет, а `page_url` несёт то же
-    имя, только процент-кодированным — это снимает `normalize_filename`.
+    имя, только процент-кодированным — это снимает `normalize_filename`. Форму URL
+    `normalize_filename` знает одну — commons (`/wiki/File:`), и сегодня в манифесте
+    других источников нет. Второй источник (Flickr, Openverse по Р-11) отдаст URL, от
+    которого в токены уйдёт весь путь, и слово из домена сможет совпасть с иглой —
+    к тому времени имя придётся брать из колонки источника, а не из адреса.
+
+    Класс вне таблицы игл — не `unknown`, а остановка: молчаливый пропуск означал бы
+    вердикт, посчитанный не по тому классу. `KeyError` из `alias_verdict` перевыбрасывается
+    с именем файла и класса, потому что на манифесте в три с половиной тысячи строк голый
+    `KeyError('lada__granta')` не говорит ни какая это строка, ни что править надо
+    `catalog/model_aliases.yaml`.
     """
     итог: list[RowVerdict] = []
     for строка in rows:
         if not строка.basis.startswith(SEARCH_BASIS_PREFIX):
             continue
-        вердикт = alias_verdict(normalize_filename(строка.page_url), строка.class_id, table)
+        try:
+            вердикт = alias_verdict(normalize_filename(строка.page_url), строка.class_id, table)
+        except KeyError as ошибка:
+            raise AliasesError(
+                f"{строка.file}: класса {строка.class_id} нет в таблице игл "
+                f"(catalog/model_aliases.yaml)"
+            ) from ошибка
         итог.append(RowVerdict(строка.file, строка.class_id, вердикт.kind, вердикт.foreign))
     return итог
 

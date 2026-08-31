@@ -62,10 +62,19 @@ class HarvestSource(Protocol):
         ...
 
 
+SEARCH_BASIS_PREFIX = "search:"
+CATEGORY_BASIS_PREFIX = "category:"
+
+
 def basis_of(query: SourceQuery) -> str:
-    """Основание разметки для манифеста: откуда взялась метка класса."""
+    """Основание разметки для манифеста: откуда взялась метка класса.
+
+    Префиксы объявлены здесь, у производителя: какие строки считаются поисковыми, решают
+    сразу два потребителя — шлюз на приёме (`run.py`) и триаж манифеста (`alignment.py`),
+    — и разойтись им нельзя.
+    """
     if query.category:
-        return f"category:{query.category}"
+        return f"{CATEGORY_BASIS_PREFIX}{query.category}"
     if query.text:
-        return f"search:{query.text}"
+        return f"{SEARCH_BASIS_PREFIX}{query.text}"
     raise ValueError(f"{query.class_id}: запрос без ни категории, ни текста")

@@ -35,7 +35,13 @@ from pipeline.harvest.licenses import canonical_name, is_allowed, tier_of
 from pipeline.harvest.manifest import HarvestRow, append_row, strip_html
 from pipeline.harvest.queries import ClassQueries
 from pipeline.harvest.redact import redact_frame
-from pipeline.harvest.sources import Candidate, HarvestSource, SourceQuery, basis_of
+from pipeline.harvest.sources import (
+    SEARCH_BASIS_PREFIX,
+    Candidate,
+    HarvestSource,
+    SourceQuery,
+    basis_of,
+)
 from pipeline.harvest.state import (
     HarvestState,
     is_class_done,
@@ -114,7 +120,7 @@ def process_candidate(
     # Шлюз принадлежности классу. Только поисковый путь: категория Commons размечена
     # людьми и проходит даже с именем IMG_0412.jpg. Место в цепочке не случайно —
     # проверка идёт по метаданным выдачи, до единого байта трафика, как и лицензия выше.
-    if candidate.basis.startswith("search:"):
+    if candidate.basis.startswith(SEARCH_BASIS_PREFIX):
         имя = normalize_filename(candidate.title or candidate.page_url)
         вердикт_иглы = alias_verdict(имя, candidate.class_id, deps.alias_table)
         if вердикт_иглы.kind != "own":

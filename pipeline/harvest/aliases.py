@@ -162,11 +162,14 @@ def _иглы_класса(path: Path, class_id: str, сырые_иглы: objec
     return tuple(иглы)
 
 
+AliasKind = Literal["own", "foreign", "unknown"]
+
+
 @dataclass(frozen=True, slots=True)
 class AliasVerdict:
     """Что имя файла говорит о принадлежности кадра классу."""
 
-    kind: Literal["own", "foreign", "unknown"]
+    kind: AliasKind
     foreign: tuple[str, ...] = ()
 
 

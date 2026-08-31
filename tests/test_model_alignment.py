@@ -1,3 +1,11 @@
+# tests/test_model_alignment.py
+"""Триаж манифеста: кто уходит автоматом, кто идёт человеку, кого не трогают вовсе."""
+
+from __future__ import annotations
+
+import pytest
+
+from pipeline.harvest.aliases import AliasesError
 from pipeline.harvest.alignment import auto_drops, review_queue, triage
 from pipeline.harvest.manifest import HarvestRow
 
@@ -75,3 +83,35 @@ def test_своё_имя_не_попадает_ни_в_один_список() -
     assert [в.kind for в in вердикты] == ["own"]
     assert auto_drops(вердикты) == []
     assert review_queue(вердикты) == []
+
+
+def test_пустой_манифест_даёт_пустой_вердикт() -> None:
+    assert triage([], _ТАБЛИЦА) == []
+
+
+def test_категория_с_явно_чужим_именем_всё_равно_не_трогается() -> None:
+    """Категорию размечали люди: имя Land Cruiser в классе LX её не отменяет."""
+    строки = [
+        _строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser_BJ41.jpg", "category:Lexus LX")
+    ]
+    assert triage(строки, _ТАБЛИЦА) == []
+
+
+def test_класс_вне_таблицы_игл_останавливает_триаж_с_именем_файла() -> None:
+    """Молчаливый `unknown` означал бы вердикт, посчитанный не по тому классу."""
+    строки = [_строка("a.jpg", "нет__игл", "2019_Lexus_LX570.jpg", "search:Нет игл")]
+    with pytest.raises(AliasesError) as авария:
+        triage(строки, _ТАБЛИЦА)
+    assert "a.jpg" in str(авария.value)
+    assert "нет__игл" in str(авария.value)
+
+
+def test_порядок_вердиктов_повторяет_порядок_манифеста() -> None:
+    """Задачи 7 и 8 считают числа и пишут CSV по этому порядку."""
+    строки = [
+        _строка("c.jpg", "lexus__lx", "IMG_0412.jpg", "search:Lexus LX"),
+        _строка("a.jpg", "lexus__lx", "2019_Lexus_LX570.jpg", "search:Lexus LX"),
+        _строка("b.jpg", "lexus__lx", "IMG_0413.jpg", "category:Lexus LX"),
+        _строка("d.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX"),
+    ]
+    assert [в.file for в in triage(строки, _ТАБЛИЦА)] == ["c.jpg", "a.jpg", "d.jpg"]
