@@ -4,7 +4,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from pipeline.harvest.manifest import HarvestRow, append_row
+from pipeline.harvest.manifest import HarvestRow, append_row, write_manifest
 from scripts.audit_gallery import (
     build_parser,
     main,
@@ -108,6 +108,7 @@ def test_build_parser() -> None:
     assert args.seed == 0
     assert args.verdicts == []
     assert args.only_missing is False
+    assert args.only_files is None
 
     args_custom = parser.parse_args(
         [
@@ -123,12 +124,15 @@ def test_build_parser() -> None:
             "v1.csv",
             "v2.csv",
             "--only-missing",
+            "--only-files",
+            "queue.txt",
         ]
     )
     assert args_custom.thumb_px == 320
     assert args_custom.seed == 42
     assert args_custom.verdicts == [Path("v1.csv"), Path("v2.csv")]
     assert args_custom.only_missing is True
+    assert args_custom.only_files == Path("queue.txt")
 
 
 def test_main_ужимает_миниатюры_и_сохраняет_галерею(tmp_path: Path) -> None:
@@ -194,3 +198,29 @@ def test_без_флага_показываются_все() -> None:
     строки = [_строка("a.jpg"), _строка("b.jpg")]
     видно = отобрать_для_показа(строки, {"a.jpg": "ok"}, only_missing=False)
     assert [с.file for с in видно] == ["a.jpg", "b.jpg"]
+
+
+def test_only_files_сужает_показ_до_списка(tmp_path: Path) -> None:
+    """Очередь триажа — единственное, что человек смотрит на этом проходе."""
+    манифест = tmp_path / "harvest_manifest.csv"
+    write_manifest(
+        манифест,
+        [_строка("a.jpg", class_id="lada__granta"), _строка("b.jpg", class_id="lada__granta")],
+    )
+    список = tmp_path / "alias_queue.txt"
+    список.write_text("b.jpg\n", encoding="utf-8")
+
+    main(
+        [
+            "--manifest",
+            str(манифест),
+            "--data-root",
+            str(tmp_path),
+            "--only-files",
+            str(список),
+        ]
+    )
+
+    страница = (tmp_path / "audit" / "index.html").read_text(encoding="utf-8")
+    assert "b.jpg" in страница
+    assert "a.jpg" not in страница

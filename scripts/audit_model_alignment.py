@@ -1,0 +1,123 @@
+"""Триаж выборки по именам файлов: автовердикты, очередь человеку, отчёт и гейт.
+
+Скрипт офлайновый: сети нет ни в одном пути, кроме явной проверки категорий (§12
+дизайна), которая включается флагом и по умолчанию выключена.
+
+Порядок работы двухпроходный и иначе не выйдет. Первый прогон — без вердиктов человека:
+он выдаёт автовердикты и очередь, и гейт при этом красный по `G_AL2`, потому что охват
+ещё не закрыт. Второй прогон — с вердиктами всех проходов: он и даёт вердикт задачи.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import subprocess
+from collections.abc import Sequence
+from datetime import date
+from pathlib import Path
+
+from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
+from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, load_alias_table
+from pipeline.harvest.alignment import (
+    auto_drops,
+    check_alias_gate,
+    render_alignment_report,
+    review_queue,
+    triage,
+)
+from pipeline.harvest.audit import load_audit, merge_verdicts
+from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, load_manifest
+from pipeline.paths import harvest_dir
+
+_КОРЕНЬ = Path(__file__).resolve().parent.parent
+DEFAULT_REPORT_PATH = _КОРЕНЬ / "bench" / "model-alignment.md"
+DEFAULT_OUT_VERDICTS_PATH = _КОРЕНЬ / "verdicts.alias.csv"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    парсер = argparse.ArgumentParser(description="Триаж выборки по именам файлов (задача B)")
+    парсер.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST_PATH)
+    парсер.add_argument("--aliases", type=Path, default=DEFAULT_ALIASES_PATH)
+    парсер.add_argument("--out-verdicts", type=Path, default=DEFAULT_OUT_VERDICTS_PATH)
+    парсер.add_argument("--queue", type=Path, default=None, help="по умолчанию в каталоге данных")
+    парсер.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
+    парсер.add_argument(
+        "--verdicts",
+        type=Path,
+        nargs="*",
+        default=[],
+        help="CSV вердиктов всех проходов; поздний файл побеждает ранний",
+    )
+    парсер.add_argument(
+        "--alias-verdicts",
+        type=Path,
+        nargs="*",
+        default=[],
+        help="CSV вердиктов алиасных проходов для G_AL2",
+    )
+    return парсер
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Прогнать триаж, записать артефакты и вернуть код по вердикту гейта."""
+    аргументы = build_parser().parse_args(argv)
+    очередь_путь = аргументы.queue or (harvest_dir() / "alias_queue.txt")
+
+    таблица = load_alias_table(аргументы.aliases)
+    строки = load_manifest(аргументы.manifest)
+    вердикты_строк = triage(строки, таблица)
+
+    автоматом = auto_drops(вердикты_строк, таблица)
+    аргументы.out_verdicts.parent.mkdir(parents=True, exist_ok=True)
+    with аргументы.out_verdicts.open("w", encoding="utf-8", newline="") as файл:
+        писатель = csv.writer(файл)
+        писатель.writerow(["file", "verdict"])
+        for вердикт in автоматом:
+            писатель.writerow([вердикт.file, "drop:wrong_model"])
+
+    очередь = review_queue(вердикты_строк, таблица)
+    очередь_путь.parent.mkdir(parents=True, exist_ok=True)
+    очередь_путь.write_text("".join(f"{вердикт.file}\n" for вердикт in очередь), encoding="utf-8")
+
+    # Первый прогон считает гейт по одним автовердиктам: файлов человека ещё нет.
+    # Второй получает всю цепочку файлов в хронологическом порядке и складывает её как
+    # есть — подмешивать автовердикты сюда нельзя, иначе 1611 автоматических `ok` из
+    # `verdicts.auto.csv` встанут позже дропов и воскресят выкинутые кадры.
+    все_вердикты = (
+        merge_verdicts(*(load_audit(путь) for путь in аргументы.verdicts))
+        if аргументы.verdicts
+        else {вердикт.file: "drop:wrong_model" for вердикт in автоматом}
+    )
+    # Охват `G_AL2` закрывают только вердикты алиасного прохода: `verdicts.csv` прохода H3
+    # смотрел номера и лица, а не принадлежность модели, и его `ok` не свидетельство о
+    # классе. Отсюда второй вход и отдельный флаг `--alias-verdicts` на два файла человека.
+    алиасные_вердикты = (
+        merge_verdicts(
+            {вердикт.file: "drop:wrong_model" for вердикт in автоматом},
+            *(load_audit(путь) for путь in аргументы.alias_verdicts),
+        )
+        if аргументы.alias_verdicts
+        else {вердикт.file: "drop:wrong_model" for вердикт in автоматом}
+    )
+    классы = tuple(класс.class_id for класс in load_catalog(DEFAULT_CATALOG_PATH).classes)
+    гейт = check_alias_gate(строки, таблица, все_вердикты, алиасные_вердикты, классы)
+    sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    аргументы.report.parent.mkdir(parents=True, exist_ok=True)
+    аргументы.report.write_text(
+        render_alignment_report(строки, таблица, все_вердикты, гейт, sha, date.today().isoformat()),
+        encoding="utf-8",
+    )
+
+    print(f"поисковых строк: {len(вердикты_строк)}, помечено: {len(автоматом) + len(очередь)}")
+    print(f"автовердикты: {аргументы.out_verdicts} ({len(автоматом)})")
+    print(f"очередь человеку: {очередь_путь} ({len(очередь)})")
+    for причина in гейт.blocking_failures:
+        print(f"БЛОКИРУЕТ {причина}")
+    return 0 if гейт.passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

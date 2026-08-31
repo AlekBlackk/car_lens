@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from pipeline.harvest.aliases import AliasesError
+from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, AliasesError
 from pipeline.harvest.alignment import (
     auto_drops,
     check_alias_gate,
@@ -13,7 +15,8 @@ from pipeline.harvest.alignment import (
     review_queue,
     triage,
 )
-from pipeline.harvest.manifest import HarvestRow
+from pipeline.harvest.manifest import HarvestRow, write_manifest
+from scripts.audit_model_alignment import main as триаж_main
 
 _ТАБЛИЦА = {
     "lexus__lx": ("lx",),
@@ -276,3 +279,88 @@ def test_отчёт_несёт_числа_и_вердикт() -> None:
     assert "- строк осталось после применения вердиктов: 0" in отчёт
     assert "- `lada__niva_2121`: «niva» накрывает класс `lada__niva_2131`" in отчёт
     assert "- широких игл (не блокирует): 1 (пар: 1)" in отчёт
+
+
+def test_cli_пишет_автовердикты_очередь_и_отчёт(tmp_path: Path) -> None:
+    манифест = tmp_path / "harvest_manifest.csv"
+    write_manifest(
+        манифест,
+        [
+            _строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX"),
+            _строка("b.jpg", "lexus__lx", "IMG_0412.jpg", "search:Lexus LX"),
+            _строка("c.jpg", "lexus__lx", "2019_Lexus_LX570.jpg", "search:Lexus LX"),
+        ],
+    )
+    таблица = tmp_path / "model_aliases.yaml"
+    таблица.write_text(
+        "version: 1\nclasses:\n"
+        "  lexus__lx:\n    needles: [lx]\n"
+        "  toyota__land_cruiser:\n    needles: [land cruiser]\n",
+        encoding="utf-8",
+    )
+    вердикты_файл = tmp_path / "verdicts.alias.csv"
+    очередь = tmp_path / "alias_queue.txt"
+    отчёт = tmp_path / "model-alignment.md"
+
+    код = триаж_main(
+        [
+            "--manifest",
+            str(манифест),
+            "--aliases",
+            str(таблица),
+            "--out-verdicts",
+            str(вердикты_файл),
+            "--queue",
+            str(очередь),
+            "--report",
+            str(отчёт),
+        ]
+    )
+
+    assert код == 1, "без вердиктов человека G_AL2 обязан быть красным"
+    assert вердикты_файл.read_text(encoding="utf-8").splitlines() == [
+        "file,verdict",
+        "a.jpg,drop:wrong_model",
+    ]
+    assert очередь.read_text(encoding="utf-8").split() == ["b.jpg"]
+    assert "НЕ ПРОЙДЕН" in отчёт.read_text(encoding="utf-8")
+
+
+def test_cli_успешный_прогон_с_вердиктами(tmp_path: Path) -> None:
+    манифест = tmp_path / "harvest_manifest.csv"
+    write_manifest(
+        манифест,
+        [
+            _строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX"),
+            _строка("b.jpg", "lexus__lx", "IMG_0412.jpg", "search:Lexus LX"),
+            _строка("c.jpg", "lexus__lx", "2019_Lexus_LX570.jpg", "search:Lexus LX"),
+        ],
+    )
+    вердикты_ревью = tmp_path / "verdicts.alias-review.csv"
+    вердикты_ревью.write_text("file,verdict\nb.jpg,drop:wrong_model\n", encoding="utf-8")
+    вердикты_файл = tmp_path / "verdicts.alias.csv"
+    очередь = tmp_path / "alias_queue.txt"
+    отчёт = tmp_path / "model-alignment.md"
+
+    код = триаж_main(
+        [
+            "--manifest",
+            str(манифест),
+            "--aliases",
+            str(DEFAULT_ALIASES_PATH),
+            "--out-verdicts",
+            str(вердикты_файл),
+            "--queue",
+            str(очередь),
+            "--report",
+            str(отчёт),
+            "--verdicts",
+            str(вердикты_файл),
+            str(вердикты_ревью),
+            "--alias-verdicts",
+            str(вердикты_ревью),
+        ]
+    )
+
+    assert код == 0
+    assert "пройден" in отчёт.read_text(encoding="utf-8")

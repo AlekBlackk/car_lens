@@ -115,6 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="показать только кадры без вердикта",
     )
+    парсер.add_argument(
+        "--only-files",
+        type=Path,
+        default=None,
+        help="файл со списком имён кадров (по строке на кадр): показать только их",
+    )
     return парсер
 
 
@@ -124,6 +130,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     аргументы = build_parser().parse_args(argv)
     строки = load_manifest(аргументы.manifest)
+    if аргументы.only_files is not None:
+        нужные = set(аргументы.only_files.read_text(encoding="utf-8").split())
+        строки = [с for с in строки if с.file in нужные]
     вердикты = merge_verdicts(*(load_audit(путь) for путь in аргументы.verdicts))
     надо = required_audit_files(строки, seed=аргументы.seed) - set(вердикты)
     строки = отобрать_для_показа(строки, вердикты, аргументы.only_missing)
