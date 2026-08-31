@@ -16,6 +16,7 @@ from scripts.build_fewshot_index import (
     ENCODER_REVISION,
     ENCODER_WEIGHTS_SHA256,
     BuildFewShotError,
+    build_parser,
     check_full_coverage,
     crops_by_class,
 )
@@ -90,3 +91,23 @@ def test_пин_энкодера_совпадает_с_манифестом_сп
     assert пин["revision"] == ENCODER_REVISION
     хеши = dict(часть.split("=", 1) for часть in пин["weights_sha256"].split(";"))
     assert хеши["open_clip_pytorch_model.bin"] == ENCODER_WEIGHTS_SHA256
+
+
+def test_покрытие_с_allow_missing_возвращает_дефицитные_классы() -> None:
+    """Дефицит эталона — измеренное состояние (16 классов на 2026-08-31), а не поломка.
+
+    Названия обязаны выйти наружу: их печатает сборка и по ним живёт задача C.
+    """
+    каталог = load_catalog(DEFAULT_CATALOG_PATH)
+    индекс = class_index(каталог)
+    по_индексу = {значение: ключ for ключ, значение in индекс.items()}
+    группы = crops_by_class(_кадр(("lada__2107", 2)), Path("/кропы"))
+    дефицит = check_full_coverage(группы, len(индекс), по_индексу, allow_missing=True)
+    assert "lada__2107" not in дефицит
+    assert len(дефицит) == len(индекс) - 1
+
+
+def test_дефицит_разрешается_только_флагом() -> None:
+    """По умолчанию сборка обязана падать: молчаливый пустой слот — тот самый дефект."""
+    assert build_parser().parse_args([]).allow_missing_classes is False
+    assert build_parser().parse_args(["--allow-missing-classes"]).allow_missing_classes is True

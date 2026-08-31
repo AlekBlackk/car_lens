@@ -135,6 +135,24 @@ export function loadIndex(
     return body.subarray(offset, offset + header.embeddingDim)
   }
 
+  // Класс без эталонных кадров записан в индексе нулями (§13.2), а косинус к нулевому
+  // центроиду равен ровно нулю и бьёт любое отрицательное сходство живого класса: на кадре
+  // не из домена top-1 занимал класс без эталона. Та же маска живых классов сторожит
+  // ранжирование в `pipeline/knn.py`.
+  //
+  // Маска считается один раз при загрузке, а не на каждом кадре: индекс после загрузки не
+  // меняется, а `match` — горячий путь, где обход нулевого класса стоит те же 4×256
+  // сравнений, что и его скалярные произведения.
+  const hasReference = new Uint8Array(header.numClasses)
+  for (let c = 0; c < header.numClasses; c += 1) {
+    for (let k = 0; k < header.centroidsPerClass; k += 1) {
+      if (centroid(c, k).some((value) => value !== 0)) {
+        hasReference[c] = 1
+        break
+      }
+    }
+  }
+
   const match = (embedding: Float32Array): { classIdx: number; sim: number } => {
     if (embedding.length !== header.embeddingDim) {
       throw new IndexFormatError(
@@ -144,6 +162,9 @@ export function loadIndex(
     let bestClass = -1
     let bestSim = -Infinity
     for (let c = 0; c < header.numClasses; c += 1) {
+      if (!hasReference[c]) {
+        continue
+      }
       for (let k = 0; k < header.centroidsPerClass; k += 1) {
         const vector = centroid(c, k)
         let dot = 0
@@ -155,6 +176,9 @@ export function loadIndex(
           bestClass = c
         }
       }
+    }
+    if (bestClass < 0) {
+      throw new IndexFormatError('в индексе ни одного класса с эталоном: все центроиды нулевые')
     }
     return { classIdx: bestClass, sim: bestSim }
   }

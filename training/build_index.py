@@ -65,7 +65,13 @@ def stack_centroids(
     kmeans: Callable[[np.ndarray, int], np.ndarray],
     allow_empty: bool = False,
 ) -> np.ndarray:
-    """Центроиды всех классов: `(num_classes, centroids_per_class, dim)`."""
+    """Центроиды всех классов: `(num_classes, centroids_per_class, dim)`.
+
+    `allow_empty` оставляет классу без эмбеддингов нули — договорённую метку «эталона нет»
+    из §13.2 SPEC. Метка работает только вместе с читалками, которые её знают
+    (`pipeline.knn`, `catalogIndex.ts`, `CatalogIndex.kt`): нулевой центроид даёт косинус
+    ровно 0 и без исключения бьёт любое отрицательное сходство живого класса.
+    """
     вне_диапазона = [метка for метка in np.unique(labels) if not 0 <= int(метка) < num_classes]
     if вне_диапазона:
         raise BuildIndexError(f"метка {int(вне_диапазона[0])} вне диапазона 0..{num_classes - 1}")

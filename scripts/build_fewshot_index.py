@@ -87,6 +87,11 @@ def check_full_coverage(
 
     Отказ с именами, а не молчаливый пустой слот: `stack_centroids` упал бы на номере
     класса, по которому не понять, какой класс чинить и чем.
+
+    `allow_missing` снимает отказ и отдаёт дефицит наружу списком — состояние после чистки
+    чужих моделей, где 16 классов остались без эталона по измерению, а не по ошибке. Флаг
+    приходит из `--allow-missing-classes` и по умолчанию выключен: сборка, молча собравшая
+    индекс с пустыми классами, — это тот самый дефект, от которого отказ и заведён.
     """
     есть = {номер for номер, _ in groups}
     нет = tuple(idx_to_class_id[номер] for номер in range(num_classes) if номер not in есть)
@@ -105,6 +110,11 @@ def build_parser() -> argparse.ArgumentParser:
     парсер.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
     парсер.add_argument("--out", type=Path, default=None)
     парсер.add_argument("--seed", type=int, default=1337, help="сид k-means")
+    парсер.add_argument(
+        "--allow-missing-classes",
+        action="store_true",
+        help="собрать индекс при классах без эталона (их центроиды останутся нулями)",
+    )
     return парсер
 
 
@@ -122,9 +132,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     кадр = read_split(splits_dir() / f"{аргументы.split}.parquet")
     группы = crops_by_class(кадр, harvest_dir() / "crops")
-    дефицитные = check_full_coverage(группы, len(индекс), по_индексу, allow_missing=True)
+    дефицитные = check_full_coverage(
+        группы, len(индекс), по_индексу, allow_missing=аргументы.allow_missing_classes
+    )
     if дефицитные:
-        print(f"дефицит (уходят в синтетический слой): {', '.join(дефицитные)}", flush=True)
+        print(
+            f"классов без эталона: {len(дефицитные)}; в индексе они останутся нулями "
+            f"и в ранжирование не попадут: {', '.join(дефицитные)}",
+            flush=True,
+        )
 
     модель, _, препроцесс = open_clip.create_model_and_transforms(
         ENCODER_ARCH, pretrained=ENCODER_WEIGHTS

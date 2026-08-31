@@ -74,6 +74,64 @@ test('match отвергает вектор чужой размерности', 
   expect(() => index.match(new Float32Array(8))).toThrow(IndexFormatError)
 })
 
+/**
+ * Индекс из готовых центроидов: `centroids[класс][k]` — вектор. Фикстура на диске вся
+ * живая, а нужен класс без эталонных кадров — тот записан нулями (§13.2).
+ */
+const synthetic = (centroids: number[][][]): { bytes: Uint8Array; document: Uint8Array } => {
+  const perClass = centroids[0]!.length
+  const dim = centroids[0]![0]!.length
+  const document = new TextEncoder().encode(
+    JSON.stringify({
+      classes: centroids.map((_, c) => ({
+        class_id: `cls__${c}`,
+        members: [`cls__${c}`],
+        brand: null,
+        display: `Class ${c}`,
+      })),
+    }),
+  )
+  const flat = centroids.flat(2)
+  const bytes = new Uint8Array(64 + flat.length * 4)
+  bytes.set(new TextEncoder().encode('CLIX'))
+  const view = new DataView(bytes.buffer)
+  view.setUint16(4, 1, true)
+  view.setUint16(6, dim, true)
+  view.setUint32(8, centroids.length, true)
+  view.setUint32(12, perClass, true)
+  view.setUint8(16, 1)
+  view.setUint8(17, 1)
+  bytes.set(Uint8Array.from(Buffer.from(sha256(document), 'hex')), 20)
+  new Float32Array(bytes.buffer, 64, flat.length).set(flat)
+  return { bytes, document }
+}
+
+test('класс без эталона не вытесняет живой', () => {
+  // Кадр не из домена: у живого класса сходство отрицательное, а косинус к нулевым
+  // центроидам ровно 0, поэтому без отсева top-1 забирает класс без эталона.
+  const { bytes, document } = synthetic([
+    [
+      [-1, 0],
+      [-0.6, -0.8],
+    ],
+    [
+      [0, 0],
+      [0, 0],
+    ],
+  ])
+  const found = loadIndex(bytes, document, sha256).match(Float32Array.from([1, 0]))
+  expect(found.classIdx).toBe(0)
+  expect(found.sim).toBeCloseTo(-0.6)
+})
+
+test('индекс без живых классов отвергается', () => {
+  // Сортировать нечего, а молчаливый класс 0 хуже отказа.
+  const { bytes, document } = synthetic([[[0, 0]], [[0, 0]]])
+  const index = loadIndex(bytes, document, sha256)
+  expect(() => index.match(Float32Array.from([1, 0]))).toThrow(IndexFormatError)
+  expect(() => index.match(Float32Array.from([1, 0]))).toThrow(/ни одного класса с эталоном/)
+})
+
 const damaged = (patch: (bytes: Uint8Array) => void): Uint8Array => {
   const bytes = bin()
   patch(bytes)

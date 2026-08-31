@@ -195,3 +195,24 @@ def test_tflite_без_пути_падает() -> None:
     # испортить падеж. Проверяется тот же смысл — сообщение про отсутствующий путь.
     with pytest.raises(BuildIndexError, match="пути"):
         parse_embedder("tflite:")
+
+
+def test_stack_с_allow_empty_оставляет_нули_классу_без_эмбеддингов() -> None:
+    """Нули — договорённая метка «эталона нет» (§13.2), а не забытый слот.
+
+    Читалки обязаны исключать такой класс из ранжирования: `pipeline.knn`,
+    `app/src/vision/catalogIndex.ts`, `CatalogIndex.kt`.
+    """
+    эмбеддинги = _нормировать(np.random.default_rng(4).normal(size=(10, 8)))
+    метки = np.zeros(10, dtype=int)
+    результат = stack_centroids(
+        эмбеддинги,
+        метки,
+        num_classes=2,
+        centroids_per_class=4,
+        kmeans=_kmeans,
+        allow_empty=True,
+    )
+    assert результат.shape == (2, 4, 8)
+    assert np.all(результат[1] == 0.0)
+    assert np.any(результат[0] != 0.0)
