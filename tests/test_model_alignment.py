@@ -6,7 +6,13 @@ from __future__ import annotations
 import pytest
 
 from pipeline.harvest.aliases import AliasesError
-from pipeline.harvest.alignment import auto_drops, review_queue, triage
+from pipeline.harvest.alignment import (
+    auto_drops,
+    check_alias_gate,
+    render_alignment_report,
+    review_queue,
+    triage,
+)
 from pipeline.harvest.manifest import HarvestRow
 
 _ТАБЛИЦА = {
@@ -159,3 +165,51 @@ def test_три_списка_дают_полный_охват() -> None:
         len(свои) + len(auto_drops(вердикты, _ТАБЛИЦА)) + len(review_queue(вердикты, _ТАБЛИЦА))
     )
     assert покрытие == len(вердикты) == 4
+
+
+_КЛАССЫ = ("lexus__lx", "toyota__land_cruiser", "lada__samara", "lada__samara_2")
+
+
+def test_гейт_проходит_когда_всё_помеченное_выкинуто() -> None:
+    строки = [
+        _строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX"),
+        _строка("b.jpg", "lexus__lx", "2019_Lexus_LX570.jpg", "search:Lexus LX"),
+    ]
+    гейт = check_alias_gate(строки, _ТАБЛИЦА, {"a.jpg": "drop:wrong_model"}, _КЛАССЫ)
+    assert гейт.passed
+    assert гейт.blocking_failures == ()
+
+
+def test_строка_без_вердикта_роняет_g_al2() -> None:
+    """«Ноль найденной грязи» одинаково верно и когда её не смотрели."""
+    строки = [_строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX")]
+    гейт = check_alias_gate(строки, _ТАБЛИЦА, {}, _КЛАССЫ)
+    assert not гейт.passed
+    assert any("G_AL2" in причина for причина in гейт.blocking_failures)
+
+
+def test_вердикт_ok_на_молчащем_имени_не_закрывает_g_al3() -> None:
+    """Кадр оставили — значит имя надо объяснить иглой, а не вердиктом."""
+    строки = [_строка("a.jpg", "lexus__lx", "IMG_0412.jpg", "search:Lexus LX")]
+    гейт = check_alias_gate(строки, _ТАБЛИЦА, {"a.jpg": "ok"}, _КЛАССЫ)
+    assert not гейт.passed
+    assert any("G_AL3" in причина for причина in гейт.blocking_failures)
+
+
+def test_неполная_таблица_роняет_g_al1() -> None:
+    """Строки непустые намеренно: на пустых гейт не дошёл бы до `triage` и дефект бы уцелел."""
+    строки = [_строка("a.jpg", "нет__игл", "2019_Lexus_LX570.jpg", "search:Нет игл")]
+    гейт = check_alias_gate(строки, _ТАБЛИЦА, {}, (*_КЛАССЫ, "нет__игл"))
+    assert not гейт.passed
+    assert any("G_AL1" in причина for причина in гейт.blocking_failures)
+
+
+def test_отчёт_несёт_числа_и_вердикт() -> None:
+    строки = [_строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX")]
+    гейт = check_alias_gate(строки, _ТАБЛИЦА, {"a.jpg": "drop:wrong_model"}, _КЛАССЫ)
+    отчёт = render_alignment_report(
+        строки, _ТАБЛИЦА, {"a.jpg": "drop:wrong_model"}, гейт, "abc1234", "2026-08-31"
+    )
+    assert "abc1234" in отчёт
+    assert "lexus__lx" in отчёт
+    assert "пройден" in отчёт

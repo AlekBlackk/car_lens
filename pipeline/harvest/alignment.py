@@ -15,7 +15,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from pipeline.harvest.aliases import (
@@ -24,12 +25,23 @@ from pipeline.harvest.aliases import (
     AliasTable,
     alias_verdict,
     broad_needles,
+    needle_conflicts,
     normalize_filename,
 )
+from pipeline.harvest.audit import apply_audit
 from pipeline.harvest.manifest import HarvestRow
 from pipeline.harvest.sources import SEARCH_BASIS_PREFIX
 
-__all__ = ["SEARCH_BASIS_PREFIX", "RowVerdict", "auto_drops", "review_queue", "triage"]
+__all__ = [
+    "SEARCH_BASIS_PREFIX",
+    "AliasGateResult",
+    "RowVerdict",
+    "auto_drops",
+    "check_alias_gate",
+    "render_alignment_report",
+    "review_queue",
+    "triage",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,3 +126,135 @@ def _автомат_вправе(verdict: RowVerdict, широкие: frozenset[
     if verdict.kind != "foreign" or len(verdict.foreign) != 1:
         return False
     return (verdict.foreign[0], verdict.needle, verdict.class_id) not in широкие
+
+
+@dataclass(frozen=True, slots=True)
+class AliasGateResult:
+    """Вердикт задачи B: что блокирует и что просто измерено."""
+
+    passed: bool
+    blocking_failures: tuple[str, ...]
+    measured: tuple[str, ...]
+
+
+def check_alias_gate(
+    rows: Sequence[HarvestRow],
+    table: AliasTable,
+    verdicts: Mapping[str, str],
+    catalog_class_ids: Collection[str],
+) -> AliasGateResult:
+    """Три блокирующих порога задачи B плюс измеряемые числа.
+
+    `rows` — манифест ДО чистки, `verdicts` — слитая карта всех проходов. Вердикты
+    применяются здесь же (`apply_audit`), потому что охват иначе не по чему считать:
+    выкинутая строка из манифеста исчезает вместе со своим вердиктом.
+
+    Разделение «блокирует / измерено» повторяет `pipeline/harvest/gate.py` и по той же
+    причине: чистота выборки под нашим контролем, рост метрики — под контролем CLIP и
+    содержимого чужого хранилища.
+    """
+    блокирующие: list[str] = []
+
+    без_игл = sorted(c for c in catalog_class_ids if c not in table)
+    if без_игл:
+        блокирующие.append(
+            f"G_AL1: у {len(без_игл)} классов каталога нет игл, например {без_игл[0]}"
+        )
+        return AliasGateResult(False, tuple(блокирующие), ())
+
+    конфликты = needle_conflicts(table)
+    if конфликты:
+        первый, второй, игла = конфликты[0]
+        блокирующие.append(
+            f"G_AL1: взаимно неразличимых игл — {len(конфликты)}, "
+            f"например «{игла}» у {первый} и {второй}"
+        )
+
+    вердикты_строк = triage(rows, table)
+    помеченные = [в for в in вердикты_строк if в.kind != "own"]
+    недостача = sorted(в.file for в in помеченные if в.file not in verdicts)
+    if недостача:
+        блокирующие.append(
+            f"G_AL2: без вердикта {len(недостача)} помеченных строк "
+            f"(например {недостача[0]}); ноль найденной грязи на непросмотренном ничего не значит"
+        )
+
+    остатки = [в for в in triage(apply_audit(rows, verdicts), table) if в.kind != "own"]
+    if остатки:
+        блокирующие.append(
+            f"G_AL3: в манифесте осталось {len(остатки)} поисковых строк без своей иглы "
+            f"(например {остатки[0].file} в {остатки[0].class_id}); "
+            f"кадр либо выкидывается, либо объясняется новой иглой"
+        )
+
+    автоматом = len(auto_drops(помеченные, table))
+    измерено = [
+        f"строк поискового базиса: {len(вердикты_строк)}",
+        f"помечено: {len(помеченные)}, из них автоматом {автоматом}, "
+        f"человеку {len(помеченные) - автоматом}",
+        f"широких игл (не блокирует): {len(broad_needles(table))}",
+    ]
+    return AliasGateResult(not блокирующие, tuple(блокирующие), tuple(измерено))
+
+
+def render_alignment_report(
+    rows: Sequence[HarvestRow],
+    table: AliasTable,
+    verdicts: Mapping[str, str],
+    gate: AliasGateResult,
+    git_sha: str,
+    ran_at: str,
+    categories: Mapping[str, bool] | None = None,
+) -> str:
+    """Собрать `bench/model-alignment.md`: числа задачи в отслеживаемом git месте.
+
+    Отчёт существует потому, что сама спека живёт вне git (`docs/` в `.gitignore`), и
+    без него от задачи не осталось бы ни одного проверяемого следа.
+    """
+    вердикты_строк = triage(rows, table)
+    помеченные = [в for в in вердикты_строк if в.kind != "own"]
+    по_классам = Counter(в.class_id for в in помеченные)
+    всего_по_классам = Counter(в.class_id for в in вердикты_строк)
+    уцелевшие = apply_audit(rows, verdicts)
+    осталось_по_классам = Counter(с.class_id for с in уцелевшие)
+
+    строки_отчёта = [
+        "# Калибровка эталонной линейки: чужие модели в классах (задача B)",
+        "",
+        f"Прогон от {ran_at}, `git_sha` — `{git_sha}`.",
+        "",
+        f"- строк в манифесте до чистки: {len(rows)}",
+        f"- строк поискового базиса: {len(вердикты_строк)}",
+        f"- помечено правилом игл: {len(помеченные)}",
+        f"- строк осталось после применения вердиктов: {len(уцелевшие)}",
+        f"- вердикт гейта: {'пройден' if gate.passed else 'НЕ ПРОЙДЕН'}",
+        "",
+        "## Блокирующие провалы",
+        "",
+        *([f"- {причина}" for причина in gate.blocking_failures] or ["Нет."]),
+        "",
+        "## Измеренные числа (не блокируют)",
+        "",
+        *[f"- {число}" for число in gate.measured],
+        "",
+        "## Классы с помеченными строками",
+        "",
+        "| Класс | Поисковых | Помечено | Осталось всего |",
+        "|---|---|---|---|",
+        *[
+            f"| `{класс}` | {всего_по_классам[класс]} | {сколько} | {осталось_по_классам[класс]} |"
+            for класс, сколько in по_классам.most_common()
+        ],
+    ]
+    if categories is not None:
+        отсутствуют = sorted(класс for класс, есть in categories.items() if not есть)
+        строки_отчёта += [
+            "",
+            "## Проверка категорий Commons (вход в задачу C)",
+            "",
+            f"Проверено классов: {len(categories)}, категория не найдена или пуста у "
+            f"{len(отсутствуют)}.",
+            "",
+            *[f"- `{класс}`" for класс in отсутствуют],
+        ]
+    return "\n".join(строки_отчёта) + "\n"
