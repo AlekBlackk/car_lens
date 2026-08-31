@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pipeline.harvest.aliases import normalize_filename
-from pipeline.harvest.commons import API_URL, Transport, request_with_backoff
+from pipeline.harvest.commons import API_URL, MIN_INTERVAL_SECONDS, Transport, request_with_backoff
 
 MAX_SUBCAT_REQUESTS = 12
 MAX_DEPTH = 2
@@ -116,6 +116,10 @@ def expand(
     Родитель идёт первым всегда, даже если файлов у него нет: пустая выдача стоит один
     запрос и не стоит отдельной проверки. `include` пробивает все правила допуска —
     явно названная человеком категория обходу не подчиняется.
+
+    Между запросами держится тот же интервал, что у харвеста (`MIN_INTERVAL_SECONDS`,
+    §3.2 SPEC): без него обход отправлял бы до `MAX_SUBCAT_REQUESTS` запросов встык.
+    Ждёт только переданный `sleep` — тесты подставляют сюда заглушку и идут мгновенно.
     """
     запрещено = {normalize_filename(имя) for имя in exclude}
     итог: list[str] = [category]
@@ -125,6 +129,7 @@ def expand(
     стоп_словом = 0
     исключением = 0
     исчерпан = False
+    последний_запрос = 0.0
 
     очередь: deque[tuple[str, int]] = deque([(category, 0)])
     while очередь:
@@ -134,8 +139,13 @@ def expand(
         if запросов >= MAX_SUBCAT_REQUESTS:
             исчерпан = True
             break
+        прошло = time.monotonic() - последний_запрос
+        if прошло < MIN_INTERVAL_SECONDS:
+            sleep(MIN_INTERVAL_SECONDS - прошло)
         запросов += 1
-        for потомок in _подкатегории(transport, родитель, sleep):
+        потомки = _подкатегории(transport, родитель, sleep)
+        последний_запрос = time.monotonic()
+        for потомок in потомки:
             имя = normalize_filename(потомок)
             if имя in видели:
                 continue

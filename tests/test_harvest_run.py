@@ -102,7 +102,7 @@ def _обход_без_сети(
     категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
 ) -> ExpandResult:
     """Заглушка обхода по умолчанию: категория сама себе дерево, ни одного запроса."""
-    return ExpandResult((категория,), 1, 0, 0, False)
+    return ExpandResult((категория,), 0, 0, 0, False)
 
 
 def _зависимости(
@@ -398,15 +398,24 @@ def test_неудача_кодирования_кропа_не_оставляе�
 
 
 def test_обход_подставляет_подкатегории_перед_терминами(tmp_path: Path) -> None:
-    вызовы: list[str] = []
+    вызовы: list[tuple[str, int, tuple[str, ...], tuple[str, ...]]] = []
 
     def обход(
         категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
     ) -> ExpandResult:
-        вызовы.append(категория)
+        вызовы.append((категория, глубина, include, exclude))
         return ExpandResult((категория, f"{категория} (DC)"), 1, 0, 0, False)
 
-    queries = ClassQueries("kia__rio", ("Kia Rio",), ("Kia Rio",))
+    # Глубина, include и exclude заданы различимыми: обе последние — `tuple[str, ...]`, и
+    # перестановка их местами прошла бы проверку типов молча.
+    queries = ClassQueries(
+        "kia__rio",
+        ("Kia Rio",),
+        ("Kia Rio",),
+        depth=2,
+        include=("Kia Rio (UB)",),
+        exclude=("Kia Rio (JB)",),
+    )
     состояние = HarvestState({}, {}, {}, set())
     deps = _зависимости(tmp_path, expand_categories=обход)
 
@@ -417,7 +426,8 @@ def test_обход_подставляет_подкатегории_перед_�
         ("Kia Rio (DC)", None),
         (None, "Kia Rio"),
     ]
-    assert вызовы == ["Kia Rio"]
+    assert вызовы == [("Kia Rio", 2, ("Kia Rio (UB)",), ("Kia Rio (JB)",))]
+    assert состояние.categories["kia__rio|Kia Rio"] == ("Kia Rio", "Kia Rio (DC)")
 
 
 def test_дерево_из_состояния_не_перезапрашивается(tmp_path: Path) -> None:

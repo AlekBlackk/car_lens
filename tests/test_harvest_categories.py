@@ -2,7 +2,7 @@ import json
 from collections.abc import Mapping
 
 from pipeline.harvest.categories import MAX_SUBCAT_REQUESTS, expand
-from pipeline.harvest.commons import HttpResponse
+from pipeline.harvest.commons import MIN_INTERVAL_SECONDS, HttpResponse
 
 
 class ЗаписанныйТранспорт:
@@ -133,3 +133,16 @@ def test_бюджет_обрывает_обход_и_отмечается() -> N
 
     assert итог.requests == MAX_SUBCAT_REQUESTS
     assert итог.budget_exhausted is True
+
+
+def test_пауза_держится_перед_каждым_следующим_запросом() -> None:
+    """Обход отправлял до MAX_SUBCAT_REQUESTS запросов встык, а §3.2 требует 2 с на домен."""
+    транспорт = ЗаписанныйТранспорт({"Kia Rio": ["Kia Rio (DC)", "Kia Rio (QB)"]})
+    паузы: list[float] = []
+
+    итог = expand(транспорт, "Kia Rio", depth=2, sleep=паузы.append)
+
+    assert транспорт.вызовы == ["Kia Rio", "Kia Rio (DC)", "Kia Rio (QB)"]
+    assert итог.requests == 3
+    assert len(паузы) == 2, "первый запрос уходит сразу, каждый следующий — после паузы"
+    assert all(0 < пауза <= MIN_INTERVAL_SECONDS for пауза in паузы)

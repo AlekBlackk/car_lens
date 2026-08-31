@@ -326,7 +326,11 @@ def _категории(queries: ClassQueries, deps: HarvestDeps, state: Harvest
 
 
 def _запросы(queries: ClassQueries, deps: HarvestDeps, state: HarvestState) -> list[SourceQuery]:
-    """Категории первыми, текстовый поиск добором: категория размечена людьми."""
+    """Категории первыми, текстовый поиск добором: категория размечена людьми.
+
+    Не чистая функция: категории разворачиваются обходом (в бою — по сети) и развёрнутое
+    дерево дописывается в `state.categories`.
+    """
     из_категорий = [
         SourceQuery(queries.class_id, категория, None, PAGE_LIMIT, None)
         for категория in _категории(queries, deps, state)
