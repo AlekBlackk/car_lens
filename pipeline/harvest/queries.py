@@ -59,7 +59,9 @@ def load_queries(path: Path) -> dict[str, ClassQueries]:
             raise QueriesError(f"{path}: у {class_id} нет ни категорий, ни терминов")
         глубина = тело.get("depth", 1)
         if not isinstance(глубина, int) or isinstance(глубина, bool) or not 0 <= глубина <= 2:
-            raise QueriesError(f"{path}: у {class_id} depth должен быть целым 0..2")
+            raise QueriesError(
+                f"{path}: у {class_id} depth должен быть целым 0..2, получено {глубина!r}"
+            )
         включения = tuple(str(x).strip() for x in (тело.get("include") or []) if str(x).strip())
         исключения = tuple(str(x).strip() for x in (тело.get("exclude") or []) if str(x).strip())
         результат[str(class_id)] = ClassQueries(

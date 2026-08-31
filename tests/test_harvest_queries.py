@@ -108,3 +108,25 @@ def test_глубина_вне_диапазона_роняет(tmp_path: Path) -
 
     with pytest.raises(QueriesError, match="depth"):
         load_queries(путь)
+
+
+@pytest.mark.parametrize("значение", ["3", "true", '"2"', "null"])
+def test_негодная_глубина_роняет(tmp_path: Path, значение: str) -> None:
+    """Не только выход за диапазон: `true` в Python — целое, а глубиной обхода не является."""
+    путь = _записать(
+        tmp_path,
+        f"version: 1\nclasses:\n  kia__rio:\n    categories: [Kia Rio]\n    depth: {значение}\n",
+    )
+
+    with pytest.raises(QueriesError, match="depth"):
+        load_queries(путь)
+
+
+def test_нулевая_глубина_допустима(tmp_path: Path) -> None:
+    """0 — легальное значение: «в подкатегории не ходить вовсе»."""
+    путь = _записать(
+        tmp_path,
+        "version: 1\nclasses:\n  kia__rio:\n    categories: [Kia Rio]\n    depth: 0\n",
+    )
+
+    assert load_queries(путь)["kia__rio"].depth == 0
