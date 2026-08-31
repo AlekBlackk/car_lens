@@ -84,14 +84,14 @@ def rebuild_row(
 
     хеш = phash_of(кроп)
 
-    вердикт = dedup.check(хеш, row.class_id)
+    вердикт = dedup.check(хеш, row.class_id, row.basis)
     if вердикт.status != "new":
         return вердикт.status, None
 
     путь = deps.root / "crops" / row.class_id / f"{row.sha256}.jpg"
     путь.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(путь), кроп)
-    dedup.add(хеш, row.class_id, путь.name)
+    dedup.add(хеш, row.class_id, путь.name, row.basis)
 
     return "accepted", replace(
         row,

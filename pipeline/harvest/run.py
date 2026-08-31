@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import csv
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -100,6 +101,10 @@ class HarvestDeps:
     # Обход категорий приходит вызываемым объектом, а не транспортом: `run.py` не должен
     # знать ни про Commons, ни про сеть — в тестах сюда подставляется функция без запросов.
     expand_categories: CategoryExpander
+    # Решения дедупа (§8 дизайна): манифест по ходу прогона не переписывается, поэтому
+    # `supersede`/`conflict` дописываются сюда, а не в manifest_path, и применяются
+    # существующим шагом `--audit`.
+    dedup_verdicts_path: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,9 +192,17 @@ def process_candidate(
 
     хеш = phash_of(кроп)
 
-    решение_дедуп = dedup.check(хеш, candidate.class_id)
-    if решение_дедуп.status != "new":
-        return решение_дедуп.status, None
+    решение_дедуп = dedup.check(хеш, candidate.class_id, candidate.basis)
+    if решение_дедуп.status == "conflict":
+        # Отметки на отбракованном кандидате не будет: строки в манифесте у него нет и не
+        # появится. Обе стороны спора видны парой «`conflict` в журнале отказов + `conflict`
+        # в манифесте».
+        _записать_вердикт(deps.dedup_verdicts_path, решение_дедуп.other, "conflict")
+        return "conflict", None
+    if решение_дедуп.status == "duplicate":
+        return "duplicate", None
+    if решение_дедуп.status == "supersede":
+        _записать_вердикт(deps.dedup_verdicts_path, решение_дедуп.other, "drop:superseded")
 
     sha = digest(данные)
     путь = crop_path(deps.root, candidate.class_id, sha)
@@ -203,7 +216,7 @@ def process_candidate(
         if not удалось:
             return "write_failed", None
         путь.write_bytes(буфер.tobytes())
-    dedup.add(хеш, candidate.class_id, путь.name)
+    dedup.add(хеш, candidate.class_id, путь.name, candidate.basis)
 
     тир = tier_of(candidate.license_raw)
     assert тир is not None  # проверено `is_allowed` выше
@@ -233,6 +246,26 @@ def process_candidate(
         det_conf=float(решение.box.conf),
         audit="",
     )
+
+
+def _записать_вердикт(path: Path, file: str | None, verdict: str) -> None:
+    """Дописать решение дедупа в CSV `file,verdict`, читаемый существующим `--audit`.
+
+    Манифест по ходу прогона не переписывается: он только дописывается, и переписывание
+    посреди сбора означало бы гонку между записью строки и записью вердикта.
+    """
+    if file is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Файл нулевой длины — файл без шапки (идиома `rejects.append_reject_row`): журнал
+    # можно укоротить через `> файл`, и без проверки размера первая дописанная строка
+    # молча стала бы шапкой.
+    новый = not path.exists() or path.stat().st_size == 0
+    with path.open("a", encoding="utf-8", newline="") as файл:
+        писатель = csv.DictWriter(файл, fieldnames=["file", "verdict"])
+        if новый:
+            писатель.writeheader()
+        писатель.writerow({"file": file, "verdict": verdict})
 
 
 def redact_and_crop(

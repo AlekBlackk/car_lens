@@ -10,6 +10,7 @@ from PIL import Image
 
 from pipeline.crop import Detection
 from pipeline.harvest.aliases import REJECT_COLUMNS
+from pipeline.harvest.audit import load_audit
 from pipeline.harvest.categories import ExpandResult
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.manifest import load_manifest
@@ -129,12 +130,20 @@ def _зависимости(
         "alias_rejects_path": tmp_path / "alias_rejects.csv",
         "reject_log_path": tmp_path / "reject_log.csv",
         "expand_categories": _обход_без_сети,
+        "dedup_verdicts_path": tmp_path / "verdicts.dedup.csv",
     }
     поля.update(правки)
     return HarvestDeps(**поля)  # type: ignore[arg-type]
 
 
 _deps = _зависимости
+
+
+def _хеш_кадра(tmp_path: Path) -> int:
+    """Хеш кропа, который даст цепочка решений: берётся из прогона, а не из копии кода."""
+    _, строка = process_candidate(_кандидат(), _зависимости(tmp_path), DedupIndex())
+    assert строка is not None
+    return строка.phash
 
 
 def test_годный_кандидат_принимается(tmp_path: Path) -> None:
@@ -219,6 +228,30 @@ def test_повтор_отсекается_дедупом(tmp_path: Path) -> Non
     process_candidate(_кандидат(), зависимости, индекс)
     причина, _ = process_candidate(_кандидат(source_item_id="99"), зависимости, индекс)
     assert причина == "duplicate"
+
+
+def test_вытеснение_пишет_вердикт_и_принимает_кадр(tmp_path: Path) -> None:
+    вердикты = tmp_path / "verdicts.dedup.csv"
+    deps = _зависимости(tmp_path, dedup_verdicts_path=вердикты)
+    дедуп = DedupIndex()
+    дедуп.add(_хеш_кадра(tmp_path), "daewoo__lanos", "a.jpg", "search:lanos")
+
+    причина, _ = process_candidate(_кандидат(basis="category:Chevrolet Lanos"), deps, дедуп)
+
+    assert причина == "accepted"
+    assert load_audit(вердикты) == {"a.jpg": "drop:superseded"}
+
+
+def test_спор_двух_категорий_помечает_старую_строку(tmp_path: Path) -> None:
+    вердикты = tmp_path / "verdicts.dedup.csv"
+    deps = _зависимости(tmp_path, dedup_verdicts_path=вердикты)
+    дедуп = DedupIndex()
+    дедуп.add(_хеш_кадра(tmp_path), "daewoo__lanos", "a.jpg", "category:Daewoo Lanos")
+
+    причина, строка = process_candidate(_кандидат(basis="category:Chevrolet Lanos"), deps, дедуп)
+
+    assert (причина, строка) == ("conflict", None)
+    assert load_audit(вердикты) == {"a.jpg": "conflict"}
 
 
 def test_прогон_класса_останавливается_на_бюджете(tmp_path: Path) -> None:

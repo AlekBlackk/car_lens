@@ -85,6 +85,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     аргументы = build_parser().parse_args(argv)
     каталог = load_catalog(DEFAULT_CATALOG_PATH)
     порядок = tuple(класс.class_id for класс in каталог.classes)
+    корень = harvest_dir()
 
     if аргументы.report_only:
         from collections import Counter
@@ -99,7 +100,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         import open_clip  # type: ignore[import-untyped]
 
-        корень = harvest_dir()
         пины = load_detectors_manifest(DEFAULT_DETECTORS_MANIFEST)
         verify_weights(пины, корень / "models")
 
@@ -159,10 +159,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             alias_rejects_path=корень / "alias_rejects.csv",
             reject_log_path=корень / "reject_log.csv",
             expand_categories=развернуть,
+            dedup_verdicts_path=корень / "verdicts.dedup.csv",
         )
 
         состояние = load_state(корень / "state.json")
-        дедуп = DedupIndex()
+        # Засев манифестом: без него второй прогон принимает во второй класс кадр, который
+        # первый уже принял в первый (§8 дизайна).
+        дедуп = (
+            DedupIndex.from_manifest(load_manifest(DEFAULT_MANIFEST_PATH))
+            if DEFAULT_MANIFEST_PATH.exists()
+            else DedupIndex()
+        )
         итоги = []
         for class_id in аргументы.classes or порядок:
             итоги.append(harvest_class(запросы[class_id], зависимости, состояние, дедуп))
@@ -174,8 +181,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     строки = load_manifest(DEFAULT_MANIFEST_PATH)
     audited_total, audited_dirty = 0, 0
-    if аргументы.audit:
-        вердикты = merge_verdicts(*(load_audit(Path(п)) for п in аргументы.audit))
+    # Файл дедупа идёт первым, а `--audit` — следом: `merge_verdicts` документирован как
+    # «поздний проход побеждает ранний, потому что человек пересмотрел своё решение». Если
+    # бы автоматика шла последней, она перебивала бы человека, и кадр, снесённый дедупом
+    # (`drop:superseded`), человек не смог бы вернуть своим `ok` — тот переписывался бы на
+    # каждом прогоне.
+    файл_дедупа = корень / "verdicts.dedup.csv"
+    пути_вердиктов = [файл_дедупа] if файл_дедупа.exists() else []
+    пути_вердиктов += [Path(п) for п in (аргументы.audit or [])]
+    if пути_вердиктов:
+        вердикты = merge_verdicts(*(load_audit(п) for п in пути_вердиктов))
         с_вердиктами = [replace(s, audit=вердикты.get(s.file, s.audit)) for s in строки]
         audited_total, audited_dirty = audit_counts(с_вердиктами)
         строки = apply_audit(строки, вердикты)
