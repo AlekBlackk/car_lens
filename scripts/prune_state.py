@@ -26,12 +26,12 @@ from pipeline.harvest.state import ACCEPTED_TARGET, HarvestState, load_state, sa
 from pipeline.paths import harvest_dir
 
 
-def prune(state: HarvestState, rows: Sequence[HarvestRow]) -> HarvestState:
-    """Пересобрать состояние по манифесту: и `done_items`, и `accepted` считаются по строкам.
+def prune(rows: Sequence[HarvestRow]) -> HarvestState:
+    """Собрать прополотое состояние по манифесту: и `done_items`, и `accepted` — из строк.
 
-    `state` не читается ни одним полем: после поправки 2026-09-01 прополотое состояние целиком
-    выводится из манифеста. Параметр оставлен, чтобы подпись читалась как «прежнее → новое» и
-    вызов оставался проверяемым на идемпотентность.
+    Прежнее состояние на вход не нужно: после поправки 2026-09-01 каждое поле выводится из
+    манифеста, а `seen`, `tokens` и `categories` обнуляются (§7 дизайна C1). `main()` читает
+    старое состояние сам — только чтобы напечатать дельту и положить его в `.bak`.
     """
     return HarvestState(
         seen={},
@@ -60,7 +60,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     состояние = load_state(путь)
     строки = load_manifest(аргументы.manifest)
-    новое = prune(состояние, строки)
+    новое = prune(строки)
 
     print(f"done_items: было {len(состояние.done_items)}, станет {len(новое.done_items)}")
     print(f"удаляется меток: {len(состояние.done_items - новое.done_items)}")

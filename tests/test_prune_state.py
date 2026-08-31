@@ -55,54 +55,40 @@ def _записать_манифест(путь: Path) -> None:
 
 
 def test_остаются_только_принятые() -> None:
-    состояние = HarvestState(
-        seen={"kia__rio": 120},
-        accepted={"kia__rio": 26},
-        tokens={"kia__rio|category:Kia Rio": "page|1"},
-        done_items={"commons:1", "commons:2", "commons:3"},
-    )
-    состояние.categories["kia__rio|Kia Rio"] = ("Kia Rio",)
     строки = [_строка(source="commons", source_item_id="2")]
 
-    итог = prune(состояние, строки)
+    итог = prune(строки)
 
     assert итог.done_items == {"commons:2"}
     assert итог.seen == {}
     assert итог.tokens == {}
     assert итог.categories == {}
-    # Единственная строка манифеста принадлежит `lada__granta`, поэтому счётчик пересобирается
-    # на неё, а `kia__rio`, чьих строк в манифесте нет, из него исчезает.
+    # Единственная строка манифеста принадлежит `lada__granta`, поэтому счётчик собирается
+    # на неё: классов, которых в манифесте нет, в `accepted` не появляется.
     assert итог.accepted == {"lada__granta": 1}
 
 
 def test_завышенный_счётчик_снова_открывает_класс() -> None:
-    состояние = HarvestState({}, {"lada__granta": 30}, {}, set())
+    # Случай `lada__niva_2131` 30/2: состояние считало класс добравшим цель, живых строк две.
     строки = [
         _строка(source="commons", source_item_id="2"),
         _строка(source="commons", source_item_id="3"),
     ]
 
-    итог = prune(состояние, строки)
+    итог = prune(строки)
 
     assert итог.accepted == {"lada__granta": 2}
     assert is_class_done(итог, "lada__granta") is False
 
 
 def test_класс_без_строк_в_манифесте_исчезает_из_счётчика() -> None:
-    состояние = HarvestState({}, {"chevrolet__lanos": 30, "lada__granta": 30}, {}, set())
+    # Случай `chevrolet__lanos` 30/0: аудит выкинул все строки класса, ключа он не получает.
     строки = [_строка(source="commons", source_item_id="2")]
 
-    итог = prune(состояние, строки)
+    итог = prune(строки)
 
     assert "chevrolet__lanos" not in итог.accepted
     assert итог.accepted == {"lada__granta": 1}
-
-
-def test_прополка_идемпотентна() -> None:
-    состояние = HarvestState({}, {"kia__rio": 1}, {}, {"commons:2"})
-    строки = [_строка(source="commons", source_item_id="2")]
-
-    assert prune(prune(состояние, строки), строки).done_items == {"commons:2"}
 
 
 def test_сухой_прогон_ничего_не_пишет(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
