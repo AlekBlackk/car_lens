@@ -30,11 +30,14 @@ class QueriesError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class ClassQueries:
-    """Чем искать один класс: категории Commons и текстовые термины."""
+    """Чем искать один класс: категории Commons, текстовые термины и правила обхода."""
 
     class_id: str
     categories: tuple[str, ...]
     terms: tuple[str, ...]
+    depth: int = 1
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
 
 
 def load_queries(path: Path) -> dict[str, ClassQueries]:
@@ -54,7 +57,19 @@ def load_queries(path: Path) -> dict[str, ClassQueries]:
         термины = tuple(str(x).strip() for x in (тело.get("terms") or []) if str(x).strip())
         if not категории and not термины:
             raise QueriesError(f"{path}: у {class_id} нет ни категорий, ни терминов")
-        результат[str(class_id)] = ClassQueries(str(class_id), категории, термины)
+        глубина = тело.get("depth", 1)
+        if not isinstance(глубина, int) or isinstance(глубина, bool) or not 0 <= глубина <= 2:
+            raise QueriesError(f"{path}: у {class_id} depth должен быть целым 0..2")
+        включения = tuple(str(x).strip() for x in (тело.get("include") or []) if str(x).strip())
+        исключения = tuple(str(x).strip() for x in (тело.get("exclude") or []) if str(x).strip())
+        результат[str(class_id)] = ClassQueries(
+            str(class_id),
+            категории,
+            термины,
+            depth=глубина,
+            include=включения,
+            exclude=исключения,
+        )
     return результат
 
 

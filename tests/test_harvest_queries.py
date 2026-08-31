@@ -64,3 +64,47 @@ def test_латинские_имена_покрывают_каталог() -> No
     assert set(имена) == {класс.class_id for класс in каталог.classes}
     for имя in имена.values():
         assert имя.isascii()
+
+
+def test_новые_поля_читаются(tmp_path: Path) -> None:
+    путь = tmp_path / "q.yaml"
+    путь.write_text(
+        "version: 1\n"
+        "classes:\n"
+        "  hyundai__accent:\n"
+        "    categories: [Hyundai Accent]\n"
+        '    terms: ["Hyundai Accent"]\n'
+        "    depth: 2\n"
+        '    exclude: ["Hyundai Accent (RB)"]\n'
+        '    include: ["Hyundai Accent (X3)"]\n',
+        encoding="utf-8",
+    )
+
+    класс = load_queries(путь)["hyundai__accent"]
+
+    assert класс.depth == 2
+    assert класс.exclude == ("Hyundai Accent (RB)",)
+    assert класс.include == ("Hyundai Accent (X3)",)
+
+
+def test_без_новых_полей_действуют_умолчания(tmp_path: Path) -> None:
+    путь = tmp_path / "q.yaml"
+    путь.write_text(
+        'version: 1\nclasses:\n  kia__rio:\n    categories: [Kia Rio]\n    terms: ["Kia Rio"]\n',
+        encoding="utf-8",
+    )
+
+    класс = load_queries(путь)["kia__rio"]
+
+    assert (класс.depth, класс.include, класс.exclude) == (1, (), ())
+
+
+def test_глубина_вне_диапазона_роняет(tmp_path: Path) -> None:
+    путь = tmp_path / "q.yaml"
+    путь.write_text(
+        "version: 1\nclasses:\n  kia__rio:\n    categories: [Kia Rio]\n    depth: 5\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(QueriesError, match="depth"):
+        load_queries(путь)
