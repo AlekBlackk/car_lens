@@ -157,6 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             checked=date.today().isoformat(),
             alias_table=иглы,
             alias_rejects_path=корень / "alias_rejects.csv",
+            reject_log_path=корень / "reject_log.csv",
             expand_categories=развернуть,
         )
 

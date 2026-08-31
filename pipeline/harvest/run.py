@@ -36,6 +36,7 @@ from pipeline.harvest.licenses import canonical_name, is_allowed, tier_of
 from pipeline.harvest.manifest import HarvestRow, append_row, strip_html
 from pipeline.harvest.queries import ClassQueries
 from pipeline.harvest.redact import redact_frame
+from pipeline.harvest.rejects import Reject, append_reject_row
 from pipeline.harvest.sources import (
     SEARCH_BASIS_PREFIX,
     Candidate,
@@ -93,6 +94,9 @@ class HarvestDeps:
     checked: str
     alias_table: AliasTable
     alias_rejects_path: Path
+    # Отдельный журнал от `alias_rejects_path`: там подробности вердикта игл, здесь единая
+    # линейка причин всей цепочки решений, переживающая прогон.
+    reject_log_path: Path
     # Обход категорий приходит вызываемым объектом, а не транспортом: `run.py` не должен
     # знать ни про Commons, ни про сеть — в тестах сюда подставляется функция без запросов.
     expand_categories: CategoryExpander
@@ -287,6 +291,17 @@ def harvest_class(
                 причина, строка = process_candidate(кандидат, deps, dedup)
                 if строка is None:
                     отказы[причина] += 1
+                    append_reject_row(
+                        deps.reject_log_path,
+                        Reject(
+                            class_id=class_id,
+                            basis=кандидат.basis,
+                            source=кандидат.source,
+                            source_item_id=кандидат.source_item_id,
+                            reason=причина,
+                            checked=deps.checked,
+                        ),
+                    )
                     continue
                 append_row(deps.manifest_path, строка)
                 state.accepted[class_id] = state.accepted.get(class_id, 0) + 1

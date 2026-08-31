@@ -14,6 +14,7 @@ from pipeline.harvest.categories import ExpandResult
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.manifest import load_manifest
 from pipeline.harvest.queries import ClassQueries
+from pipeline.harvest.rejects import load_rejects
 from pipeline.harvest.run import (
     MAX_BLACK_PIXEL_FRAC,
     HarvestDeps,
@@ -126,6 +127,7 @@ def _зависимости(
         "checked": "2026-08-28",
         "alias_table": {"lada__granta": ("granta",), "uaz__patriot": ("patriot",)},
         "alias_rejects_path": tmp_path / "alias_rejects.csv",
+        "reject_log_path": tmp_path / "reject_log.csv",
         "expand_categories": _обход_без_сети,
     }
     поля.update(правки)
@@ -444,3 +446,14 @@ def test_дерево_из_состояния_не_перезапрашивае�
     список = _запросы(queries, deps, состояние)
 
     assert [з.category for з in список] == ["Kia Rio", "Kia Rio (QB)"]
+
+
+def test_отказ_попадает_в_журнал(tmp_path: Path) -> None:
+    журнал = tmp_path / "reject_log.csv"
+    источник = ПодставнойИсточник([SearchPage((_кандидат(width=400),), None)])
+    deps = _зависимости(tmp_path, источник, reject_log_path=журнал)
+    состояние = HarvestState({}, {}, {}, set())
+
+    harvest_class(ClassQueries("lada__granta", (), ("Lada Granta",)), deps, состояние, DedupIndex())
+
+    assert [с.reason for с in load_rejects(журнал)] == ["too_small_file"]
