@@ -175,7 +175,8 @@ def test_гейт_проходит_когда_всё_помеченное_вык
         _строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX"),
         _строка("b.jpg", "lexus__lx", "2019_Lexus_LX570.jpg", "search:Lexus LX"),
     ]
-    гейт = check_alias_gate(строки, _ТАБЛИЦА, {"a.jpg": "drop:wrong_model"}, _КЛАССЫ)
+    вердикты = {"a.jpg": "drop:wrong_model"}
+    гейт = check_alias_gate(строки, _ТАБЛИЦА, вердикты, вердикты, _КЛАССЫ)
     assert гейт.passed
     assert гейт.blocking_failures == ()
 
@@ -183,7 +184,16 @@ def test_гейт_проходит_когда_всё_помеченное_вык
 def test_строка_без_вердикта_роняет_g_al2() -> None:
     """«Ноль найденной грязи» одинаково верно и когда её не смотрели."""
     строки = [_строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX")]
-    гейт = check_alias_gate(строки, _ТАБЛИЦА, {}, _КЛАССЫ)
+    гейт = check_alias_gate(строки, _ТАБЛИЦА, {}, {}, _КЛАССЫ)
+    assert not гейт.passed
+    assert any("G_AL2" in причина for причина in гейт.blocking_failures)
+
+
+def test_строка_без_алиас_вердикта_роняет_g_al2() -> None:
+    """Вердикт H3/privacy в all_verdicts не закрывает G_AL2: модель не смотрели."""
+    строки = [_строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX")]
+    все_вердикты = {"a.jpg": "ok"}
+    гейт = check_alias_gate(строки, _ТАБЛИЦА, все_вердикты, {}, _КЛАССЫ)
     assert not гейт.passed
     assert any("G_AL2" in причина for причина in гейт.blocking_failures)
 
@@ -191,25 +201,76 @@ def test_строка_без_вердикта_роняет_g_al2() -> None:
 def test_вердикт_ok_на_молчащем_имени_не_закрывает_g_al3() -> None:
     """Кадр оставили — значит имя надо объяснить иглой, а не вердиктом."""
     строки = [_строка("a.jpg", "lexus__lx", "IMG_0412.jpg", "search:Lexus LX")]
-    гейт = check_alias_gate(строки, _ТАБЛИЦА, {"a.jpg": "ok"}, _КЛАССЫ)
+    вердикты = {"a.jpg": "ok"}
+    гейт = check_alias_gate(строки, _ТАБЛИЦА, вердикты, вердикты, _КЛАССЫ)
     assert not гейт.passed
     assert any("G_AL3" in причина for причина in гейт.blocking_failures)
 
 
-def test_неполная_таблица_роняет_g_al1() -> None:
+def test_неполная_таблица_роняет_g_al1_и_рендер_отчёта_не_падает() -> None:
     """Строки непустые намеренно: на пустых гейт не дошёл бы до `triage` и дефект бы уцелел."""
     строки = [_строка("a.jpg", "нет__игл", "2019_Lexus_LX570.jpg", "search:Нет игл")]
-    гейт = check_alias_gate(строки, _ТАБЛИЦА, {}, (*_КЛАССЫ, "нет__игл"))
+    все_классы = (*_КЛАССЫ, "нет__игл")
+    гейт = check_alias_gate(строки, _ТАБЛИЦА, {}, {}, все_классы)
     assert not гейт.passed
     assert any("G_AL1" in причина for причина in гейт.blocking_failures)
+    assert гейт.measured == ()
+
+    отчёт = render_alignment_report(строки, _ТАБЛИЦА, {}, гейт, "abc1234", "2026-08-31")
+    assert "НЕ ПРОЙДЕН" in отчёт
+    assert "G_AL1" in отчёт
+    assert "Нет." in отчёт
+
+
+def test_конфликт_игл_роняет_g_al1() -> None:
+    """Взаимно неразличимые иглы у двух классов блокируют G_AL1."""
+    конфликтная_таблица = {
+        "chevrolet__niva": ("niva",),
+        "lada__niva_2121": ("niva",),
+    }
+    классы = ("chevrolet__niva", "lada__niva_2121")
+    гейт = check_alias_gate([], конфликтная_таблица, {}, {}, классы)
+    assert not гейт.passed
+    assert any("G_AL1: взаимно неразличимых игл" in причина for причина in гейт.blocking_failures)
+
+
+def test_арифметика_автомата_и_широких_игл_пинится() -> None:
+    """Широкие иглы не идут в автодроп, но считаются в broad_needles и measured."""
+    строки = [
+        _строка("a.jpg", "lada__niva_2131", "VAZ_2121_Niva.jpg", "search:Lada Niva 2131"),
+        _строка("b.jpg", "lada__niva_2131", "Lada_Niva_2.jpg", "search:Lada Niva 2131"),
+    ]
+    вердикты = triage(строки, _ТАБЛИЦА_НИВЫ)
+    авто = auto_drops(вердикты, _ТАБЛИЦА_НИВЫ)
+    очередь = review_queue(вердикты, _ТАБЛИЦА_НИВЫ)
+    assert [в.file for в in авто] == ["a.jpg"]
+    assert [в.file for в in очередь] == ["b.jpg"]
+
+    вердикты_карта = {"a.jpg": "drop:wrong_model", "b.jpg": "drop:wrong_model"}
+    гейт = check_alias_gate(
+        строки, _ТАБЛИЦА_НИВЫ, вердикты_карта, вердикты_карта, tuple(_ТАБЛИЦА_НИВЫ)
+    )
+    assert гейт.passed
+    assert "помечено: 2, из них автоматом 1, человеку 1" in гейт.measured[1]
+    assert "широких игл (не блокирует): 1 (пар: 1)" in гейт.measured[2]
 
 
 def test_отчёт_несёт_числа_и_вердикт() -> None:
-    строки = [_строка("a.jpg", "lexus__lx", "1982_Toyota_Land_Cruiser.jpg", "search:Lexus LX")]
-    гейт = check_alias_gate(строки, _ТАБЛИЦА, {"a.jpg": "drop:wrong_model"}, _КЛАССЫ)
-    отчёт = render_alignment_report(
-        строки, _ТАБЛИЦА, {"a.jpg": "drop:wrong_model"}, гейт, "abc1234", "2026-08-31"
-    )
+    строки = [
+        _строка(
+            "a.jpg", "lada__niva_2131", "1982_Toyota_Land_Cruiser.jpg", "search:Lada Niva 2131"
+        ),
+        _строка("b.jpg", "lada__niva_2131", "Lada_Niva_2.jpg", "search:Lada Niva 2131"),
+    ]
+    вердикты = {"a.jpg": "drop:wrong_model", "b.jpg": "drop:wrong_model"}
+    гейт = check_alias_gate(строки, _ТАБЛИЦА_НИВЫ, вердикты, вердикты, tuple(_ТАБЛИЦА_НИВЫ))
+    отчёт = render_alignment_report(строки, _ТАБЛИЦА_НИВЫ, вердикты, гейт, "abc1234", "2026-08-31")
     assert "abc1234" in отчёт
-    assert "lexus__lx" in отчёт
+    assert "lada__niva_2131" in отчёт
     assert "пройден" in отчёт
+    assert "- строк в манифесте до чистки: 2" in отчёт
+    assert "- строк поискового базиса: 2" in отчёт
+    assert "- помечено правилом игл: 2" in отчёт
+    assert "- строк осталось после применения вердиктов: 0" in отчёт
+    assert "- `lada__niva_2121`: «niva» накрывает класс `lada__niva_2131`" in отчёт
+    assert "- широких игл (не блокирует): 1 (пар: 1)" in отчёт
