@@ -97,3 +97,27 @@ def test_отчёт_содержит_вердикт_пороги_и_провен
     assert str(G_FS1_TOP1) in отчёт
     assert "abc1234" in отчёт and "deadbeef" in отчёт
     assert "lifan__x60" in отчёт
+
+
+def test_отчёт_содержит_блок_цена_решения_и_дроблёные_классы() -> None:
+    метрики = _метрики(top1=0.5)
+    итог = check_gate(метрики, catalog_classes=КАТАЛОГ)
+    дроблёные = ("bmw__x5", "lada__granta")
+    отчёт = render_report(
+        метрики,
+        итог,
+        git_sha="abc1234",
+        run_date="2026-08-30",
+        encoder="openclip_b32",
+        index_sha256="deadbeef",
+        holdout_frames=1442,
+        pool_frames=2232,
+        catalog_classes=КАТАЛОГ,
+        missing_holdout=(),
+        refined_classes=дроблёные,
+    )
+    assert "Цена решения" in отчёт
+    assert "утечк" in отчёт.lower()
+    assert "2" in отчёт
+    assert "`bmw__x5`" in отчёт
+    assert "`lada__granta`" in отчёт

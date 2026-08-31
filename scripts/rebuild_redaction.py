@@ -31,6 +31,7 @@ from pipeline.harvest.manifest import (
     load_manifest,
 )
 from pipeline.harvest.redact import redact_frame
+from pipeline.harvest.run import is_crop_over_redacted
 from pipeline.paths import harvest_dir
 
 
@@ -78,7 +79,11 @@ def rebuild_row(
         return "redaction_failed", None
 
     кроп = crop_image(итог.image, решение.box)
+    if is_crop_over_redacted(кроп):
+        return "over_redacted", None
+
     хеш = phash_of(кроп)
+
     вердикт = dedup.check(хеш, row.class_id)
     if вердикт.status != "new":
         return вердикт.status, None

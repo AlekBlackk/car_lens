@@ -8,7 +8,7 @@ from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
 from pipeline.harvest.manifest import HarvestRow
 from pipeline.holdout import listing_id_of
 from pipeline.schema import validate_frame
-from scripts.build_holdout_ru import строки_в_кадр
+from scripts.build_holdout_ru import строки_в_кадр, сформировать_отчёт_сплита
 from tests.test_holdout import _класс
 
 
@@ -58,3 +58,19 @@ def test_ключ_дроблёной_единицы_попадает_в_listing_
     единицы = {строка.file: f"{listing_id_of(строка)}#7" for строка in строки}
     кадр = строки_в_кадр(строки, каталог, единицы)
     assert all(lid.endswith("#7") for lid in кадр["listing_id"])
+
+
+def test_сформировать_отчёт_сплита_содержит_дроблёные_и_короткие_классы() -> None:
+    from pipeline.holdout import HoldoutSelection
+
+    выбор = HoldoutSelection(
+        files=frozenset(["a.jpg", "b.jpg"]),
+        short_classes=("lifan__x60",),
+        refined_classes=("lada__granta", "bmw__x5"),
+        units=(("a.jpg", "u1"), ("b.jpg", "u2")),
+    )
+    отчёт = сформировать_отчёт_сплита(holdout_frames=2, pool_frames=10, selection=выбор)
+    assert отчёт["holdout_frames"] == 2
+    assert отчёт["pool_frames"] == 10
+    assert отчёт["refined_classes"] == ["lada__granta", "bmw__x5"]
+    assert отчёт["short_classes"] == ["lifan__x60"]

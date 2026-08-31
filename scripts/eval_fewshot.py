@@ -68,6 +68,14 @@ def missing_holdout_classes(
     )
 
 
+def read_split_report(report_path: Path) -> tuple[str, ...]:
+    """Прочитать список дроблёных классов из отчёта сплита, если файл существует."""
+    if not report_path.exists():
+        return ()
+    данные = json.loads(report_path.read_text(encoding="utf-8"))
+    return tuple(данные.get("refined_classes", ()))
+
+
 def evaluate(
     embeddings: np.ndarray,
     targets: Sequence[int],
@@ -138,6 +146,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
 
+    отчёт_сплита_путь = splits_dir() / f"{аргументы.split}_report.json"
+    дроблёные = read_split_report(отчёт_сплита_путь)
+
     аргументы.report.parent.mkdir(parents=True, exist_ok=True)
     аргументы.report.write_text(
         render_report(
@@ -151,6 +162,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             pool_frames=int(сборка["embeddings_total"]),
             catalog_classes=заголовок.num_classes,
             missing_holdout=missing_holdout_classes(имена, метрики),
+            refined_classes=дроблёные,
         ),
         encoding="utf-8",
     )
@@ -164,6 +176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "gate_passed": гейт.passed,
                 "gate_failures": list(гейт.failures),
                 "deficient_classes": list(гейт.deficient_classes),
+                "refined_classes": list(дроблёные),
             },
             ensure_ascii=False,
             indent=2,

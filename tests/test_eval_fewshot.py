@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 from pipeline.fewshot.metrics import FewShotMetrics
-from scripts.eval_fewshot import evaluate, idx_to_class_id_of, missing_holdout_classes
+from scripts.eval_fewshot import (
+    evaluate,
+    idx_to_class_id_of,
+    missing_holdout_classes,
+    read_split_report,
+)
 
 МЕТА = {
     "classes": [
@@ -54,3 +61,16 @@ def test_evaluate_ловит_ошибки_ранжирования() -> None:
 
     with pytest.raises(ValueError):
         evaluate(эмбеддинги, [0, 1], центроиды, {0: "a", 1: "b", 2: "c"})
+
+
+def test_чтение_отчёта_сплита_извлекает_дроблёные_классы(tmp_path: Path) -> None:
+    import json
+
+    путь = tmp_path / "holdout_ru_report.json"
+    путь.write_text(json.dumps({"refined_classes": ["bmw__x5", "lada__granta"]}), encoding="utf-8")
+    assert read_split_report(путь) == ("bmw__x5", "lada__granta")
+
+
+def test_чтение_отчёта_сплита_когда_нет_файла_возвращает_пустой_кортеж(tmp_path: Path) -> None:
+    путь = tmp_path / "несуществующий_report.json"
+    assert read_split_report(путь) == ()

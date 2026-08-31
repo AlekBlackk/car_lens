@@ -154,6 +154,15 @@ def test_rebuild_отклоняет_no_vehicle_и_multi_car(tmp_path: Path) -> N
     assert строка_m is None
 
 
+def test_rebuild_отклоняет_over_redacted(tmp_path: Path) -> None:
+    sha = "a" * 64
+    _оригинал(tmp_path, sha)
+    plate = Фикс([[Detection(40.0, 40.0, 360.0, 300.0, 0.95, 0)], [], [], []])
+    причина, строка = rebuild_row(_строка(sha), _deps(tmp_path, plate), DedupIndex())
+    assert причина == "over_redacted"
+    assert строка is None
+
+
 def test_build_parser() -> None:
     parser = build_parser()
     args = parser.parse_args(["--models", "models_dir", "--data-root", "data_dir"])

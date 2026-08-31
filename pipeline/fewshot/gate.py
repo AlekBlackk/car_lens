@@ -114,6 +114,7 @@ def render_report(
     pool_frames: int,
     catalog_classes: int,
     missing_holdout: Sequence[str],
+    refined_classes: Sequence[str] = (),
 ) -> str:
     """Собрать `bench/fewshot-m2.md`.
 
@@ -156,6 +157,17 @@ def render_report(
     ]
     if gate.failures:
         строки += ["Провалы:", "", *(f"- {провал}" for провал in gate.failures), ""]
+    if refined_classes:
+        строки += [
+            f"## Цена решения: дробление по pHash ({len(refined_classes)} классов)",
+            "",
+            "Серии авторов разбиты на компоненты связности pHash для классов с недобором эталона.",
+            "Допущена контролируемая утечка автора между эталоном и обучающим пулом; "
+            "остаточный риск — возможное завышение метрики на этих классах.",
+            "",
+            *(f"- `{class_id}`" for class_id in refined_classes),
+            "",
+        ]
     if missing_holdout:
         строки += [
             f"## Классов без эталона: {len(missing_holdout)}",

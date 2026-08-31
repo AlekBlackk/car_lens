@@ -8,14 +8,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, Catalog, class_index, load_catalog
 from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, HarvestRow, load_manifest
-from pipeline.holdout import HOLDOUT_MIN, HOLDOUT_TARGET, select_holdout
+from pipeline.holdout import HOLDOUT_MIN, HOLDOUT_TARGET, HoldoutSelection, select_holdout
 from pipeline.paths import splits_dir
 from pipeline.schema import empty_frame, write_split
 from pipeline.split import check_invariants
@@ -71,6 +73,20 @@ def строки_в_кадр(
     return pd.DataFrame(записи)
 
 
+def сформировать_отчёт_сплита(
+    holdout_frames: int,
+    pool_frames: int,
+    selection: HoldoutSelection,
+) -> dict[str, Any]:
+    """Данные для сайдкара провенанса сплита."""
+    return {
+        "holdout_frames": holdout_frames,
+        "pool_frames": pool_frames,
+        "refined_classes": list(selection.refined_classes),
+        "short_classes": list(selection.short_classes),
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Разделить манифест на эталон и пул, записать parquet, проверить инварианты."""
     парсер = argparse.ArgumentParser(description="Собрать holdout_ru (правило 2 Р-11)")
@@ -96,6 +112,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     write_split(эталон, splits_dir() / "holdout_ru.parquet")
     write_split(пул, splits_dir() / "pool.parquet")
+
+    отчёт_данные = сформировать_отчёт_сплита(len(эталон), len(пул), выбор)
+    (splits_dir() / "holdout_ru_report.json").write_text(
+        json.dumps(отчёт_данные, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     print(f"holdout_ru: {len(эталон)} кадров, pool: {len(пул)} кадров")
     print(f"дроблено по pHash: {len(выбор.refined_classes)} классов")
