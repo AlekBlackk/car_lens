@@ -367,11 +367,37 @@ def test_cli_успешный_прогон_с_вердиктами(tmp_path: Pat
     assert "пройден" in отчёт.read_text(encoding="utf-8")
 
 
-def test_check_categories_требует_contact(tmp_path: Path) -> None:
+def test_check_categories_без_contact_падает_до_первой_записи(tmp_path: Path) -> None:
+    """Негодная пара флагов обязана падать раньше записи артефактов.
+
+    Проверка стояла перед рендером отчёта, то есть после автовердиктов и очереди, и сам
+    этот тест затирал очередь человека в каталоге данных: пути по умолчанию ведут в
+    рабочее дерево и в `~/carlens-data`.
+    """
     манифест = tmp_path / "harvest_manifest.csv"
     write_manifest(манифест, [])
+    вердикты = tmp_path / "verdicts.alias.csv"
+    очередь = tmp_path / "alias_queue.txt"
+    отчёт = tmp_path / "model-alignment.md"
+
     with pytest.raises(SystemExit):
-        триаж_main(["--manifest", str(манифест), "--check-categories"])
+        триаж_main(
+            [
+                "--manifest",
+                str(манифест),
+                "--out-verdicts",
+                str(вердикты),
+                "--queue",
+                str(очередь),
+                "--report",
+                str(отчёт),
+                "--check-categories",
+            ]
+        )
+
+    assert not вердикты.exists(), "автовердикты записаны до проверки флагов"
+    assert not очередь.exists(), "очередь перезаписана до проверки флагов"
+    assert not отчёт.exists()
 
 
 def test_проверить_категории_пропускает_классы_с_категориями_и_опрашивает_остальные(

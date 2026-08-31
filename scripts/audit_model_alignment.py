@@ -99,7 +99,13 @@ def проверить_категории(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Прогнать триаж, записать артефакты и вернуть код по вердикту гейта."""
-    аргументы = build_parser().parse_args(argv)
+    парсер = build_parser()
+    аргументы = парсер.parse_args(argv)
+    # Негодная пара флагов отвергается раньше любой записи: пути по умолчанию ведут в
+    # рабочее дерево и в каталог данных, и падение на середине затирало бы очередь,
+    # которую человек уже набрал глазами.
+    if аргументы.check_categories and not аргументы.contact:
+        парсер.error("--check-categories требует --contact (§3.2)")
     очередь_путь = аргументы.queue or (harvest_dir() / "alias_queue.txt")
 
     таблица = load_alias_table(аргументы.aliases)
@@ -143,11 +149,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     sha = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
-    категории = None
-    if аргументы.check_categories:
-        if not аргументы.contact:
-            build_parser().error("--check-categories требует --contact (§3.2)")
-        категории = проверить_категории(строки, аргументы.contact)
+    категории = (
+        проверить_категории(строки, аргументы.contact) if аргументы.check_categories else None
+    )
     аргументы.report.parent.mkdir(parents=True, exist_ok=True)
     аргументы.report.write_text(
         render_alignment_report(
