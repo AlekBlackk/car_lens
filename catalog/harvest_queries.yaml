@@ -26,10 +26,10 @@ classes:
     categories: [BMW X5]
     terms: ["BMW X5"]
   changan__cs35_plus:
-    categories: [Changan CS35 Plus]
+    categories: ["Chang'an CS35 Plus"]
     terms: ["Changan CS35 Plus"]
   changan__cs55_plus:
-    categories: [Changan CS55 Plus]
+    categories: ["Chang'an CS55 Plus"]
     terms: ["Changan CS55 Plus"]
   chery__amulet:
     categories: [Chery Amulet, Chery A15, Chery Cowin]
@@ -74,7 +74,7 @@ classes:
     categories: [Daewoo Nexia]
     terms: ["Daewoo Nexia"]
   datsun__on_do:
-    categories: [Datsun on-DO]
+    categories: [Datsun on-Do]
     terms: ["Datsun on-DO"]
   exeed__txl:
     categories: [Exeed TXL, EXEED TXL]
@@ -104,7 +104,7 @@ classes:
     categories: [GAZ Sobol, GAZ-2752 Sobol]
     terms: ["GAZ Sobol"]
   gaz__volga_3110:
-    categories: [GAZ-3110 Volga, GAZ-31105 Volga, GAZ Volga]
+    categories: [GAZ-3110, GAZ-31105]
     terms: ["GAZ Volga", "GAZ-3110", "GAZ-31105"]
   geely__emgrand:
     categories: [Geely Emgrand, Geely Emgrand EC7]
@@ -127,6 +127,7 @@ classes:
   grp__solaris_hs:
     categories: [Hyundai Solaris, Solaris HS]
     terms: ["Hyundai Solaris", "Solaris HS"]
+    include: ["Hyundai Accent (RB)", "Hyundai Accent (HC)"]
   grp__tiggo7:
     categories: [Chery Tiggo 7 Pro, Chery Tiggo 7, Xcite X-Cross 7]
     terms: ["Chery Tiggo 7 Pro", "Chery Tiggo 7", "Xcite X-Cross 7"]
@@ -151,6 +152,7 @@ classes:
   hyundai__accent:
     categories: [Hyundai Accent]
     terms: ["Hyundai Accent"]
+    exclude: ["Hyundai Accent (RB)", "Hyundai Accent (HC)"]
   hyundai__creta:
     categories: [Hyundai Creta]
     terms: ["Hyundai Creta"]
@@ -227,7 +229,7 @@ classes:
     categories: [VAZ-2121, Lada 4x4, Lada Niva]
     terms: ["VAZ-2121", "Lada Niva", "Lada 4x4"]
   lada__niva_2131:
-    categories: [VAZ-2131, Lada 2131]
+    categories: [Long-wheelbase Lada Nivas]
     terms: ["VAZ-2131", "Lada 2131"]
   lada__niva_travel:
     categories: [Lada Niva Travel]
@@ -239,7 +241,7 @@ classes:
     categories: [VAZ-2108, VAZ-2109, VAZ-21099, Lada Samara]
     terms: ["VAZ-2108", "VAZ-2109", "VAZ-21099", "Lada Samara"]
   lada__samara_2:
-    categories: [VAZ-2113, VAZ-2114, VAZ-2115, Lada Samara 2]
+    categories: [Lada 2114, Lada 2115, VAZ 2113]
     terms: ["VAZ-2113", "VAZ-2114", "VAZ-2115", "Lada Samara-2"]
   lada__vesta:
     categories: [Lada Vesta]
@@ -299,7 +301,7 @@ classes:
     categories: [Mitsubishi Pajero, Mitsubishi Montero]
     terms: ["Mitsubishi Pajero", "Mitsubishi Montero"]
   moskvich__2140:
-    categories: [Moskvitch-2140, Moskvich 2140]
+    categories: [Moskvich-2140]
     terms: ["Moskvich 2140", "Moskvitch-2140", "AZLK 2140"]
   moskvich__2141:
     categories: [Moskvitch-2141, Moskvich 2141, Aleko]
@@ -344,7 +346,7 @@ classes:
     categories: [Porsche Cayenne]
     terms: ["Porsche Cayenne"]
   ravon__nexia_r3:
-    categories: [Ravon Nexia R3]
+    categories: [Ravon R3]
     terms: ["Ravon Nexia R3"]
   renault__duster:
     categories: [Renault Duster, Dacia Duster]
