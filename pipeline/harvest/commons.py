@@ -177,12 +177,12 @@ class CommonsSource:
 def category_is_populated(
     transport: Transport, category: str, sleep: Callable[[float], None] = time.sleep
 ) -> bool:
-    """Есть ли в категории Commons хотя бы один файл.
+    """Есть ли в категории Commons хотя бы один файл или подкатегория.
 
     Существование и непустота здесь одно и то же: класс, чья категория пуста, и класс,
     чьей категории нет, получают одинаковый ноль принятых строк, и лечатся оба правкой
-    имени в `harvest_queries.yaml`. Различать их значило бы придумывать разницу, которой
-    у задачи нет.
+    имени в `harvest_queries.yaml`. Наличие подкатегорий означает живую категорию
+    (файлы разложены по поколениям/годам), требующую рекурсивного сбора.
     """
     ответ = request_with_backoff(
         transport,
@@ -192,7 +192,7 @@ def category_is_populated(
             "format": "json",
             "generator": "categorymembers",
             "gcmtitle": f"Category:{category}",
-            "gcmtype": "file",
+            "gcmtype": "file|subcat",
             "gcmlimit": "1",
         },
         sleep=sleep,
