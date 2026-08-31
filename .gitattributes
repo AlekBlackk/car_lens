@@ -7,3 +7,7 @@ tests/fixtures/index/catalog_index.bin binary
 # Обёртка Gradle — POSIX-скрипт: при core.autocrlf=true checkout под Windows подставил
 # бы CRLF, и `./gradlew` из Git Bash упал бы на `bad interpreter`.
 app/android/gradlew text eol=lf
+
+# Планы и спеки markdown должны сохранять LF под Windows
+docs/superpowers/plans/*.md text eol=lf
+docs/superpowers/specs/*.md text eol=lf
