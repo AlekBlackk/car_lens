@@ -18,6 +18,7 @@ Cruiser в классе `lexus__lx` для текстового энкодера
 from __future__ import annotations
 
 import csv
+import json
 import re
 import urllib.parse
 from collections.abc import Mapping
@@ -89,6 +90,21 @@ def matches_needle(name: str, needle: str) -> bool:
 _КОРЕНЬ = Path(__file__).resolve().parent.parent.parent
 DEFAULT_ALIASES_PATH = _КОРЕНЬ / "catalog" / "model_aliases.yaml"
 SUPPORTED_VERSION = 1
+ШАПКА_ТАБЛИЦЫ = "\n".join(
+    [
+        "# Иглы моделей: что в имени файла Commons подтверждает класс каталога.",
+        "#",
+        "# Таблица ведётся РУКАМИ. Черновик снят scripts/gen_model_aliases.py из терминов",
+        "# поиска, и этого мало: кузовные коды (21310, 315195), экспортные имена (cressida,",
+        "# 1500 sl, outlander sport) и разведение соседей из терминов не выводятся.",
+        "#",
+        "# Полнота по каталогу, отсутствие взаимно неразличимых игл и канонический вид этого",
+        "# файла держатся тестом tests/test_model_aliases_table.py — это гейт G_AL1 задачи B.",
+        "version: 1",
+        "classes:",
+        "",
+    ]
+)
 
 AliasTable = Mapping[str, tuple[str, ...]]
 
@@ -160,6 +176,25 @@ def _иглы_класса(path: Path, class_id: str, сырые_иглы: objec
     if not иглы:
         raise AliasesError(f"{path}: у {class_id} нет ни одной годной иглы")
     return tuple(иглы)
+
+
+def render_alias_table(table: Mapping[str, tuple[str, ...]]) -> str:
+    """Таблица игл в каноническом виде файла: шапка и по инлайн-списку на класс.
+
+    Форма закреплена не из вкусовщины. Файл правят руками, и однажды его переписал
+    ямл-дампер: инлайновые списки стали блочными, а шапка — та, что объявляет таблицу
+    ручной и указывает на гейт, — исчезла. Диффа на 566 строк при четырнадцати новых иглах
+    человек не читает, то есть ревью в этом месте перестаёт работать.
+
+    Порядок классов и игл берётся из `table` как есть: `load_alias_table` сохраняет порядок
+    файла, поэтому `render_alias_table(load_alias_table(path))` — это тот же файл, если он
+    канонический. Ровно это и сверяет тест.
+    """
+    куски = [ШАПКА_ТАБЛИЦЫ]
+    for class_id, иглы in table.items():
+        перечень = ", ".join(json.dumps(игла, ensure_ascii=False) for игла in иглы)
+        куски.append(f"  {class_id}:\n    needles: [{перечень}]\n")
+    return "".join(куски)
 
 
 AliasKind = Literal["own", "foreign", "unknown"]

@@ -10,30 +10,20 @@
 from __future__ import annotations
 
 import argparse
-import json
 from collections.abc import Sequence
 from pathlib import Path
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
-from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, normalize_filename
+from pipeline.harvest.aliases import (
+    DEFAULT_ALIASES_PATH,
+    normalize_filename,
+    render_alias_table,
+)
 from pipeline.harvest.queries import (
     DEFAULT_LATIN_NAMES_PATH,
     DEFAULT_QUERIES_PATH,
     load_latin_names,
     load_queries,
-)
-
-ШАПКА = (
-    "# Иглы моделей: что в имени файла Commons подтверждает класс каталога.\n"
-    "#\n"
-    "# Таблица ведётся РУКАМИ. Черновик снят scripts/gen_model_aliases.py из терминов\n"
-    "# поиска, и этого мало: кузовные коды (21310, 315195), экспортные имена (cressida,\n"
-    "# 1500 sl, outlander sport) и разведение соседей из терминов не выводятся.\n"
-    "#\n"
-    "# Полнота по каталогу и отсутствие взаимно неразличимых игл держатся тестом\n"
-    "# tests/test_model_aliases_table.py — это гейт G_AL1 задачи B.\n"
-    "version: 1\n"
-    "classes:\n"
 )
 
 
@@ -66,16 +56,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     запросы = load_queries(DEFAULT_QUERIES_PATH)
     имена = load_latin_names(DEFAULT_LATIN_NAMES_PATH)
 
-    куски = [ШАПКА]
+    таблица: dict[str, tuple[str, ...]] = {}
     пусто: list[str] = []
     for класс in каталог.classes:
         иглы = черновые_иглы(класс.brand, запросы[класс.class_id].terms, имена[класс.class_id])
         if not иглы:
             пусто.append(класс.class_id)
             иглы = ["ЗАПОЛНИТЬ РУКАМИ"]
-        перечень = ", ".join(json.dumps(игла, ensure_ascii=False) for игла in иглы)
-        куски.append(f"  {класс.class_id}:\n    needles: [{перечень}]\n")
-    аргументы.out.write_text("".join(куски), encoding="utf-8")
+        таблица[класс.class_id] = tuple(иглы)
+    аргументы.out.write_text(render_alias_table(таблица), encoding="utf-8")
 
     список_пустых = ", ".join(пусто)
     print(f"черновик записан: {аргументы.out}, классов {len(каталог.classes)}")
