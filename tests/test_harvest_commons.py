@@ -8,6 +8,7 @@ from pipeline.harvest.commons import (
     CommonsSource,
     HarvestHttpError,
     HttpResponse,
+    category_is_populated,
     request_with_backoff,
 )
 from pipeline.harvest.sources import SourceQuery
@@ -117,3 +118,14 @@ def test_разметка_из_поиска_помечается_как_search()
     источник = CommonsSource(ЗаписанныйТранспорт([_ок(ОТВЕТ)]), sleep=lambda _: None)
     страница = источник.search(SourceQuery("lada__granta", None, "Lada Granta", 50, None))
     assert страница.candidates[0].basis == "search:Lada Granta"
+
+
+def test_непустая_категория_подтверждается() -> None:
+    транспорт = ЗаписанныйТранспорт([_ок({"query": {"pages": {"1": {"pageid": 1}}}})])
+    assert category_is_populated(транспорт, "Lada Granta", sleep=lambda _: None) is True
+
+
+def test_пустая_или_несуществующая_категория_отвергается() -> None:
+    """Ответ без `pages` — это и «категории нет», и «в ней ничего»: разницы для нас нет."""
+    транспорт = ЗаписанныйТранспорт([_ок({"batchcomplete": ""})])
+    assert category_is_populated(транспорт, "VAZ-2113", sleep=lambda _: None) is False

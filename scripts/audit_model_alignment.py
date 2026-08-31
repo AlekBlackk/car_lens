@@ -13,7 +13,8 @@ from __future__ import annotations
 import argparse
 import csv
 import subprocess
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from datetime import date
 from pathlib import Path
 
@@ -27,7 +28,8 @@ from pipeline.harvest.alignment import (
     triage,
 )
 from pipeline.harvest.audit import load_audit, merge_verdicts
-from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, load_manifest
+from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, HarvestRow, load_manifest
+from pipeline.harvest.queries import DEFAULT_QUERIES_PATH
 from pipeline.paths import harvest_dir
 
 _КОРЕНЬ = Path(__file__).resolve().parent.parent
@@ -56,7 +58,43 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="CSV вердиктов алиасных проходов для G_AL2",
     )
+    парсер.add_argument(
+        "--check-categories",
+        action="store_true",
+        help="проверить существование категорий Commons у классов без строк из категорий",
+    )
+    парсер.add_argument("--contact", default=None, help="контакт для User-Agent (§3.2)")
     return парсер
+
+
+def проверить_категории(
+    rows: Sequence[HarvestRow],
+    contact: str,
+    queries_path: Path = DEFAULT_QUERIES_PATH,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, bool]:
+    """Классы без принятых строк из категорий: жива ли хоть одна заявленная категория.
+
+    Пауза между запросами — та же, что у харвеста (§3.2 SPEC): чужое хранилище не должно
+    отличать нашу диагностику от вежливого прогона.
+    """
+    from pipeline.harvest.backends import UrllibTransport
+    from pipeline.harvest.commons import MIN_INTERVAL_SECONDS, category_is_populated
+    from pipeline.harvest.queries import load_queries
+
+    из_категорий = {с.class_id for с in rows if с.basis.startswith("category:")}
+    запросы = load_queries(queries_path)
+    транспорт = UrllibTransport(contact)
+    итог: dict[str, bool] = {}
+    for class_id, запрос in sorted(запросы.items()):
+        if class_id in из_категорий:
+            continue
+        итог[class_id] = any(
+            category_is_populated(транспорт, категория, sleep=sleep)
+            for категория in запрос.categories
+        )
+        sleep(MIN_INTERVAL_SECONDS)
+    return итог
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -105,9 +143,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     sha = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
+    категории = None
+    if аргументы.check_categories:
+        if not аргументы.contact:
+            build_parser().error("--check-categories требует --contact (§3.2)")
+        категории = проверить_категории(строки, аргументы.contact)
     аргументы.report.parent.mkdir(parents=True, exist_ok=True)
     аргументы.report.write_text(
-        render_alignment_report(строки, таблица, все_вердикты, гейт, sha, date.today().isoformat()),
+        render_alignment_report(
+            строки,
+            таблица,
+            все_вердикты,
+            гейт,
+            sha,
+            date.today().isoformat(),
+            categories=категории,
+        ),
         encoding="utf-8",
     )
 

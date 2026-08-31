@@ -17,6 +17,7 @@ from pipeline.harvest.alignment import (
 )
 from pipeline.harvest.manifest import HarvestRow, write_manifest
 from scripts.audit_model_alignment import main as триаж_main
+from scripts.audit_model_alignment import проверить_категории
 
 _ТАБЛИЦА = {
     "lexus__lx": ("lx",),
@@ -364,3 +365,44 @@ def test_cli_успешный_прогон_с_вердиктами(tmp_path: Pat
 
     assert код == 0
     assert "пройден" in отчёт.read_text(encoding="utf-8")
+
+
+def test_check_categories_требует_contact(tmp_path: Path) -> None:
+    манифест = tmp_path / "harvest_manifest.csv"
+    write_manifest(манифест, [])
+    with pytest.raises(SystemExit):
+        триаж_main(["--manifest", str(манифест), "--check-categories"])
+
+
+def test_проверить_категории_пропускает_классы_с_категориями_и_опрашивает_остальные(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    запросы_файл = tmp_path / "harvest_queries.yaml"
+    запросы_файл.write_text(
+        "version: 1\nclasses:\n"
+        "  lexus__lx:\n"
+        "    terms: [lx]\n"
+        "    categories: [Lexus LX]\n"
+        "  toyota__land_cruiser:\n"
+        "    terms: [land cruiser]\n"
+        "    categories: [Toyota Land Cruiser]\n",
+        encoding="utf-8",
+    )
+    строки = [_строка("a.jpg", "lexus__lx", "IMG_0412.jpg", "category:Lexus LX")]
+    опрошенные: list[str] = []
+
+    def mock_populated(transport: object, category: str, sleep: object = None) -> bool:
+        опрошенные.append(category)
+        return category == "Toyota Land Cruiser"
+
+    monkeypatch.setattr("pipeline.harvest.commons.category_is_populated", mock_populated)
+    паузы: list[float] = []
+    итог = проверить_категории(
+        строки,
+        contact="user@test.org",
+        queries_path=запросы_файл,
+        sleep=паузы.append,
+    )
+    assert итог == {"toyota__land_cruiser": True}
+    assert опрошенные == ["Toyota Land Cruiser"]
+    assert len(паузы) == 1

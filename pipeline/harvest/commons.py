@@ -172,3 +172,30 @@ class CommonsSource:
             height=int(инфо.get("height", 0)),
             basis=basis,
         )
+
+
+def category_is_populated(
+    transport: Transport, category: str, sleep: Callable[[float], None] = time.sleep
+) -> bool:
+    """Есть ли в категории Commons хотя бы один файл.
+
+    Существование и непустота здесь одно и то же: класс, чья категория пуста, и класс,
+    чьей категории нет, получают одинаковый ноль принятых строк, и лечатся оба правкой
+    имени в `harvest_queries.yaml`. Различать их значило бы придумывать разницу, которой
+    у задачи нет.
+    """
+    ответ = request_with_backoff(
+        transport,
+        API_URL,
+        {
+            "action": "query",
+            "format": "json",
+            "generator": "categorymembers",
+            "gcmtitle": f"Category:{category}",
+            "gcmtype": "file",
+            "gcmlimit": "1",
+        },
+        sleep=sleep,
+    )
+    данные: Any = json.loads(ответ.body.decode("utf-8"))
+    return bool((данные.get("query") or {}).get("pages"))
