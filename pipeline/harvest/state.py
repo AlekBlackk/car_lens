@@ -5,15 +5,17 @@
 восьмидесятом кандидате иначе обнулил бы бюджет, и рестарт просмотрел бы те же двести
 заново — то есть двести лишних запросов к чужому хранилищу.
 
-Стоп-критерий класса — 200 просмотренных ИЛИ 15 принятых, что раньше. Пятнадцать это
-5 в `holdout_ru` (правило 2 Р-11) плюс 10 на центроиды; класс, не добравший их,
-помечается дефицитным и уходит в синтетический слой — это исход, а не ошибка.
+Стоп-критерий класса — `SEEN_BUDGET = 400` просмотренных ИЛИ `ACCEPTED_TARGET = 30`
+принятых, что раньше. Числа названы константами, а не в тексте: прежняя редакция
+докстринга говорила «200 или 15», разойдясь с кодом и пережив три прогона незамеченной.
+Класс, не добравший цель, помечается дефицитным и уходит в синтетический слой — это исход,
+а не ошибка.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 SEEN_BUDGET = 400
@@ -28,6 +30,9 @@ class HarvestState:
     accepted: dict[str, int]
     tokens: dict[str, str]
     done_items: set[str]
+    # Развёрнутые деревья категорий, ключ `class_id|категория`. Поле со значением по
+    # умолчанию: состояние, записанное до задачи C1, обязано читаться без правки файла.
+    categories: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def load_state(path: Path) -> HarvestState:
@@ -40,6 +45,9 @@ def load_state(path: Path) -> HarvestState:
         accepted=dict(данные.get("accepted", {})),
         tokens=dict(данные.get("tokens", {})),
         done_items=set(данные.get("done_items", [])),
+        categories={
+            ключ: tuple(значения) for ключ, значения in (данные.get("categories") or {}).items()
+        },
     )
 
 
@@ -54,6 +62,7 @@ def save_state(path: Path, state: HarvestState) -> None:
                 "accepted": state.accepted,
                 "tokens": state.tokens,
                 "done_items": sorted(state.done_items),
+                "categories": {ключ: list(значения) for ключ, значения in state.categories.items()},
             },
             ensure_ascii=False,
             indent=2,

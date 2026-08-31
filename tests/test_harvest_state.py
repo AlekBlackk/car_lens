@@ -1,4 +1,5 @@
 # tests/test_harvest_state.py
+import json
 from pathlib import Path
 
 from pipeline.harvest.state import (
@@ -39,6 +40,26 @@ def test_запись_атомарна(tmp_path: Path) -> None:
     путь = tmp_path / "state.json"
     save_state(путь, HarvestState({}, {}, {}, set()))
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_категории_переживают_запись_и_чтение(tmp_path: Path) -> None:
+    путь = tmp_path / "state.json"
+    состояние = HarvestState({}, {}, {}, set())
+    состояние.categories["kia__rio|Kia Rio"] = ("Kia Rio", "Kia Rio (DC)")
+
+    save_state(путь, состояние)
+
+    assert load_state(путь).categories == {"kia__rio|Kia Rio": ("Kia Rio", "Kia Rio (DC)")}
+
+
+def test_старое_состояние_без_категорий_читается(tmp_path: Path) -> None:
+    путь = tmp_path / "state.json"
+    путь.write_text(
+        json.dumps({"seen": {"a": 1}, "accepted": {}, "tokens": {}, "done_items": []}),
+        encoding="utf-8",
+    )
+
+    assert load_state(путь).categories == {}
 
 
 def test_класс_закрыт_по_бюджету_просмотра() -> None:
