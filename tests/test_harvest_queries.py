@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
+from pipeline.harvest.categories import MAX_DEPTH
 from pipeline.harvest.queries import (
     DEFAULT_LATIN_NAMES_PATH,
     DEFAULT_QUERIES_PATH,
@@ -132,6 +133,64 @@ def test_нулевая_глубина_допустима(tmp_path: Path) -> Non
     )
 
     assert load_queries(путь)["kia__rio"].depth == 0
+
+
+def test_граница_глубины_взята_из_обхода(tmp_path: Path) -> None:
+    """Верхняя граница — `categories.MAX_DEPTH`, а не литерал, дублирующий его в двух файлах."""
+    путь = _записать(
+        tmp_path,
+        f"version: 1\nclasses:\n  kia__rio:\n    categories: [Kia Rio]\n    depth: {MAX_DEPTH}\n",
+    )
+
+    assert load_queries(путь)["kia__rio"].depth == MAX_DEPTH
+
+
+@pytest.mark.parametrize("поле", ["categories", "terms", "include", "exclude"])
+def test_скаляр_вместо_списка_роняет(tmp_path: Path, поле: str) -> None:
+    """Скаляр — законный YAML, но итерация пошла бы по строке, по одной букве на значение.
+
+    Тише всех отказ у `exclude`: сравнение идёт по целому нормализованному имени, поэтому
+    `exclude: "Abt Q5"` без скобок превратился бы в шесть односимвольных исключений и
+    перестал бы исключать что-либо, не сказав ни слова. §6.1 требует проверку явно.
+    """
+    поля = {"categories": "[Audi Q5]", "terms": '["Audi Q5"]'}
+    поля[поле] = '"Abt Q5"'
+    тело = "".join(f"    {ключ}: {значение}\n" for ключ, значение in поля.items())
+    путь = _записать(tmp_path, f"version: 1\nclasses:\n  audi__q5:\n{тело}")
+
+    with pytest.raises(QueriesError, match=поле):
+        load_queries(путь)
+
+
+def test_не_строка_в_списке_роняет(tmp_path: Path) -> None:
+    """`str(элемент)` превратил бы `null` в живое исключение `none`."""
+    путь = _записать(
+        tmp_path,
+        "version: 1\n"
+        "classes:\n"
+        "  audi__q5:\n"
+        "    categories: [Audi Q5]\n"
+        '    terms: ["Audi Q5"]\n'
+        "    exclude: [Abt Q5, null]\n",
+    )
+
+    with pytest.raises(QueriesError, match="не строка"):
+        load_queries(путь)
+
+
+def test_пробельное_значение_отбрасывается_молча(tmp_path: Path) -> None:
+    """Лишний пробел в ручной таблице — не повод ронять прогон, в отличие от скаляра."""
+    путь = _записать(
+        tmp_path,
+        "version: 1\n"
+        "classes:\n"
+        "  audi__q5:\n"
+        "    categories: [Audi Q5]\n"
+        '    terms: ["Audi Q5"]\n'
+        '    exclude: ["Abt Q5", "   "]\n',
+    )
+
+    assert load_queries(путь)["audi__q5"].exclude == ("Abt Q5",)
 
 
 def test_категория_заявленная_двумя_классами_отдаёт_оба() -> None:

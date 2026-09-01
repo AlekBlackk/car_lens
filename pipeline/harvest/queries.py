@@ -18,6 +18,7 @@ from typing import Any
 import yaml
 
 from pipeline.harvest.aliases import normalize_filename
+from pipeline.harvest.categories import MAX_DEPTH
 
 _КОРЕНЬ = Path(__file__).resolve().parent.parent.parent
 DEFAULT_QUERIES_PATH = _КОРЕНЬ / "catalog" / "harvest_queries.yaml"
@@ -42,6 +43,35 @@ class ClassQueries:
     exclude: tuple[str, ...] = ()
 
 
+def _строки(path: Path, class_id: str, тело: dict[str, Any], ключ: str) -> tuple[str, ...]:
+    """Прочитать поле-список непустых строк (§6.1 дизайна C1) у одного класса.
+
+    Проверка списка целиком и поэлементно, а не `str(x) for x in ...`, потому что таблицу
+    правят руками. Скаляр вместо списка (`exclude: Abt Q5` без скобок) — законный YAML, но
+    итерация пошла бы по строке и дала бы шесть односимвольных значений; `exclude` и
+    `include` сравниваются по целому нормализованному имени, так что исключение молча
+    перестало бы исключать что-либо. Та же защита с тем же обоснованием стоит в
+    `aliases._иглы_класса`. От элемента требуется строка, а не `str(элемент)`: он превратил
+    бы `null` в живое значение `none`.
+
+    Значение, от которого после обрезки пробелов ничего не осталось, отбрасывается молча:
+    отказ здесь дал бы ложную тревогу на лишнем пробеле, а пустой итог поля законен —
+    непустоту `categories` и `terms` вместе проверяет вызывающий.
+    """
+    значение = тело.get(ключ)
+    перечень = [] if значение is None else значение
+    if not isinstance(перечень, list):
+        raise QueriesError(f"{path}: {ключ} у {class_id} должно быть списком строк")
+    значения: list[str] = []
+    for элемент in перечень:
+        if not isinstance(элемент, str):
+            raise QueriesError(f"{path}: {ключ} у {class_id}: {элемент!r} не строка")
+        обрезанное = элемент.strip()
+        if обрезанное:
+            значения.append(обрезанное)
+    return tuple(значения)
+
+
 def load_queries(path: Path) -> dict[str, ClassQueries]:
     """Прочитать таблицу запросов и провалидировать её целиком."""
     сырое: Any = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -55,24 +85,28 @@ def load_queries(path: Path) -> dict[str, ClassQueries]:
     for class_id, тело in таблица.items():
         if not isinstance(тело, dict):
             raise QueriesError(f"{path}: {class_id} должен быть отображением")
-        категории = tuple(str(x).strip() for x in (тело.get("categories") or []) if str(x).strip())
-        термины = tuple(str(x).strip() for x in (тело.get("terms") or []) if str(x).strip())
+        имя_класса = str(class_id)
+        категории = _строки(path, имя_класса, тело, "categories")
+        термины = _строки(path, имя_класса, тело, "terms")
         if not категории and not термины:
-            raise QueriesError(f"{path}: у {class_id} нет ни категорий, ни терминов")
+            raise QueriesError(f"{path}: у {имя_класса} нет ни категорий, ни терминов")
         глубина = тело.get("depth", 1)
-        if not isinstance(глубина, int) or isinstance(глубина, bool) or not 0 <= глубина <= 2:
+        if (
+            not isinstance(глубина, int)
+            or isinstance(глубина, bool)
+            or not 0 <= глубина <= MAX_DEPTH
+        ):
             raise QueriesError(
-                f"{path}: у {class_id} depth должен быть целым 0..2, получено {глубина!r}"
+                f"{path}: у {имя_класса} depth должен быть целым 0..{MAX_DEPTH},"
+                f" получено {глубина!r}"
             )
-        включения = tuple(str(x).strip() for x in (тело.get("include") or []) if str(x).strip())
-        исключения = tuple(str(x).strip() for x in (тело.get("exclude") or []) if str(x).strip())
-        результат[str(class_id)] = ClassQueries(
-            str(class_id),
+        результат[имя_класса] = ClassQueries(
+            имя_класса,
             категории,
             термины,
             depth=глубина,
-            include=включения,
-            exclude=исключения,
+            include=_строки(path, имя_класса, тело, "include"),
+            exclude=_строки(path, имя_класса, тело, "exclude"),
         )
     return результат
 
