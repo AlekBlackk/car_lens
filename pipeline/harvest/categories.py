@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pipeline.harvest.aliases import normalize_filename
-from pipeline.harvest.commons import API_URL, MIN_INTERVAL_SECONDS, Transport, request_with_backoff
+from pipeline.harvest.commons import API_URL, Transport, request_with_backoff
 
 MAX_SUBCAT_REQUESTS = 12
 MAX_DEPTH = 2
@@ -132,9 +132,12 @@ def expand(
     Параметр keyword-only и без умолчания: прод не должен иметь возможности забыть его и
     молча собрать дерево без проверки принадлежности.
 
-    Между запросами держится тот же интервал, что у харвеста (`MIN_INTERVAL_SECONDS`,
-    §3.2 SPEC): без него обход отправлял бы до `MAX_SUBCAT_REQUESTS` запросов встык.
-    Ждёт только переданный `sleep` — тесты подставляют сюда заглушку и идут мгновенно.
+    Своего интервала обход не держит: интервал §3.2 (≤ 1 запрос / 2 с на домен) считает
+    `DomainPacer` внутри транспорта — один на прогон, общий с поиском и скачиванием. Свой
+    счётчик здесь обнулялся на каждом вызове, поэтому первый запрос вызова уходил без
+    паузы, а в отгруженной конфигурации (`depth` не задан ни одному классу, значит 1)
+    каждый вызов делает ровно один запрос — то есть пауза не срабатывала ни разу.
+    `sleep` остаётся для пауз 2/4/8 с на кодах 429 и 503 внутри `request_with_backoff`.
     """
     запрещено = {normalize_filename(имя) for имя in exclude}
     итог: list[str] = [category]
@@ -145,7 +148,6 @@ def expand(
     исключением = 0
     не_своим = 0
     исчерпан = False
-    последний_запрос = 0.0
 
     очередь: deque[tuple[str, int]] = deque([(category, 0)])
     while очередь:
@@ -155,12 +157,8 @@ def expand(
         if запросов >= MAX_SUBCAT_REQUESTS:
             исчерпан = True
             break
-        прошло = time.monotonic() - последний_запрос
-        if прошло < MIN_INTERVAL_SECONDS:
-            sleep(MIN_INTERVAL_SECONDS - прошло)
         запросов += 1
         потомки = _подкатегории(transport, родитель, sleep)
-        последний_запрос = time.monotonic()
         for потомок in потомки:
             имя = normalize_filename(потомок)
             if имя in видели:

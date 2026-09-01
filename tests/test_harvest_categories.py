@@ -2,7 +2,7 @@ import json
 from collections.abc import Mapping
 
 from pipeline.harvest.categories import ADMIT_ALL, MAX_SUBCAT_REQUESTS, expand
-from pipeline.harvest.commons import MIN_INTERVAL_SECONDS, HttpResponse
+from pipeline.harvest.commons import HttpResponse
 
 
 class ЗаписанныйТранспорт:
@@ -161,8 +161,14 @@ def test_бюджет_обрывает_обход_и_отмечается() -> N
     assert итог.budget_exhausted is True
 
 
-def test_пауза_держится_перед_каждым_следующим_запросом() -> None:
-    """Обход отправлял до MAX_SUBCAT_REQUESTS запросов встык, а §3.2 требует 2 с на домен."""
+def test_обход_не_держит_своего_интервала() -> None:
+    """Интервал §3.2 держит один пейсер на домен внутри транспорта, а не сам обход.
+
+    Свой счётчик здесь обнулялся на каждом вызове `expand`, поэтому первый запрос вызова
+    уходил без паузы, — а при `depth=1` у всех 150 классов вызов делает ровно один запрос,
+    то есть пауза не срабатывала ни разу (все 251 строка `expand_log.csv`: `requests=1`).
+    Проверка самого интервала — в `tests/test_harvest_pacing.py`.
+    """
     транспорт = ЗаписанныйТранспорт({"Kia Rio": ["Kia Rio (DC)", "Kia Rio (QB)"]})
     паузы: list[float] = []
 
@@ -170,5 +176,4 @@ def test_пауза_держится_перед_каждым_следующим_
 
     assert транспорт.вызовы == ["Kia Rio", "Kia Rio (DC)", "Kia Rio (QB)"]
     assert итог.requests == 3
-    assert len(паузы) == 2, "первый запрос уходит сразу, каждый следующий — после паузы"
-    assert all(0 < пауза <= MIN_INTERVAL_SECONDS for пауза in паузы)
+    assert паузы == [], "`sleep` обхода остаётся только для откатов 429/503"

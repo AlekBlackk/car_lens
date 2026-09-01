@@ -24,21 +24,33 @@ import cv2
 import numpy as np
 
 from pipeline.crop import Detection
-from pipeline.harvest.commons import HttpResponse
+from pipeline.harvest.commons import DomainPacer, HttpResponse
 
 USER_AGENT_TEMPLATE = "CarLens-harvest/0.1 (https://github.com/carlens; {contact})"
 HTTP_TIMEOUT_SECONDS = 30
 
 
 class UrllibTransport:
-    """HTTP поверх стандартной библиотеки. Контакт в User-Agent обязателен (§3.2)."""
+    """HTTP поверх стандартной библиотеки. Контакт в User-Agent обязателен (§3.2).
 
-    def __init__(self, contact: str) -> None:
+    Здесь же держится интервал между запросами — вторая половина того же §3.2. Место
+    выбрано так потому, что это единственная точка, через которую запрос действительно
+    уходит в сеть: поиск, скачивание и обход категорий все идут сюда, и вежливость
+    перестаёт зависеть от того, вспомнил ли о ней очередной вызывающий. Пейсер приходит
+    параметром, чтобы тест мог подставить свои часы и сон вместо настоящих.
+
+    Логика интервала живёт в `DomainPacer` (`commons.py`), а не здесь: этот модуль
+    намеренно тонкий и почти не покрыт тестами, а арифметику интервала проверять нужно.
+    """
+
+    def __init__(self, contact: str, pacer: DomainPacer | None = None) -> None:
         self._headers = {"User-Agent": USER_AGENT_TEMPLATE.format(contact=contact)}
+        self._pacer = pacer if pacer is not None else DomainPacer()
 
     def get(self, url: str, params: Mapping[str, str]) -> HttpResponse:
         адрес = f"{url}?{urlencode(dict(params))}" if params else url
         запрос = Request(адрес, headers=self._headers)
+        self._pacer.wait(url)
         try:
             with urlopen(запрос, timeout=HTTP_TIMEOUT_SECONDS) as ответ:
                 return HttpResponse(int(ответ.status), ответ.read())
@@ -47,6 +59,10 @@ class UrllibTransport:
             # поэтому статус надо вернуть, а не потерять внутри трассировки.
             код = int(getattr(ошибка, "code", 0) or getattr(ошибка, "status", 0) or 0)
             return HttpResponse(код or 599, b"")
+        finally:
+            # Отметка и на провале: неудачный запрос хранилище всё равно обслужило, и
+            # частить после ошибки — ровно то, чего просит не делать §3.2.
+            self._pacer.mark(url)
 
 
 def decode_ssd_output(raw: np.ndarray, frame_w: int, frame_h: int, conf: float) -> list[Detection]:

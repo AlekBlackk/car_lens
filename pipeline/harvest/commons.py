@@ -9,6 +9,10 @@
 Категория первична, полнотекстовый поиск — добор: категория Commons размечена людьми и
 надёжнее строки запроса. Оба пути помечаются в `basis`, чтобы аудит знал, чему верить
 меньше.
+
+Интервал между запросами (§3.2: ≤ 1 запрос / 2 с на домен) держит `DomainPacer` — один
+на прогон, общий для поиска, скачивания и обхода категорий, и вызывает его транспорт,
+единственное место, где запрос действительно уходит в сеть.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from pipeline.harvest.licenses import is_allowed
 from pipeline.harvest.sources import Candidate, SearchPage, SourceQuery, basis_of
@@ -30,6 +35,59 @@ MIN_INTERVAL_SECONDS = 2.0
 
 class HarvestHttpError(RuntimeError):
     """Запрос не удался и повторять его больше нечем."""
+
+
+class DomainPacer:
+    """Один интервал между запросами к одному домену: ≤ 1 запрос / 2 с (§3.2 SPEC).
+
+    Пейсер один на весь прогон и общий для всех путей — поиска, скачивания и обхода
+    категорий. До него интервал считался в двух местах по отдельности, и оба не работали:
+    `CommonsSource.search` не держал его вовсе (счётчик обновлялся только в `fetch`), а
+    `expand` заводил счётчик заново на каждый вызов, поэтому первый запрос вызова уходил
+    без паузы — а в отгруженной конфигурации (`depth` не задан ни одному классу, значит 1)
+    каждый вызов делает ровно один запрос, то есть пауза не срабатывала ни разу. Отсюда и
+    форма правки: состояние обязано жить дольше вызова, а вежливость — не зависеть от того,
+    вспомнил ли о ней очередной вызывающий.
+
+    Ключ — домен, а не адрес: ограничение §3.2 сформулировано на домен, и страницы API
+    (`commons.wikimedia.org`) не должны копить долг из-за скачиваний файлов
+    (`upload.wikimedia.org`).
+
+    Отметка ставится **после** ответа (`mark`), а не перед запросом: интервал получается
+    «старт-до-старта» длиннее нужного на время самого запроса. Это консервативно в нужную
+    сторону, и менять это здесь не задача.
+
+    Часы и сон впрыскиваются: тест обязан мерить арифметику интервала, а не ждать секунды.
+    """
+
+    def __init__(
+        self,
+        min_interval: float = MIN_INTERVAL_SECONDS,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._min_interval = min_interval
+        self._sleep = sleep
+        self._clock = clock
+        self._последний: dict[str, float] = {}
+
+    def wait(self, url: str) -> None:
+        """Додержать интервал перед запросом к домену `url`. Первый запрос уходит сразу."""
+        домен = self._домен(url)
+        если_был = self._последний.get(домен)
+        if если_был is None:
+            return
+        прошло = self._clock() - если_был
+        if прошло < self._min_interval:
+            self._sleep(self._min_interval - прошло)
+
+    def mark(self, url: str) -> None:
+        """Отметить, что запрос к домену `url` только что завершился."""
+        self._последний[self._домен(url)] = self._clock()
+
+    @staticmethod
+    def _домен(url: str) -> str:
+        return urlsplit(url).netloc.lower()
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,14 +131,18 @@ def request_with_backoff(
 
 
 class CommonsSource:
-    """Поиск и скачивание в Commons через Action API."""
+    """Поиск и скачивание в Commons через Action API.
+
+    Интервала между запросами источник не считает: его держит транспорт одним пейсером на
+    домен (`DomainPacer`), общим с обходом категорий. `sleep` остаётся — им пользуется
+    `request_with_backoff` для пауз 2/4/8 с на кодах 429 и 503, а это другая величина.
+    """
 
     name = "commons"
 
     def __init__(self, transport: Transport, sleep: Callable[[float], None] = time.sleep) -> None:
         self._transport = transport
         self._sleep = sleep
-        self._последний_запрос = 0.0
 
     def search(self, query: SourceQuery) -> SearchPage:
         """Одна страница выдачи вместе с токеном продолжения."""
@@ -100,16 +162,11 @@ class CommonsSource:
         return SearchPage(кандидаты, str(токен) if токен is not None else None)
 
     def fetch(self, candidate: Candidate) -> bytes:
-        """Скачать файл, соблюдая паузу в две секунды между запросами (§3.2)."""
-        прошло = time.monotonic() - self._последний_запрос
-        if прошло < MIN_INTERVAL_SECONDS:
-            self._sleep(MIN_INTERVAL_SECONDS - прошло)
+        """Скачать файл. Пустые байты — запрос не удался, отказ решает вызывающий."""
         try:
             ответ = request_with_backoff(self._transport, candidate.file_url, {}, sleep=self._sleep)
         except HarvestHttpError:
-            self._последний_запрос = time.monotonic()
             return b""
-        self._последний_запрос = time.monotonic()
         return ответ.body
 
     def _параметры(self, query: SourceQuery) -> dict[str, str]:
