@@ -35,8 +35,8 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from pipeline.harvest.manifest import HarvestRow
@@ -76,6 +76,33 @@ class HoldoutSelection:
 def listing_id_of(row: HarvestRow) -> str:
     """Ключ серии автора: источник, класс и автор."""
     return f"{row.source}:{row.class_id}:{row.author}"
+
+
+def classes_short_of_holdout(
+    selection: HoldoutSelection,
+    rows: Sequence[HarvestRow],
+    class_ids: Iterable[str],
+    minimum: int = HOLDOUT_MIN,
+) -> tuple[str, ...]:
+    """Классы каталога, у которых в эталоне меньше `minimum` кадров.
+
+    Знаменатель — каталог, а не классы манифеста, и это не придирка к формулировке.
+    `select_holdout` раскладывает по классам **строки манифеста**, поэтому класс, у
+    которого строк нет вовсе, в `short_classes` не попадает ни разу: он не «набрал мало»,
+    он вообще не рассматривался. Дефицит занижается ровно в самом тяжёлом случае — на BASE
+    `14a70bf` это давало 15 против настоящих 16 (`chevrolet__lanos` без единой строки), а
+    гейт `G_C1` мерит именно дефицит каталога: сколько классов каталога остались без
+    честного эталона. Поэтому проверка идёт по каждому классу каталога, а не по тому, что
+    нашлось в манифесте.
+
+    Считается по `selection.files`, а не по `selection.short_classes`, по той же причине:
+    множество коротких классов знает только о рассмотренных, а число эталонных кадров
+    класса определено для любого класса каталога, в том числе для нулевого.
+    """
+    в_эталоне: Counter[str] = Counter(
+        строка.class_id for строка in rows if строка.file in selection.files
+    )
+    return tuple(sorted(класс for класс in class_ids if в_эталоне[класс] < minimum))
 
 
 def phash_components(rows: Sequence[HarvestRow], max_distance: int) -> dict[str, str]:

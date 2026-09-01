@@ -2,7 +2,9 @@
 
 Блокирует ровно одно число — классов без эталона, — и это число есть цель задачи: 16
 классов появились измерением задачи B, и C1 существует, чтобы вернуть их к дочистковым
-шести честным провенансом, а не ослаблением порогов.
+шести честным провенансом, а не ослаблением порогов. Число считается здесь, по каталогу и
+манифесту, а не переносится руками из вывода другого скрипта: гейт, который нельзя
+пересчитать по репозиторию, проверяет внимательность оператора, а не данные.
 
 Остальные числа наблюдаемые. Доля категорийного базиса зависит от содержимого чужого
 хранилища: требовать от кода 60 % значит требовать от Commons разложить машины так, как
@@ -13,16 +15,19 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from pipeline.harvest.audit import load_audit
+from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
+from pipeline.harvest.audit import DEFAULT_APPLIED_PATH, load_applied, load_audit
 from pipeline.harvest.expand_log import ExpandRow, expand_totals, load_expand_rows
 from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, HarvestRow, load_manifest
 from pipeline.harvest.rejects import Reject, load_rejects, reason_counts
 from pipeline.harvest.sources import CATEGORY_BASIS_PREFIX
+from pipeline.holdout import HOLDOUT_MIN, classes_short_of_holdout, select_holdout
 from pipeline.paths import harvest_dir
 
 REPORT_PATH = Path(__file__).resolve().parent.parent / "bench" / "harvest-c1.md"
@@ -30,6 +35,20 @@ DEDUP_VERDICTS_NAME = "verdicts.dedup.csv"
 EXPAND_LOG_NAME = "expand_log.csv"
 
 G_C1_MAX_MISSING = 6
+
+
+@dataclass(frozen=True, slots=True)
+class C2ScopeRow:
+    """Класс без эталона и чем он набран сегодня — строка предложения задаче C2."""
+
+    class_id: str
+    accepted: int
+    category_rows: int
+
+    @property
+    def category_share(self) -> float:
+        """Доля категорийного базиса. У класса без строк — ноль, а не деление на ноль."""
+        return self.category_rows / self.accepted if self.accepted else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,29 +70,57 @@ class C1Numbers:
     expand_rejected_exclude: int
     expand_rejected_not_own: int
     expand_budget_exhausted: int
+    # Поимённый дефицит: та же величина, что блокирует гейт, только разложенная по классам.
+    # `classes_without_holdout == len(c2_scope)`, поэтому таблица и вердикт не могут
+    # разойтись — до этой правки таблица дописывалась в отчёт руками, а число приходило
+    # флагом, и сойтись они могли только вниманием оператора.
+    c2_scope: tuple[C2ScopeRow, ...]
 
 
 def collect(
     rows: Sequence[HarvestRow],
     rejects: Sequence[Reject],
     verdicts: Mapping[str, str],
-    classes_without_holdout: int,
+    catalog_classes: Sequence[str],
     expand_rows: Sequence[ExpandRow] = (),
+    classes_without_holdout: int | None = None,
 ) -> C1Numbers:
     """Числа отчёта. `verdicts` — содержимое `verdicts.dedup.csv`.
+
+    Блокирующее число считается здесь, а не приходит флагом: гейт, который нельзя
+    пересчитать по репозиторию, держится на том, что оператор перенёс число из вывода
+    другого скрипта без опечатки. Считает `pipeline.holdout.classes_short_of_holdout` —
+    по классам **каталога**, поэтому класс, потерявший провенанс целиком, попадает в
+    дефицит, а не исчезает из знаменателя (обоснование записано там же). Место правки —
+    здесь: отбор эталона выбирает из того, что есть, и каталог ему для этого не нужен, а
+    гейт мерит именно дефицит каталога, значит знаменатель — его забота.
+
+    `classes_without_holdout` оставлен как перекрытие для сверки со старым выводом
+    `build_holdout_ru`; в обычном прогоне он пуст и число берётся из `c2_scope`, то есть
+    вердикт гейта и таблица скоупа C2 — одна и та же величина в двух видах.
 
     `expand_rows` по умолчанию пуст: старый прогон без журнала обхода даёт нули, а не
     падение — отчёт обязан собираться и на данных до задачи 12.
     """
-    категорийных = sum(1 for с in rows if с.basis.startswith(CATEGORY_BASIS_PREFIX))
-    классов = {с.class_id for с in rows if с.basis.startswith(CATEGORY_BASIS_PREFIX)}
+    принято: Counter[str] = Counter(с.class_id for с in rows)
+    из_категорий: Counter[str] = Counter(
+        с.class_id for с in rows if с.basis.startswith(CATEGORY_BASIS_PREFIX)
+    )
+    категорийных = sum(из_категорий.values())
+    дефицитные = classes_short_of_holdout(select_holdout(rows), rows, catalog_classes)
+    скоуп = tuple(
+        C2ScopeRow(class_id=класс, accepted=принято[класс], category_rows=из_категорий[класс])
+        for класс in дефицитные
+    )
     обход = expand_totals(expand_rows)
     return C1Numbers(
         rows=len(rows),
         category_rows=категорийных,
         category_share=категорийных / len(rows) if rows else 0.0,
-        classes_with_category=len(классов),
-        classes_without_holdout=classes_without_holdout,
+        classes_with_category=len(из_категорий),
+        classes_without_holdout=(
+            len(скоуп) if classes_without_holdout is None else classes_without_holdout
+        ),
         conflicts=sum(1 for в in verdicts.values() if в == "conflict"),
         supersedes=sum(1 for в in verdicts.values() if в == "drop:superseded"),
         reasons=reason_counts(rejects),
@@ -82,6 +129,7 @@ def collect(
         expand_rejected_exclude=обход["rejected_exclude"],
         expand_rejected_not_own=обход["rejected_not_own"],
         expand_budget_exhausted=обход["budget_exhausted"],
+        c2_scope=скоуп,
     )
 
 
@@ -150,7 +198,29 @@ def render(
         f"| срезано `exclude` | {numbers.expand_rejected_exclude} |",
         f"| отвергнуто не своей полкой | {numbers.expand_rejected_not_own} |",
         f"| категорий с исчерпанным бюджетом | {numbers.expand_budget_exhausted} |",
+        "",
+        "## Классы без эталона (скоуп задачи C2)",
+        "",
+        f"Классы, у которых в `holdout_ru` меньше {HOLDOUT_MIN} кадров (недостаточно"
+        " независимых серий авторов для честного эталона). Переходят в скоуп задачи C2"
+        " (синтетический слой Р-11 и внешние источники).",
+        "",
     ]
+    # Раздел считается здесь, а не дописывается в файл руками: `main` пишет отчёт целиком
+    # через `write_text`, поэтому ручная таблица — единственная долговечная выгода
+    # провалившегося гейта — молча исчезала бы при следующем запуске скрипта.
+    if numbers.c2_scope:
+        строки += [
+            "| Класс | Принято всего | Из категорий | Доля `category:` |",
+            "|---|---|---|---|",
+        ]
+        строки.extend(
+            f"| `{класс.class_id}` | {класс.accepted} | {класс.category_rows} |"
+            f" {класс.category_share:.1%} |"
+            for класс in numbers.c2_scope
+        )
+    else:
+        строки.append("Нет.")
     return "\n".join(строки) + "\n"
 
 
@@ -159,16 +229,23 @@ def build_parser() -> argparse.ArgumentParser:
     парсер.add_argument(
         "--classes-without-holdout",
         type=int,
-        required=True,
-        help="число из вывода scripts/build_holdout_ru.py",
+        default=None,
+        help="перекрыть вычисленное число (по умолчанию считается по каталогу и манифесту)",
     )
     парсер.add_argument("--report", type=Path, default=REPORT_PATH)
     парсер.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST_PATH)
+    парсер.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
     парсер.add_argument(
         "--reject-log", type=Path, default=None, help="по умолчанию в каталоге данных"
     )
     парсер.add_argument(
         "--dedup-verdicts", type=Path, default=None, help="по умолчанию в каталоге данных"
+    )
+    парсер.add_argument(
+        "--applied-verdicts",
+        type=Path,
+        default=DEFAULT_APPLIED_PATH,
+        help="журнал применённых автовердиктов под provenance/",
     )
     парсер.add_argument(
         "--expand-log", type=Path, default=None, help="по умолчанию в каталоге данных"
@@ -186,14 +263,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     журнал = аргументы.reject_log or (корень / "reject_log.csv")
     файл_вердиктов = аргументы.dedup_verdicts or (корень / DEDUP_VERDICTS_NAME)
     журнал_обхода = аргументы.expand_log or (корень / EXPAND_LOG_NAME)
+    каталог = load_catalog(аргументы.catalog)
+    # Вердикты дедупа живут в двух файлах: ожидающие — в `verdicts.dedup.csv` каталога
+    # данных, применённые — в git-отслеживаемом журнале `provenance/dedup_verdicts.csv`,
+    # потому что `scripts/harvest.py` усекает первый сразу после применения. Отчёт обязан
+    # показывать события прогона, а не остаток очереди, поэтому считает по обоим. Ключ —
+    # имя файла, так что вердикт, оказавшийся в обоих, считается один раз, и побеждает
+    # ожидающий: он новее применённого.
+    вердикты = {з.file: з.verdict for з in load_applied(аргументы.applied_verdicts)}
+    if файл_вердиктов.exists():
+        вердикты.update(load_audit(файл_вердиктов))
     числа = collect(
         rows=load_manifest(аргументы.manifest),
         rejects=load_rejects(журнал),
-        verdicts=load_audit(файл_вердиктов) if файл_вердиктов.exists() else {},
-        classes_without_holdout=аргументы.classes_without_holdout,
+        verdicts=вердикты,
+        catalog_classes=[к.class_id for к in каталог.classes],
         expand_rows=load_expand_rows(журнал_обхода),
+        classes_without_holdout=аргументы.classes_without_holdout,
     )
     прошёл, провалы = check_c1(числа)
+    if аргументы.classes_without_holdout is not None and аргументы.classes_without_holdout != len(
+        числа.c2_scope
+    ):
+        print(
+            f"ВНИМАНИЕ: перекрытие {аргументы.classes_without_holdout} расходится с"
+            f" вычисленными {len(числа.c2_scope)} — гейт судит по перекрытию,"
+            " а таблица скоупа C2 по вычисленному"
+        )
     sha = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()

@@ -1,9 +1,20 @@
 from pathlib import Path
 
+import pytest
+
+from pipeline.harvest.audit import AppliedVerdict, append_applied
 from pipeline.harvest.expand_log import ExpandRow, append_expand_row
 from pipeline.harvest.manifest import HarvestRow, write_manifest
 from pipeline.harvest.rejects import Reject, append_reject_row
-from scripts.report_c1 import G_C1_MAX_MISSING, C1Numbers, check_c1, collect, main, render
+from scripts.report_c1 import (
+    G_C1_MAX_MISSING,
+    C1Numbers,
+    C2ScopeRow,
+    check_c1,
+    collect,
+    main,
+    render,
+)
 
 
 def _строка(**правки: object) -> HarvestRow:
@@ -81,12 +92,26 @@ def _числа(**правки: object) -> C1Numbers:
         "expand_rejected_exclude": 0,
         "expand_rejected_not_own": 0,
         "expand_budget_exhausted": 0,
+        "c2_scope": (),
     }
     поля.update(правки)
     return C1Numbers(**поля)  # type: ignore[arg-type]
 
 
-def _подготовить(tmp_path: Path) -> tuple[list[str], Path]:
+def _каталог(tmp_path: Path, классов: int) -> Path:
+    """Крошечный каталог: `lada__granta` из манифеста плюс добивка до нужного числа.
+
+    Число классов каталога — знаменатель гейта, поэтому размер каталога задаёт вердикт:
+    класс без строк манифеста дефицитен по определению.
+    """
+    имена = ["granta", *(f"m{номер}" for номер in range(1, классов))]
+    модели = "".join(f"      {имя}:\n        display: Lada {имя}\n" for имя in имена)
+    путь = tmp_path / "canonical.yaml"
+    путь.write_text(f"version: 1\nbrands:\n  Lada:\n    models:\n{модели}", encoding="utf-8")
+    return путь
+
+
+def _подготовить(tmp_path: Path, классов_в_каталоге: int = 8) -> tuple[list[str], Path]:
     """Манифест, журнал отказов и вердикты дедупа в `tmp_path`; флаги путей и путь отчёта."""
     манифест = tmp_path / "harvest_manifest.csv"
     write_manifest(
@@ -114,10 +139,14 @@ def _подготовить(tmp_path: Path) -> tuple[list[str], Path]:
         str(отчёт),
         "--manifest",
         str(манифест),
+        "--catalog",
+        str(_каталог(tmp_path, классов_в_каталоге)),
         "--reject-log",
         str(журнал),
         "--dedup-verdicts",
         str(вердикты),
+        "--applied-verdicts",
+        str(tmp_path / "dedup_verdicts.csv"),
         "--expand-log",
         str(журнал_обхода),
     ]
@@ -125,7 +154,9 @@ def _подготовить(tmp_path: Path) -> tuple[list[str], Path]:
 
 
 def test_гейт_блокирует_по_классам_без_эталона() -> None:
-    числа = collect(rows=[], rejects=[], verdicts={}, classes_without_holdout=16)
+    числа = collect(
+        rows=[], rejects=[], verdicts={}, catalog_classes=(), classes_without_holdout=16
+    )
 
     прошёл, провалы = check_c1(числа)
 
@@ -134,15 +165,53 @@ def test_гейт_блокирует_по_классам_без_эталона()
 
 
 def test_гейт_проходит_на_шести() -> None:
-    числа = collect(rows=[], rejects=[], verdicts={}, classes_without_holdout=6)
+    числа = collect(rows=[], rejects=[], verdicts={}, catalog_classes=(), classes_without_holdout=6)
 
     assert check_c1(числа) == (True, [])
+
+
+def test_класс_без_строк_манифеста_считается_дефицитным() -> None:
+    """Знаменатель гейта — каталог: класс, потерявший провенанс целиком, не исчезает.
+
+    `select_holdout` группирует строки манифеста, поэтому в `short_classes` такой класс не
+    попадает вовсе, и до этой правки дефицит занижался ровно в самом тяжёлом случае (на
+    BASE 15 против настоящих 16).
+    """
+    числа = collect(
+        rows=[_строка()],
+        rejects=[],
+        verdicts={},
+        catalog_classes=("lada__granta", "chevrolet__lanos"),
+    )
+
+    assert числа.classes_without_holdout == 2
+    assert [к.class_id for к in числа.c2_scope] == ["chevrolet__lanos", "lada__granta"]
+    без_строк = next(к for к in числа.c2_scope if к.class_id == "chevrolet__lanos")
+    assert (без_строк.accepted, без_строк.category_rows, без_строк.category_share) == (0, 0, 0.0)
+
+
+def test_скоуп_c2_считает_принятое_и_долю_категорий() -> None:
+    """Таблица скоупа C2 и вердикт гейта — одна величина: `len(c2_scope)`."""
+    строки = [
+        _строка(basis="category:Lada Granta"),
+        _строка(file="cd.jpg", sha256="cd" * 32, basis="search:Lada Granta"),
+        _строка(file="ef.jpg", sha256="ef" * 32, class_id="kia__rio", basis="search:Kia Rio"),
+    ]
+
+    числа = collect(rows=строки, rejects=[], verdicts={}, catalog_classes=("lada__granta",))
+
+    assert числа.classes_without_holdout == len(числа.c2_scope) == 1
+    (гранта,) = числа.c2_scope
+    assert (гранта.accepted, гранта.category_rows) == (2, 1)
+    assert гранта.category_share == 0.5
 
 
 def test_доля_категорийного_базиса_считается_но_не_блокирует() -> None:
     строки = [_строка(basis="category:Kia Rio"), _строка(basis="search:Kia Rio")]
 
-    числа = collect(rows=строки, rejects=[], verdicts={}, classes_without_holdout=6)
+    числа = collect(
+        rows=строки, rejects=[], verdicts={}, catalog_classes=(), classes_without_holdout=6
+    )
 
     assert числа.category_rows == 1
     assert числа.category_share == 0.5
@@ -176,7 +245,9 @@ def test_причины_отказа_идут_по_убыванию_числа_�
         *(_отказ(reason="not_a_car_photo") for _ in range(3)),
         *(_отказ(reason="over_redacted") for _ in range(2)),
     ]
-    числа = collect(rows=[], rejects=отказы, verdicts={}, classes_without_holdout=6)
+    числа = collect(
+        rows=[], rejects=отказы, verdicts={}, catalog_classes=(), classes_without_holdout=6
+    )
 
     текст = render(числа, True, [], "abc1234", "2026-08-31")
 
@@ -194,7 +265,12 @@ def test_потери_обхода_суммируются_по_журналу() 
     ]
 
     числа = collect(
-        rows=[], rejects=[], verdicts={}, classes_without_holdout=6, expand_rows=строки_обхода
+        rows=[],
+        rejects=[],
+        verdicts={},
+        catalog_classes=(),
+        classes_without_holdout=6,
+        expand_rows=строки_обхода,
     )
 
     assert числа.expand_requests == 3
@@ -205,7 +281,7 @@ def test_потери_обхода_суммируются_по_журналу() 
 
 
 def test_отсутствие_журнала_обхода_даёт_нули() -> None:
-    числа = collect(rows=[], rejects=[], verdicts={}, classes_without_holdout=6)
+    числа = collect(rows=[], rejects=[], verdicts={}, catalog_classes=(), classes_without_holdout=6)
 
     assert числа.expand_requests == 0
     assert числа.expand_rejected_not_own == 0
@@ -223,25 +299,51 @@ def test_отчёт_показывает_чем_срезан_обход() -> Non
     assert "| категорий с исчерпанным бюджетом | 1 |" in текст
 
 
+def test_отчёт_показывает_скоуп_c2_по_классам() -> None:
+    """Раздел собирается `render`, а не дописывается руками: `main` пишет отчёт целиком."""
+    числа = _числа(
+        classes_without_holdout=2,
+        c2_scope=(
+            C2ScopeRow(class_id="chery__amulet", accepted=30, category_rows=20),
+            C2ScopeRow(class_id="chevrolet__lanos", accepted=0, category_rows=0),
+        ),
+    )
+
+    текст = render(числа, False, [], "abc1234", "2026-08-31")
+
+    assert "## Классы без эталона (скоуп задачи C2)" in текст
+    assert "| `chery__amulet` | 30 | 20 | 66.7% |" in текст
+    assert "| `chevrolet__lanos` | 0 | 0 | 0.0% |" in текст
+
+
+def test_отчёт_без_дефицитных_классов_печатает_нет() -> None:
+    текст = render(_числа(classes_without_holdout=0), True, [], "abc1234", "2026-08-31")
+
+    assert "## Классы без эталона (скоуп задачи C2)\n\nКлассы, у которых" in текст
+    assert текст.rstrip().endswith("Нет.")
+
+
 def test_main_на_красном_гейте_пишет_отчёт_и_возвращает_1(tmp_path: Path) -> None:
+    """Число гейта считается само: восемь классов каталога, ни у одного нет эталона."""
     флаги, отчёт = _подготовить(tmp_path)
 
-    код = main([*флаги, "--classes-without-holdout", "16"])
+    код = main(флаги)
 
     assert код == 1
     текст = отчёт.read_text(encoding="utf-8")
     assert "- вердикт гейта: НЕ ПРОЙДЕН" in текст
-    assert f"- G_C1: классов без эталона — 16 > {G_C1_MAX_MISSING}" in текст
+    assert f"- G_C1: классов без эталона — 8 > {G_C1_MAX_MISSING}" in текст
     assert "| споров `conflict` | 0 | 1 |" in текст
     assert "| вытеснений `supersede` | 0 | 2 |" in текст
     assert "| `not_a_car_photo` | 2 |" in текст
     assert "| отвергнуто не своей полкой | 3 |" in текст
+    assert "| `lada__granta` | 2 | 1 | 50.0% |" in текст
 
 
 def test_main_на_зелёном_гейте_возвращает_0(tmp_path: Path) -> None:
-    флаги, отчёт = _подготовить(tmp_path)
+    флаги, отчёт = _подготовить(tmp_path, классов_в_каталоге=6)
 
-    код = main([*флаги, "--classes-without-holdout", "6"])
+    код = main(флаги)
 
     assert код == 0
     текст = отчёт.read_text(encoding="utf-8")
@@ -250,11 +352,23 @@ def test_main_на_зелёном_гейте_возвращает_0(tmp_path: Pa
     assert "50.0%" in текст
 
 
+def test_main_перекрытие_числа_гейта_предупреждает_о_расхождении(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Флаг оставлен для сверки со старым выводом `build_holdout_ru`, и расхождение слышно."""
+    флаги, _ = _подготовить(tmp_path, классов_в_каталоге=6)
+
+    код = main([*флаги, "--classes-without-holdout", "16"])
+
+    assert код == 1
+    assert "ВНИМАНИЕ: перекрытие 16 расходится с вычисленными 6" in capsys.readouterr().out
+
+
 def test_main_без_файла_вердиктов_считает_их_пустыми(tmp_path: Path) -> None:
-    флаги, отчёт = _подготовить(tmp_path)
+    флаги, отчёт = _подготовить(tmp_path, классов_в_каталоге=6)
     флаги[флаги.index("--dedup-verdicts") + 1] = str(tmp_path / "нет.csv")
 
-    код = main([*флаги, "--classes-without-holdout", "6"])
+    код = main(флаги)
 
     assert код == 0
     текст = отчёт.read_text(encoding="utf-8")
@@ -262,11 +376,38 @@ def test_main_без_файла_вердиктов_считает_их_пуст�
     assert "| вытеснений `supersede` | 0 | 0 |" in текст
 
 
+def test_main_считает_вердикты_и_из_журнала_применённых(tmp_path: Path) -> None:
+    """`verdicts.dedup.csv` усекается после применения, а событие прогона обязано остаться.
+
+    До правки C1 отчёт читал только очередь, поэтому усечение обнулило бы оба числа в
+    git-отслеживаемом отчёте, хотя вытеснение и спор в прогоне были.
+    """
+    флаги, отчёт = _подготовить(tmp_path, классов_в_каталоге=6)
+    флаги[флаги.index("--dedup-verdicts") + 1] = str(tmp_path / "нет.csv")
+    append_applied(
+        tmp_path / "dedup_verdicts.csv",
+        [
+            AppliedVerdict(
+                file="ab.jpg",
+                class_id="lada__granta",
+                basis="category:Kia Rio",
+                verdict="drop:superseded",
+                applied="2026-09-01",
+            )
+        ],
+    )
+
+    код = main(флаги)
+
+    assert код == 0
+    assert "| вытеснений `supersede` | 0 | 1 |" in отчёт.read_text(encoding="utf-8")
+
+
 def test_main_без_журнала_обхода_считает_потери_нулями(tmp_path: Path) -> None:
-    флаги, отчёт = _подготовить(tmp_path)
+    флаги, отчёт = _подготовить(tmp_path, классов_в_каталоге=6)
     флаги[флаги.index("--expand-log") + 1] = str(tmp_path / "нет.csv")
 
-    код = main([*флаги, "--classes-without-holdout", "6"])
+    код = main(флаги)
 
     assert код == 0
     текст = отчёт.read_text(encoding="utf-8")

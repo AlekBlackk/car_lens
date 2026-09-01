@@ -8,6 +8,7 @@ from pipeline.harvest.manifest import HarvestRow
 from pipeline.holdout import (
     HOLDOUT_MIN,
     POOL_RESERVE,
+    classes_short_of_holdout,
     listing_id_of,
     phash_components,
     select_holdout,
@@ -86,6 +87,30 @@ def test_класс_короче_минимума_объявлен_дефици�
     выбор = select_holdout(_класс("lifan__x60", HOLDOUT_MIN - 1))
     assert выбор.files == frozenset()
     assert выбор.short_classes == ("lifan__x60",)
+
+
+def test_дефицит_считается_по_каталогу_а_не_по_манифесту() -> None:
+    """Класс без строк манифеста дефицитен: `short_classes` о нём не знает вовсе.
+
+    Именно этим `G_C1` занижался в самом тяжёлом случае — класс, потерявший провенанс
+    целиком, выпадал из знаменателя, а не попадал в дефицит.
+    """
+    строки = _класс("lada__2107", 30) + _класс("lifan__x60", HOLDOUT_MIN - 1)
+    выбор = select_holdout(строки)
+
+    дефицит = classes_short_of_holdout(
+        выбор, строки, ("lada__2107", "lifan__x60", "chevrolet__lanos")
+    )
+
+    assert выбор.short_classes == ("lifan__x60",)
+    assert дефицит == ("chevrolet__lanos", "lifan__x60")
+
+
+def test_дефицит_не_считает_классы_вне_каталога() -> None:
+    """Знаменатель — каталог: класс манифеста, которого в каталоге нет, гейт не касается."""
+    строки = _класс("lifan__x60", HOLDOUT_MIN - 1)
+
+    assert classes_short_of_holdout(select_holdout(строки), строки, ()) == ()
 
 
 def test_отбор_детерминирован() -> None:
