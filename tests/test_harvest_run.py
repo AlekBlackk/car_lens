@@ -494,6 +494,45 @@ def test_обход_подставляет_подкатегории_перед_�
     assert [(с.class_id, с.category, с.categories) for с in журнал] == [("kia__rio", "Kia Rio", 2)]
 
 
+def test_дубли_категорий_не_становятся_запросами(tmp_path: Path) -> None:
+    """23 лишних запроса на полный прогон: `include` в каждом обходе плюс родитель с потомком.
+
+    Класс, заявивший и родителя, и его потомка, получает потомка дважды — из обхода родителя
+    и из своего списка, — а `include` подмешивается в результат каждой заявленной категории.
+    Каждый дубль стоит минимум одной страницы, которая по `done_items` заведомо не даст
+    кандидата. Порядок при дедупе обязан сохраниться: спека закрепляет «родитель раньше
+    потомков, категории раньше текста».
+    """
+
+    def обход(
+        class_id: str,
+        категория: str,
+        глубина: int,
+        include: tuple[str, ...],
+        exclude: tuple[str, ...],
+    ) -> ExpandResult:
+        # Как в бою: результат каждого обхода = сама категория, её потомки и весь `include`.
+        потомки = {"BMW 3 Series": ("BMW E90",), "BMW E90": ()}[категория]
+        return ExpandResult((категория, *include, *потомки), 1, 0, 0, False, 0)
+
+    queries = ClassQueries(
+        "bmw__3_series",
+        ("BMW 3 Series", "BMW E90"),
+        ("BMW 3 Series",),
+        include=("BMW 318i (E90)",),
+    )
+    deps = _зависимости(tmp_path, expand_categories=обход)
+
+    список = _запросы(queries, deps, HarvestState({}, {}, {}, set()))
+
+    assert [(з.category, з.text) for з in список] == [
+        ("BMW 3 Series", None),
+        ("BMW 318i (E90)", None),
+        ("BMW E90", None),
+        (None, "BMW 3 Series"),
+    ]
+
+
 def test_дерево_из_состояния_не_перезапрашивается(tmp_path: Path) -> None:
     def обход(
         class_id: str,
