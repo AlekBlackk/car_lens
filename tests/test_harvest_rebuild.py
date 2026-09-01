@@ -27,7 +27,9 @@ def _оригинал(root: Path, sha: str) -> None:
     cv2.imwrite(str(путь), кадр)
 
 
-def _строка(sha: str, class_id: str = "lada__granta") -> HarvestRow:
+def _строка(
+    sha: str, class_id: str = "lada__granta", basis: str = "category:Lada Granta"
+) -> HarvestRow:
     return HarvestRow(
         file=f"{sha}.jpg",
         class_id=class_id,
@@ -39,7 +41,7 @@ def _строка(sha: str, class_id: str = "lada__granta") -> HarvestRow:
         license="CC0",
         license_tier=1,
         checked="2026-08-28",
-        basis="category:Lada Granta",
+        basis=basis,
         sha256=sha,
         phash=0,
         clip_rank=1,
@@ -119,6 +121,51 @@ def test_rebuild_отклоняет_при_дедупе(tmp_path: Path) -> None:
 
     причина2, строка2 = rebuild_row(_строка(sha2), _deps(tmp_path, plate), dedup)
     assert причина2 == "duplicate"
+    assert строка2 is None
+
+
+def test_rebuild_вытеснение_оставляет_категорийную_строку(tmp_path: Path) -> None:
+    """§8: при кросс-классовом столкновении выигрывает категорийное заявление.
+
+    Перестройка идёт по манифесту в его порядке, поэтому старая `search:`-строка попадает в
+    индекс раньше, а новая `category:` приходит следом и получает `supersede`. Трактовка
+    вытеснения как отказа выбрасывала бы из перестройки ровно те категорийные строки, ради
+    которых затевался категорийный сбор.
+    """
+    sha_поисковая = "a" * 64
+    sha_категорийная = "b" * 64
+    _оригинал(tmp_path, sha_поисковая)
+    _оригинал(tmp_path, sha_категорийная)
+    dedup = DedupIndex()
+
+    поисковая = _строка(sha_поисковая, "mitsubishi__pajero", "search:Mitsubishi Pajero")
+    причина1, строка1 = rebuild_row(поисковая, _deps(tmp_path, Фикс([])), dedup)
+    assert причина1 == "accepted"
+    assert строка1 is not None
+
+    категорийная = _строка(sha_категорийная, "mazda__cx5", "category:Mazda CX-5 (KE)")
+    причина2, строка2 = rebuild_row(категорийная, _deps(tmp_path, Фикс([])), dedup)
+    assert причина2 == "accepted", "вытеснение — выигрыш этой строки, а не отказ ей"
+    assert строка2 is not None
+    assert строка2.class_id == "mazda__cx5"
+    assert (tmp_path / "crops" / "mazda__cx5" / f"{sha_категорийная}.jpg").exists()
+
+
+def test_rebuild_отказывает_при_равных_заявлениях_разных_классов(tmp_path: Path) -> None:
+    """Оба заявления категорийные — спор не решён, `conflict` остаётся отказом."""
+    sha_первая = "a" * 64
+    sha_вторая = "b" * 64
+    _оригинал(tmp_path, sha_первая)
+    _оригинал(tmp_path, sha_вторая)
+    dedup = DedupIndex()
+
+    первая = _строка(sha_первая, "mitsubishi__pajero", "category:Mitsubishi Pajero")
+    причина1, _ = rebuild_row(первая, _deps(tmp_path, Фикс([])), dedup)
+    assert причина1 == "accepted"
+
+    вторая = _строка(sha_вторая, "mazda__cx5", "category:Mazda CX-5 (KE)")
+    причина2, строка2 = rebuild_row(вторая, _deps(tmp_path, Фикс([])), dedup)
+    assert причина2 == "conflict"
     assert строка2 is None
 
 
