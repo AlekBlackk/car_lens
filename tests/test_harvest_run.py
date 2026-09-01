@@ -102,7 +102,7 @@ def _кандидат(class_id: str = "lada__granta", **правки: object) ->
 
 
 def _обход_без_сети(
-    категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
+    class_id: str, категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
 ) -> ExpandResult:
     """Заглушка обхода по умолчанию: категория сама себе дерево, ни одного запроса."""
     return ExpandResult((категория,), 0, 0, 0, False, 0)
@@ -456,12 +456,16 @@ def test_неудача_кодирования_кропа_не_оставляе�
 
 
 def test_обход_подставляет_подкатегории_перед_терминами(tmp_path: Path) -> None:
-    вызовы: list[tuple[str, int, tuple[str, ...], tuple[str, ...]]] = []
+    вызовы: list[tuple[str, str, int, tuple[str, ...], tuple[str, ...]]] = []
 
     def обход(
-        категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
+        class_id: str,
+        категория: str,
+        глубина: int,
+        include: tuple[str, ...],
+        exclude: tuple[str, ...],
     ) -> ExpandResult:
-        вызовы.append((категория, глубина, include, exclude))
+        вызовы.append((class_id, категория, глубина, include, exclude))
         return ExpandResult((категория, f"{категория} (DC)"), 1, 0, 0, False, 0)
 
     # Глубина, include и exclude заданы различимыми: обе последние — `tuple[str, ...]`, и
@@ -484,7 +488,7 @@ def test_обход_подставляет_подкатегории_перед_�
         ("Kia Rio (DC)", None),
         (None, "Kia Rio"),
     ]
-    assert вызовы == [("Kia Rio", 2, ("Kia Rio (UB)",), ("Kia Rio (JB)",))]
+    assert вызовы == [("kia__rio", "Kia Rio", 2, ("Kia Rio (UB)",), ("Kia Rio (JB)",))]
     assert состояние.categories["kia__rio|Kia Rio"] == ("Kia Rio", "Kia Rio (DC)")
     журнал = load_expand_rows(tmp_path / "expand_log.csv")
     assert [(с.class_id, с.category, с.categories) for с in журнал] == [("kia__rio", "Kia Rio", 2)]
@@ -492,7 +496,11 @@ def test_обход_подставляет_подкатегории_перед_�
 
 def test_дерево_из_состояния_не_перезапрашивается(tmp_path: Path) -> None:
     def обход(
-        категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
+        class_id: str,
+        категория: str,
+        глубина: int,
+        include: tuple[str, ...],
+        exclude: tuple[str, ...],
     ) -> ExpandResult:
         raise AssertionError("обход не должен вызываться при кэше в состоянии")
 

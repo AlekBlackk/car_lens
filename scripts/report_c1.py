@@ -44,12 +44,12 @@ class C1Numbers:
     conflicts: int
     supersedes: int
     reasons: dict[str, int]
-    # Из журнала обхода категорий (задача 12): без него `is_child_of` и стоп-слова срезали
+    # Из журнала обхода категорий (задача 12): без него предикат допуска и стоп-слова срезали
     # подкатегории незаметно для отчёта — см. `pipeline/harvest/expand_log.py`.
     expand_requests: int
     expand_rejected_stopword: int
     expand_rejected_exclude: int
-    expand_rejected_not_child: int
+    expand_rejected_not_own: int
     expand_budget_exhausted: int
 
 
@@ -80,7 +80,7 @@ def collect(
         expand_requests=обход["requests"],
         expand_rejected_stopword=обход["rejected_stopword"],
         expand_rejected_exclude=обход["rejected_exclude"],
-        expand_rejected_not_child=обход["rejected_not_child"],
+        expand_rejected_not_own=обход["rejected_not_own"],
         expand_budget_exhausted=обход["budget_exhausted"],
     )
 
@@ -148,7 +148,7 @@ def render(
         f"| запросов к Commons | {numbers.expand_requests} |",
         f"| срезано стоп-словом | {numbers.expand_rejected_stopword} |",
         f"| срезано `exclude` | {numbers.expand_rejected_exclude} |",
-        f"| срезано `is_child_of` | {numbers.expand_rejected_not_child} |",
+        f"| отвергнуто не своей полкой | {numbers.expand_rejected_not_own} |",
         f"| категорий с исчерпанным бюджетом | {numbers.expand_budget_exhausted} |",
     ]
     return "\n".join(строки) + "\n"

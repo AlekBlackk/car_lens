@@ -66,7 +66,7 @@ class ExpandResult:
     rejected_stopword: int
     rejected_exclude: int
     budget_exhausted: bool
-    rejected_not_child: int
+    rejected_not_own: int
 
 
 def _подкатегории(
@@ -99,9 +99,14 @@ def is_stopword_category(name: str) -> bool:
     return any(маркер in нормальное for маркер in SUBCAT_STOPWORDS)
 
 
-def is_child_of(parent: str, child: str) -> bool:
-    """Является ли категория подполкой родителя, а не перекрёстной ссылкой."""
-    return normalize_filename(parent) in normalize_filename(child)
+def _допустить_всё(_имя: str) -> bool:
+    return True
+
+
+#: Модульная константа для тестов `expand`, которым правило допуска безразлично (глубина,
+#: бюджет, стоп-слова, интервал) — `admit` обязателен именно затем, чтобы прод не мог его
+#: забыть, а тестам на другое незачем собирать `alias_table` и `claimed`.
+ADMIT_ALL: Callable[[str], bool] = _допустить_всё
 
 
 def expand(
@@ -111,12 +116,19 @@ def expand(
     include: Sequence[str] = (),
     exclude: Sequence[str] = (),
     sleep: Callable[[float], None] = time.sleep,
+    *,
+    admit: Callable[[str], bool],
 ) -> ExpandResult:
     """Категория и допущенные потомки, в порядке обхода в ширину.
 
     Родитель идёт первым всегда, даже если файлов у него нет: пустая выдача стоит один
     запрос и не стоит отдельной проверки. `include` пробивает все правила допуска —
     явно названная человеком категория обходу не подчиняется.
+
+    `admit` решает, своя ли потомку полка (§5 дизайна C1: заявлена ли она другим классом и
+    подтверждена ли иглой) — модуль сам этого решить не может, он не знает про классы.
+    Параметр keyword-only и без умолчания: прод не должен иметь возможности забыть его и
+    молча собрать дерево без проверки принадлежности.
 
     Между запросами держится тот же интервал, что у харвеста (`MIN_INTERVAL_SECONDS`,
     §3.2 SPEC): без него обход отправлял бы до `MAX_SUBCAT_REQUESTS` запросов встык.
@@ -129,7 +141,7 @@ def expand(
     запросов = 0
     стоп_словом = 0
     исключением = 0
-    не_потомком = 0
+    не_своим = 0
     исчерпан = False
     последний_запрос = 0.0
 
@@ -157,14 +169,14 @@ def expand(
             if is_stopword_category(потомок):
                 стоп_словом += 1
                 continue
-            if not is_child_of(родитель, потомок):
+            if not admit(потомок):
                 # Отказ считается, а не молчит: без счётчика потеря целой полки (как у
                 # `Long-wheelbase Lada Nivas`, задача 12) не оставляла следа ни в прогоне,
                 # ни в отчёте.
-                не_потомком += 1
+                не_своим += 1
                 continue
             видели.add(имя)
             итог.append(потомок)
             очередь.append((потомок, уровень + 1))
 
-    return ExpandResult(tuple(итог), запросов, стоп_словом, исключением, исчерпан, не_потомком)
+    return ExpandResult(tuple(итог), запросов, стоп_словом, исключением, исчерпан, не_своим)

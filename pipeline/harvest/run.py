@@ -56,9 +56,10 @@ PAGE_LIMIT = 50
 MAX_BLACK_PIXEL_FRAC = 0.50
 BLACK_PIXEL_THRESHOLD = 8
 
-# Аргументы: категория, глубина, include, exclude — ровно то, чем `expand` управляется из
-# таблицы запросов.
-CategoryExpander = Callable[[str, int, tuple[str, ...], tuple[str, ...]], ExpandResult]
+# Аргументы: class_id, категория, глубина, include, exclude. `class_id` идёт первым, потому
+# что предикат допуска (§5 дизайна C1) собирается по классу — без него замыкание в
+# `scripts/harvest.py` не может решить, своя ли подкатегория этому обходу.
+CategoryExpander = Callable[[str, str, int, tuple[str, ...], tuple[str, ...]], ExpandResult]
 
 
 def is_crop_over_redacted(
@@ -375,7 +376,7 @@ def _категории(queries: ClassQueries, deps: HarvestDeps, state: Harvest
         известное = state.categories.get(ключ)
         if известное is None:
             итог = deps.expand_categories(
-                категория, queries.depth, queries.include, queries.exclude
+                queries.class_id, категория, queries.depth, queries.include, queries.exclude
             )
             известное = итог.categories
             state.categories[ключ] = известное
@@ -391,7 +392,7 @@ def _категории(queries: ClassQueries, deps: HarvestDeps, state: Harvest
                     requests=итог.requests,
                     rejected_stopword=итог.rejected_stopword,
                     rejected_exclude=итог.rejected_exclude,
-                    rejected_not_child=итог.rejected_not_child,
+                    rejected_not_own=итог.rejected_not_own,
                     budget_exhausted=итог.budget_exhausted,
                     checked=deps.checked,
                 ),

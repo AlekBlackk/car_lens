@@ -58,7 +58,7 @@ def _обход(**правки: object) -> ExpandRow:
         "requests": 1,
         "rejected_stopword": 0,
         "rejected_exclude": 0,
-        "rejected_not_child": 3,
+        "rejected_not_own": 3,
         "budget_exhausted": False,
         "checked": "2026-09-01",
     }
@@ -79,7 +79,7 @@ def _числа(**правки: object) -> C1Numbers:
         "expand_requests": 0,
         "expand_rejected_stopword": 0,
         "expand_rejected_exclude": 0,
-        "expand_rejected_not_child": 0,
+        "expand_rejected_not_own": 0,
         "expand_budget_exhausted": 0,
     }
     поля.update(правки)
@@ -107,7 +107,7 @@ def _подготовить(tmp_path: Path) -> tuple[list[str], Path]:
     )
     журнал_обхода = tmp_path / "expand_log.csv"
     append_expand_row(журнал_обхода, _обход())
-    append_expand_row(журнал_обхода, _обход(class_id="kia__rio", rejected_not_child=0))
+    append_expand_row(журнал_обхода, _обход(class_id="kia__rio", rejected_not_own=0))
     отчёт = tmp_path / "harvest-c1.md"
     флаги = [
         "--report",
@@ -189,8 +189,8 @@ def test_причины_отказа_идут_по_убыванию_числа_�
 
 def test_потери_обхода_суммируются_по_журналу() -> None:
     строки_обхода = [
-        _обход(requests=1, rejected_stopword=0, rejected_exclude=0, rejected_not_child=3),
-        _обход(requests=2, rejected_stopword=1, rejected_exclude=1, rejected_not_child=0),
+        _обход(requests=1, rejected_stopword=0, rejected_exclude=0, rejected_not_own=3),
+        _обход(requests=2, rejected_stopword=1, rejected_exclude=1, rejected_not_own=0),
     ]
 
     числа = collect(
@@ -200,7 +200,7 @@ def test_потери_обхода_суммируются_по_журналу() 
     assert числа.expand_requests == 3
     assert числа.expand_rejected_stopword == 1
     assert числа.expand_rejected_exclude == 1
-    assert числа.expand_rejected_not_child == 3
+    assert числа.expand_rejected_not_own == 3
     assert числа.expand_budget_exhausted == 0
 
 
@@ -208,18 +208,18 @@ def test_отсутствие_журнала_обхода_даёт_нули() ->
     числа = collect(rows=[], rejects=[], verdicts={}, classes_without_holdout=6)
 
     assert числа.expand_requests == 0
-    assert числа.expand_rejected_not_child == 0
+    assert числа.expand_rejected_not_own == 0
 
 
 def test_отчёт_показывает_чем_срезан_обход() -> None:
-    числа = _числа(expand_requests=5, expand_rejected_not_child=3, expand_budget_exhausted=1)
+    числа = _числа(expand_requests=5, expand_rejected_not_own=3, expand_budget_exhausted=1)
     прошёл, провалы = check_c1(числа)
 
     текст = render(числа, прошёл, провалы, "abc1234", "2026-08-31")
 
     assert "## Обход категорий: запросы и потери" in текст
     assert "| запросов к Commons | 5 |" in текст
-    assert "| срезано `is_child_of` | 3 |" in текст
+    assert "| отвергнуто не своей полкой | 3 |" in текст
     assert "| категорий с исчерпанным бюджетом | 1 |" in текст
 
 
@@ -235,7 +235,7 @@ def test_main_на_красном_гейте_пишет_отчёт_и_возвр
     assert "| споров `conflict` | 0 | 1 |" in текст
     assert "| вытеснений `supersede` | 0 | 2 |" in текст
     assert "| `not_a_car_photo` | 2 |" in текст
-    assert "| срезано `is_child_of` | 3 |" in текст
+    assert "| отвергнуто не своей полкой | 3 |" in текст
 
 
 def test_main_на_зелёном_гейте_возвращает_0(tmp_path: Path) -> None:
@@ -270,4 +270,4 @@ def test_main_без_журнала_обхода_считает_потери_н�
 
     assert код == 0
     текст = отчёт.read_text(encoding="utf-8")
-    assert "| срезано `is_child_of` | 0 |" in текст
+    assert "| отвергнуто не своей полкой | 0 |" in текст

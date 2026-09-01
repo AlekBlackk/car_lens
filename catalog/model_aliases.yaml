@@ -15,7 +15,7 @@ classes:
   audi__q5:
     needles: ["q5"]
   bmw__3_series:
-    needles: ["3 series", "3er", "e30", "e36", "e46", "e90", "f30", "g20"]
+    needles: ["3 series", "3er", "e30", "e36", "e46", "e90", "e91", "e92", "f30", "f31", "g20", "g21"]
   bmw__5_series:
     needles: ["5 series", "5er", "e28", "e34", "e39", "e60", "f10", "g30"]
   bmw__x5:
@@ -137,11 +137,11 @@ classes:
   kia__sportage:
     needles: ["sportage"]
   lada__2101:
-    needles: ["2101", "21011", "21013", "kopeika", "vaz 2101"]
+    needles: ["2101", "21011", "21012", "21013", "21014", "kopeika", "vaz 2101"]
   lada__2104:
-    needles: ["2104", "21043", "21047", "vaz 2104"]
+    needles: ["2104", "21042", "21043", "21047", "vaz 2104"]
   lada__2106:
-    needles: ["2106", "21060", "21061", "21063", "21065", "vaz 2106"]
+    needles: ["2106", "21060", "21061", "21062", "21063", "21065", "vaz 2106"]
   lada__2107:
     needles: ["2107", "21074", "vaz 2107"]
   lada__2110:
@@ -183,7 +183,7 @@ classes:
   mazda__3:
     needles: ["axela", "mazda 3", "mazda3"]
   mazda__6:
-    needles: ["atenza", "mazda 6", "mazda6"]
+    needles: ["atenza", "mazda 6", "mazda6", "mazda6e"]
   mazda__cx5:
     needles: ["cx 5", "cx5"]
   mercedes_benz__c_class:
@@ -287,7 +287,7 @@ classes:
   toyota__rav4:
     needles: ["rav4", "vanguard"]
   uaz__bukhanka:
-    needles: ["2206", "3741", "3909", "452", "bukhanka"]
+    needles: ["2206", "3741", "3909", "452", "452a", "452d", "452v", "bukhanka"]
   uaz__hunter:
     needles: ["3151", "315195", "hunter"]
   uaz__patriot:
@@ -305,6 +305,6 @@ classes:
   volkswagen__touareg:
     needles: ["touareg", "vw touareg"]
   volkswagen__transporter:
-    needles: ["caravelle", "multivan", "transporter", "vw t4", "vw t5", "vw t6", "vw transporter"]
+    needles: ["caravelle", "multivan", "t4", "t5", "t6", "transporter", "vw t4", "vw t5", "vw t6", "vw transporter"]
   volvo__xc60:
     needles: ["xc60"]

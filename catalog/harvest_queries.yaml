@@ -16,9 +16,11 @@ classes:
   audi__q5:
     categories: [Audi Q5]
     terms: ["Audi Q5"]
+    exclude: ["Abt Q5"]
   bmw__3_series:
     categories: [BMW 3 Series, BMW E30, BMW E36, BMW E46, BMW E90, BMW E91, BMW E92, BMW F30, BMW F31, BMW G20, BMW G21, BMW 3er]
     terms: ["BMW 3 Series", "BMW 3er", "BMW E30", "BMW E36", "BMW E46", "BMW E90", "BMW F30", "BMW G20"]
+    exclude: ["Alpina B3 (E46)", "Alpina B3 (E90)", "Alpina B3 (E92)", "Alpina B3 (F31)", "Alpina B3 (G20)", "Alpina B3 (G21)", "Alpina D3 (E90)", "Alpina D3 (E92)", "Alpina D3 (F31)", "Alpina D3 (G21)", "BMW E30 (Alpina)", "BMW E36 (Alpina)", "BMW E91 (Alpina)", "BMW F30 (Alpina)"]
   bmw__5_series:
     categories: [BMW 5 Series, BMW 5er]
     terms: ["BMW 5 Series", "BMW 5er"]
@@ -282,6 +284,7 @@ classes:
   mercedes_benz__e_class:
     categories: [Mercedes-Benz E-Class]
     terms: ["Mercedes-Benz E-Class"]
+    exclude: ["Brabus E-class"]
   mercedes_benz__gle:
     categories: [Mercedes-Benz GLE-Class, Mercedes-Benz GLE]
     terms: ["Mercedes-Benz GLE", "Mercedes-Benz GLE-Class"]
@@ -345,6 +348,7 @@ classes:
   porsche__cayenne:
     categories: [Porsche Cayenne]
     terms: ["Porsche Cayenne"]
+    exclude: ["Gemballa Cayenne", "Techart Cayenne"]
   ravon__nexia_r3:
     categories: [Ravon R3]
     terms: ["Ravon Nexia R3"]

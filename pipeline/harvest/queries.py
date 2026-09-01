@@ -17,6 +17,8 @@ from typing import Any
 
 import yaml
 
+from pipeline.harvest.aliases import normalize_filename
+
 _КОРЕНЬ = Path(__file__).resolve().parent.parent.parent
 DEFAULT_QUERIES_PATH = _КОРЕНЬ / "catalog" / "harvest_queries.yaml"
 DEFAULT_LATIN_NAMES_PATH = _КОРЕНЬ / "catalog" / "latin_names.yaml"
@@ -73,6 +75,20 @@ def load_queries(path: Path) -> dict[str, ClassQueries]:
             exclude=исключения,
         )
     return результат
+
+
+def claimed_categories(table: dict[str, ClassQueries]) -> dict[str, frozenset[str]]:
+    """Нормализованное имя заявленной категории → множество заявивших её `class_id`.
+
+    Материал для `admission.build_admit`: правило допуска подкатегории (§5 дизайна C1)
+    первым делом бракует полку, заявленную другим классом, даже если её имя проходит по
+    иглам, — а знать «другим» без этой карты не из чего.
+    """
+    итог: dict[str, set[str]] = {}
+    for class_id, запросы in table.items():
+        for категория in запросы.categories:
+            итог.setdefault(normalize_filename(категория), set()).add(class_id)
+    return {имя: frozenset(классы) for имя, классы in итог.items()}
 
 
 def load_latin_names(path: Path) -> dict[str, str]:

@@ -1,7 +1,7 @@
 import json
 from collections.abc import Mapping
 
-from pipeline.harvest.categories import MAX_SUBCAT_REQUESTS, expand
+from pipeline.harvest.categories import ADMIT_ALL, MAX_SUBCAT_REQUESTS, expand
 from pipeline.harvest.commons import MIN_INTERVAL_SECONDS, HttpResponse
 
 
@@ -26,7 +26,7 @@ class ЗаписанныйТранспорт:
 def test_плоская_категория_возвращает_саму_себя() -> None:
     транспорт = ЗаписанныйТранспорт({"Kia Rio (DC)": []})
 
-    итог = expand(транспорт, "Kia Rio (DC)", sleep=lambda _: None)
+    итог = expand(транспорт, "Kia Rio (DC)", sleep=lambda _: None, admit=ADMIT_ALL)
 
     assert итог.categories == ("Kia Rio (DC)",)
     assert итог.requests == 1
@@ -35,7 +35,7 @@ def test_плоская_категория_возвращает_саму_себ�
 def test_поколения_берутся_родитель_первым() -> None:
     транспорт = ЗаписанныйТранспорт({"Kia Rio": ["Kia Rio (DC)", "Kia Rio (QB)"]})
 
-    итог = expand(транспорт, "Kia Rio", sleep=lambda _: None)
+    итог = expand(транспорт, "Kia Rio", sleep=lambda _: None, admit=ADMIT_ALL)
 
     assert итог.categories == ("Kia Rio", "Kia Rio (DC)", "Kia Rio (QB)")
 
@@ -52,18 +52,39 @@ def test_стоп_маркер_отсекает_чужой_домен() -> None:
         }
     )
 
-    итог = expand(транспорт, "Ford Focus", sleep=lambda _: None)
+    итог = expand(транспорт, "Ford Focus", sleep=lambda _: None, admit=ADMIT_ALL)
 
     assert итог.categories == ("Ford Focus", "European Ford Focus")
     assert итог.rejected_stopword == 3
 
 
-def test_потомок_без_имени_родителя_не_берётся() -> None:
+def test_не_свой_потомок_не_берётся_и_считается() -> None:
+    """Потеря полки обязана быть видна числом: молчаливый `continue` не оставляет следа."""
     транспорт = ЗаписанныйТранспорт({"Lada Priora": ["Lada Kalina", "Lada Priora sedan"]})
 
-    итог = expand(транспорт, "Lada Priora", sleep=lambda _: None)
+    итог = expand(
+        транспорт,
+        "Lada Priora",
+        sleep=lambda _: None,
+        admit=lambda имя: имя == "Lada Priora sedan",
+    )
 
     assert итог.categories == ("Lada Priora", "Lada Priora sedan")
+    assert итог.rejected_not_own == 1
+
+
+def test_admit_отвергающий_всё_оставляет_только_родителя() -> None:
+    транспорт = ЗаписанныйТранспорт(
+        {"Long-wheelbase Lada Nivas": ["Lada Niva 2131", "VAZ-2129", "VAZ-2329"]}
+    )
+
+    итог = expand(
+        транспорт, "Long-wheelbase Lada Nivas", depth=1, sleep=lambda _: None, admit=lambda _: False
+    )
+
+    assert итог.categories == ("Long-wheelbase Lada Nivas",)
+    assert итог.rejected_not_own == 3
+    assert итог.rejected_stopword == 0
 
 
 def test_exclude_режет_поколение_и_считается() -> None:
@@ -72,7 +93,11 @@ def test_exclude_режет_поколение_и_считается() -> None:
     )
 
     итог = expand(
-        транспорт, "Hyundai Accent", exclude=["Hyundai Accent (RB)"], sleep=lambda _: None
+        транспорт,
+        "Hyundai Accent",
+        exclude=["Hyundai Accent (RB)"],
+        sleep=lambda _: None,
+        admit=ADMIT_ALL,
     )
 
     assert итог.categories == ("Hyundai Accent", "Hyundai Accent (LC)")
@@ -87,6 +112,7 @@ def test_include_пробивает_правило_допуска() -> None:
         "Hyundai Solaris",
         include=["Hyundai Accent (RB)", "Solaris HS"],
         sleep=lambda _: None,
+        admit=lambda _: False,
     )
 
     assert итог.categories == ("Hyundai Solaris", "Hyundai Accent (RB)", "Solaris HS")
@@ -97,7 +123,7 @@ def test_глубина_два_спускается_через_промежут�
         {"Ford Focus": ["European Ford Focus"], "European Ford Focus": ["European Ford Focus Mk1"]}
     )
 
-    итог = expand(транспорт, "Ford Focus", depth=2, sleep=lambda _: None)
+    итог = expand(транспорт, "Ford Focus", depth=2, sleep=lambda _: None, admit=ADMIT_ALL)
 
     assert итог.categories == ("Ford Focus", "European Ford Focus", "European Ford Focus Mk1")
 
@@ -107,7 +133,7 @@ def test_глубина_один_не_спускается_глубже() -> Non
         {"Ford Focus": ["European Ford Focus"], "European Ford Focus": ["European Ford Focus Mk1"]}
     )
 
-    итог = expand(транспорт, "Ford Focus", depth=1, sleep=lambda _: None)
+    итог = expand(транспорт, "Ford Focus", depth=1, sleep=lambda _: None, admit=ADMIT_ALL)
 
     assert итог.categories == ("Ford Focus", "European Ford Focus")
     assert транспорт.вызовы == ["Ford Focus"]
@@ -116,7 +142,7 @@ def test_глубина_один_не_спускается_глубже() -> Non
 def test_глубина_ноль_не_ходит_вовсе() -> None:
     транспорт = ЗаписанныйТранспорт({"Lada Priora": ["Lada Priora sedan"]})
 
-    итог = expand(транспорт, "Lada Priora", depth=0, sleep=lambda _: None)
+    итог = expand(транспорт, "Lada Priora", depth=0, sleep=lambda _: None, admit=ADMIT_ALL)
 
     assert итог.categories == ("Lada Priora",)
     assert транспорт.вызовы == []
@@ -129,24 +155,10 @@ def test_бюджет_обрывает_обход_и_отмечается() -> N
     }
     транспорт = ЗаписанныйТранспорт(дерево)
 
-    итог = expand(транспорт, "Дерево", depth=2, sleep=lambda _: None)
+    итог = expand(транспорт, "Дерево", depth=2, sleep=lambda _: None, admit=ADMIT_ALL)
 
     assert итог.requests == MAX_SUBCAT_REQUESTS
     assert итог.budget_exhausted is True
-
-
-def test_отвергнутый_не_потомок_попадает_в_счётчик() -> None:
-    """Потеря полки обязана быть видна числом: молчаливый `continue` съел три
-    подкатегории `Long-wheelbase Lada Nivas` и не оставил следа."""
-    транспорт = ЗаписанныйТранспорт(
-        {"Long-wheelbase Lada Nivas": ["Lada Niva 2131", "VAZ-2129", "VAZ-2329"]}
-    )
-
-    итог = expand(транспорт, "Long-wheelbase Lada Nivas", depth=1, sleep=lambda _: None)
-
-    assert итог.categories == ("Long-wheelbase Lada Nivas",)
-    assert итог.rejected_not_child == 3
-    assert итог.rejected_stopword == 0
 
 
 def test_пауза_держится_перед_каждым_следующим_запросом() -> None:
@@ -154,7 +166,7 @@ def test_пауза_держится_перед_каждым_следующим_
     транспорт = ЗаписанныйТранспорт({"Kia Rio": ["Kia Rio (DC)", "Kia Rio (QB)"]})
     паузы: list[float] = []
 
-    итог = expand(транспорт, "Kia Rio", depth=2, sleep=паузы.append)
+    итог = expand(транспорт, "Kia Rio", depth=2, sleep=паузы.append, admit=ADMIT_ALL)
 
     assert транспорт.вызовы == ["Kia Rio", "Kia Rio (DC)", "Kia Rio (QB)"]
     assert итог.requests == 3

@@ -1,7 +1,8 @@
 """Журнал обхода категорий, переживающий процесс.
 
 `ExpandResult` (`categories.py`) считает потери обхода — сколько подкатегорий срезал
-каждый стоп-маркер, `exclude` и правило `is_child_of` — но живёт внутри одного прогона:
+каждый стоп-маркер, `exclude` и предикат допуска (`admit`, §5 дизайна C1) — но живёт
+внутри одного прогона:
 объект пропадает вместе с процессом. Отчёт C1b, напротив, читает только файлы с диска
 (манифест, `reject_log.csv`, `verdicts.dedup.csv`), и без этого журнала посчитанные
 `ExpandResult` числа до отчёта попросту не доезжают — задача 12.
@@ -30,7 +31,7 @@ class ExpandRow:
     requests: int
     rejected_stopword: int
     rejected_exclude: int
-    rejected_not_child: int
+    rejected_not_own: int
     budget_exhausted: bool
     checked: str
 
@@ -64,7 +65,7 @@ def load_expand_rows(path: Path) -> list[ExpandRow]:
             requests=int(строка["requests"]),
             rejected_stopword=int(строка["rejected_stopword"]),
             rejected_exclude=int(строка["rejected_exclude"]),
-            rejected_not_child=int(строка["rejected_not_child"]),
+            rejected_not_own=int(строка["rejected_not_own"]),
             budget_exhausted=строка["budget_exhausted"] == "True",
             checked=строка["checked"],
         )
@@ -82,13 +83,13 @@ def expand_totals(rows: Sequence[ExpandRow]) -> dict[str, int]:
         "requests": 0,
         "rejected_stopword": 0,
         "rejected_exclude": 0,
-        "rejected_not_child": 0,
+        "rejected_not_own": 0,
         "budget_exhausted": 0,
     }
     for строка in rows:
         итог["requests"] += строка.requests
         итог["rejected_stopword"] += строка.rejected_stopword
         итог["rejected_exclude"] += строка.rejected_exclude
-        итог["rejected_not_child"] += строка.rejected_not_child
+        итог["rejected_not_own"] += строка.rejected_not_own
         итог["budget_exhausted"] += int(строка.budget_exhausted)
     return итог

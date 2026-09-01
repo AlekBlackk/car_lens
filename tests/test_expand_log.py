@@ -17,7 +17,7 @@ def _строка(**правки: object) -> ExpandRow:
         "requests": 1,
         "rejected_stopword": 0,
         "rejected_exclude": 0,
-        "rejected_not_child": 3,
+        "rejected_not_own": 3,
         "budget_exhausted": False,
         "checked": "2026-09-01",
     }
@@ -85,15 +85,15 @@ def test_totals_на_пустом_журнале_отдаёт_все_ключи_
         "requests": 0,
         "rejected_stopword": 0,
         "rejected_exclude": 0,
-        "rejected_not_child": 0,
+        "rejected_not_own": 0,
         "budget_exhausted": 0,
     }
 
 
 def test_totals_суммирует_счётчики_по_всем_строкам() -> None:
     строки = [
-        _строка(requests=1, rejected_stopword=0, rejected_exclude=0, rejected_not_child=3),
-        _строка(requests=2, rejected_stopword=1, rejected_exclude=1, rejected_not_child=0),
+        _строка(requests=1, rejected_stopword=0, rejected_exclude=0, rejected_not_own=3),
+        _строка(requests=2, rejected_stopword=1, rejected_exclude=1, rejected_not_own=0),
     ]
 
     итоги = expand_totals(строки)
@@ -102,6 +102,6 @@ def test_totals_суммирует_счётчики_по_всем_строкам
         "requests": 3,
         "rejected_stopword": 1,
         "rejected_exclude": 1,
-        "rejected_not_child": 3,
+        "rejected_not_own": 3,
         "budget_exhausted": 0,
     }

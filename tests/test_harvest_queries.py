@@ -6,7 +6,9 @@ from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
 from pipeline.harvest.queries import (
     DEFAULT_LATIN_NAMES_PATH,
     DEFAULT_QUERIES_PATH,
+    ClassQueries,
     QueriesError,
+    claimed_categories,
     load_latin_names,
     load_queries,
 )
@@ -130,3 +132,24 @@ def test_нулевая_глубина_допустима(tmp_path: Path) -> Non
     )
 
     assert load_queries(путь)["kia__rio"].depth == 0
+
+
+def test_категория_заявленная_двумя_классами_отдаёт_оба() -> None:
+    таблица = {
+        "geely__coolray": ClassQueries("geely__coolray", ("Geely Coolray",), ("Geely Coolray",)),
+        "grp__coolray": ClassQueries("grp__coolray", ("Geely Coolray",), ("Belgee X50",)),
+    }
+
+    заявители = claimed_categories(таблица)
+
+    assert заявители["geely coolray"] == frozenset({"geely__coolray", "grp__coolray"})
+
+
+def test_имена_заявленных_категорий_нормализованы() -> None:
+    таблица = {
+        "kia__rio": ClassQueries("kia__rio", ("Kia Rio (UB)",), ("Kia Rio",)),
+    }
+
+    заявители = claimed_categories(таблица)
+
+    assert заявители == {"kia rio ub": frozenset({"kia__rio"})}

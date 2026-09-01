@@ -19,6 +19,7 @@ from pathlib import Path
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
 from pipeline.detectors.yolo import YoloDetector
+from pipeline.harvest.admission import build_admit
 from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, load_alias_table
 from pipeline.harvest.audit import apply_audit, audit_counts, load_audit, merge_verdicts
 from pipeline.harvest.backends import (
@@ -47,6 +48,7 @@ from pipeline.harvest.notices import DEFAULT_NOTICES_PATH, render_notices
 from pipeline.harvest.queries import (
     DEFAULT_LATIN_NAMES_PATH,
     DEFAULT_QUERIES_PATH,
+    claimed_categories,
     load_latin_names,
     load_queries,
 )
@@ -145,11 +147,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         # одном месте. Интервал между запросами транспорт не держит — его считает каждый
         # вызывающий сам (`CommonsSource.fetch`, `expand`).
         транспорт = UrllibTransport(аргументы.contact)
+        # Один раз на весь прогон: карта не меняется между классами, а строить её заново на
+        # каждый вызов `развернуть` значило бы пересчитывать одно и то же 150 раз.
+        заявлено = claimed_categories(запросы)
 
         def развернуть(
-            категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
+            class_id: str,
+            категория: str,
+            глубина: int,
+            include: tuple[str, ...],
+            exclude: tuple[str, ...],
         ) -> ExpandResult:
-            return expand(транспорт, категория, глубина, include, exclude)
+            допустить = build_admit(class_id, иглы, заявлено)
+            return expand(транспорт, категория, глубина, include, exclude, admit=допустить)
 
         зависимости = HarvestDeps(
             source=CommonsSource(транспорт),
