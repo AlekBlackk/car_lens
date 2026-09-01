@@ -59,6 +59,9 @@ REPORT_PATH = Path(__file__).resolve().parent.parent / "bench" / "harvest-m0.md"
 # Имя файла завязано в двух местах: сборщик пишет решения дедупа сюда (`HarvestDeps`),
 # аудит читает их отсюда же (§8 дизайна). Разные литералы разошлись бы молча.
 DEDUP_VERDICTS_FILENAME = "verdicts.dedup.csv"
+# Тот же повод, что у DEDUP_VERDICTS_FILENAME: сборщик пишет журнал обхода сюда
+# (`HarvestDeps`), отчёт C1 читает его отсюда же (`scripts/report_c1.py`).
+EXPAND_LOG_FILENAME = "expand_log.csv"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -166,6 +169,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             reject_log_path=корень / "reject_log.csv",
             expand_categories=развернуть,
             dedup_verdicts_path=корень / DEDUP_VERDICTS_FILENAME,
+            expand_log_path=корень / EXPAND_LOG_FILENAME,
         )
 
         состояние = load_state(корень / "state.json")

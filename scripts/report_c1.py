@@ -19,6 +19,7 @@ from datetime import date
 from pathlib import Path
 
 from pipeline.harvest.audit import load_audit
+from pipeline.harvest.expand_log import ExpandRow, expand_totals, load_expand_rows
 from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, HarvestRow, load_manifest
 from pipeline.harvest.rejects import Reject, load_rejects, reason_counts
 from pipeline.harvest.sources import CATEGORY_BASIS_PREFIX
@@ -26,13 +27,14 @@ from pipeline.paths import harvest_dir
 
 REPORT_PATH = Path(__file__).resolve().parent.parent / "bench" / "harvest-c1.md"
 DEDUP_VERDICTS_NAME = "verdicts.dedup.csv"
+EXPAND_LOG_NAME = "expand_log.csv"
 
 G_C1_MAX_MISSING = 6
 
 
 @dataclass(frozen=True, slots=True)
 class C1Numbers:
-    """Числа отчёта C1: одно блокирующее и семь наблюдаемых."""
+    """Числа отчёта C1: одно блокирующее и наблюдаемые, включая потери обхода."""
 
     rows: int
     category_rows: int
@@ -42,6 +44,13 @@ class C1Numbers:
     conflicts: int
     supersedes: int
     reasons: dict[str, int]
+    # Из журнала обхода категорий (задача 12): без него `is_child_of` и стоп-слова срезали
+    # подкатегории незаметно для отчёта — см. `pipeline/harvest/expand_log.py`.
+    expand_requests: int
+    expand_rejected_stopword: int
+    expand_rejected_exclude: int
+    expand_rejected_not_child: int
+    expand_budget_exhausted: int
 
 
 def collect(
@@ -49,10 +58,16 @@ def collect(
     rejects: Sequence[Reject],
     verdicts: Mapping[str, str],
     classes_without_holdout: int,
+    expand_rows: Sequence[ExpandRow] = (),
 ) -> C1Numbers:
-    """Числа отчёта. `verdicts` — содержимое `verdicts.dedup.csv`."""
+    """Числа отчёта. `verdicts` — содержимое `verdicts.dedup.csv`.
+
+    `expand_rows` по умолчанию пуст: старый прогон без журнала обхода даёт нули, а не
+    падение — отчёт обязан собираться и на данных до задачи 12.
+    """
     категорийных = sum(1 for с in rows if с.basis.startswith(CATEGORY_BASIS_PREFIX))
     классов = {с.class_id for с in rows if с.basis.startswith(CATEGORY_BASIS_PREFIX)}
+    обход = expand_totals(expand_rows)
     return C1Numbers(
         rows=len(rows),
         category_rows=категорийных,
@@ -62,6 +77,11 @@ def collect(
         conflicts=sum(1 for в in verdicts.values() if в == "conflict"),
         supersedes=sum(1 for в in verdicts.values() if в == "drop:superseded"),
         reasons=reason_counts(rejects),
+        expand_requests=обход.get("requests", 0),
+        expand_rejected_stopword=обход.get("rejected_stopword", 0),
+        expand_rejected_exclude=обход.get("rejected_exclude", 0),
+        expand_rejected_not_child=обход.get("rejected_not_child", 0),
+        expand_budget_exhausted=обход.get("budget_exhausted", 0),
     )
 
 
@@ -119,6 +139,18 @@ def render(
         f"| `{причина}` | {число} |"
         for причина, число in sorted(numbers.reasons.items(), key=lambda пара: -пара[1])
     )
+    строки += [
+        "",
+        "## Обход категорий: чем срезан",
+        "",
+        "| Что | Число |",
+        "|---|---|",
+        f"| запросов к Commons | {numbers.expand_requests} |",
+        f"| срезано стоп-словом | {numbers.expand_rejected_stopword} |",
+        f"| срезано `exclude` | {numbers.expand_rejected_exclude} |",
+        f"| срезано `is_child_of` | {numbers.expand_rejected_not_child} |",
+        f"| категорий с исчерпанным бюджетом | {numbers.expand_budget_exhausted} |",
+    ]
     return "\n".join(строки) + "\n"
 
 
@@ -138,6 +170,9 @@ def build_parser() -> argparse.ArgumentParser:
     парсер.add_argument(
         "--dedup-verdicts", type=Path, default=None, help="по умолчанию в каталоге данных"
     )
+    парсер.add_argument(
+        "--expand-log", type=Path, default=None, help="по умолчанию в каталоге данных"
+    )
     return парсер
 
 
@@ -150,11 +185,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     корень = harvest_dir()
     журнал = аргументы.reject_log or (корень / "reject_log.csv")
     файл_вердиктов = аргументы.dedup_verdicts or (корень / DEDUP_VERDICTS_NAME)
+    журнал_обхода = аргументы.expand_log or (корень / EXPAND_LOG_NAME)
     числа = collect(
         rows=load_manifest(аргументы.manifest),
         rejects=load_rejects(журнал),
         verdicts=load_audit(файл_вердиктов) if файл_вердиктов.exists() else {},
         classes_without_holdout=аргументы.classes_without_holdout,
+        expand_rows=load_expand_rows(журнал_обхода),
     )
     прошёл, провалы = check_c1(числа)
     sha = subprocess.run(

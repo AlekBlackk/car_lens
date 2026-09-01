@@ -66,6 +66,7 @@ class ExpandResult:
     rejected_stopword: int
     rejected_exclude: int
     budget_exhausted: bool
+    rejected_not_child: int
 
 
 def _подкатегории(
@@ -128,6 +129,7 @@ def expand(
     запросов = 0
     стоп_словом = 0
     исключением = 0
+    не_потомком = 0
     исчерпан = False
     последний_запрос = 0.0
 
@@ -156,9 +158,15 @@ def expand(
                 стоп_словом += 1
                 continue
             if not is_child_of(родитель, потомок):
+                # Отказ считается, а не молчит: без счётчика потеря целой полки (как у
+                # `Long-wheelbase Lada Nivas`, задача 12) не оставляла следа ни в прогоне,
+                # ни в отчёте.
+                не_потомком += 1
                 continue
             видели.add(имя)
             итог.append(потомок)
             очередь.append((потомок, уровень + 1))
 
-    return ExpandResult(tuple(итог), запросов, стоп_словом, исключением, исчерпан)
+    return ExpandResult(
+        tuple(итог), запросов, стоп_словом, исключением, исчерпан, не_потомком
+    )

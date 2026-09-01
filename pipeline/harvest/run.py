@@ -32,6 +32,7 @@ from pipeline.harvest.aliases import (
 from pipeline.harvest.cache import crop_path, decode_image, digest, store
 from pipeline.harvest.categories import ExpandResult
 from pipeline.harvest.dedup import DedupIndex
+from pipeline.harvest.expand_log import ExpandRow, append_expand_row
 from pipeline.harvest.filters import ImageEncoder, clip_verdict
 from pipeline.harvest.licenses import canonical_name, is_allowed, tier_of
 from pipeline.harvest.manifest import HarvestRow, append_row, strip_html
@@ -105,6 +106,9 @@ class HarvestDeps:
     # `supersede`/`conflict` дописываются сюда, а не в manifest_path, и применяются
     # существующим шагом `--audit`.
     dedup_verdicts_path: Path
+    # Журнал обхода категорий (задача 12): `ExpandResult` считает потери обхода, но живёт
+    # внутри прогона, а отчёт C1b читает файлы — без журнала числа до него не доезжают.
+    expand_log_path: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -372,6 +376,23 @@ def _категории(queries: ClassQueries, deps: HarvestDeps, state: Harvest
             )
             известное = итог.categories
             state.categories[ключ] = известное
+            # Пишется только здесь, при реальном обходе: если бы строка уходила при каждом
+            # вызове `_категории`, кеш `state.categories` плодил бы её на каждом рестарте
+            # без единого сетевого запроса.
+            append_expand_row(
+                deps.expand_log_path,
+                ExpandRow(
+                    class_id=queries.class_id,
+                    category=категория,
+                    categories=len(известное),
+                    requests=итог.requests,
+                    rejected_stopword=итог.rejected_stopword,
+                    rejected_exclude=итог.rejected_exclude,
+                    rejected_not_child=итог.rejected_not_child,
+                    budget_exhausted=итог.budget_exhausted,
+                    checked=deps.checked,
+                ),
+            )
         развёрнутые.extend(известное)
     return развёрнутые
 

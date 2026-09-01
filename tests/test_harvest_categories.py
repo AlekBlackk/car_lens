@@ -135,6 +135,20 @@ def test_бюджет_обрывает_обход_и_отмечается() -> N
     assert итог.budget_exhausted is True
 
 
+def test_отвергнутый_не_потомок_попадает_в_счётчик() -> None:
+    """Потеря полки обязана быть видна числом: молчаливый `continue` съел три
+    подкатегории `Long-wheelbase Lada Nivas` и не оставил следа."""
+    транспорт = ЗаписанныйТранспорт(
+        {"Long-wheelbase Lada Nivas": ["Lada Niva 2131", "VAZ-2129", "VAZ-2329"]}
+    )
+
+    итог = expand(транспорт, "Long-wheelbase Lada Nivas", depth=1, sleep=lambda _: None)
+
+    assert итог.categories == ("Long-wheelbase Lada Nivas",)
+    assert итог.rejected_not_child == 3
+    assert итог.rejected_stopword == 0
+
+
 def test_пауза_держится_перед_каждым_следующим_запросом() -> None:
     """Обход отправлял до MAX_SUBCAT_REQUESTS запросов встык, а §3.2 требует 2 с на домен."""
     транспорт = ЗаписанныйТранспорт({"Kia Rio": ["Kia Rio (DC)", "Kia Rio (QB)"]})

@@ -13,6 +13,7 @@ from pipeline.harvest.aliases import REJECT_COLUMNS
 from pipeline.harvest.audit import load_audit
 from pipeline.harvest.categories import ExpandResult
 from pipeline.harvest.dedup import DedupIndex
+from pipeline.harvest.expand_log import load_expand_rows
 from pipeline.harvest.manifest import load_manifest
 from pipeline.harvest.queries import ClassQueries
 from pipeline.harvest.rejects import load_rejects
@@ -104,7 +105,7 @@ def _обход_без_сети(
     категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
 ) -> ExpandResult:
     """Заглушка обхода по умолчанию: категория сама себе дерево, ни одного запроса."""
-    return ExpandResult((категория,), 0, 0, 0, False)
+    return ExpandResult((категория,), 0, 0, 0, False, 0)
 
 
 def _зависимости(
@@ -131,6 +132,7 @@ def _зависимости(
         "reject_log_path": tmp_path / "reject_log.csv",
         "expand_categories": _обход_без_сети,
         "dedup_verdicts_path": tmp_path / "verdicts.dedup.csv",
+        "expand_log_path": tmp_path / "expand_log.csv",
     }
     поля.update(правки)
     return HarvestDeps(**поля)  # type: ignore[arg-type]
@@ -460,7 +462,7 @@ def test_обход_подставляет_подкатегории_перед_�
         категория: str, глубина: int, include: tuple[str, ...], exclude: tuple[str, ...]
     ) -> ExpandResult:
         вызовы.append((категория, глубина, include, exclude))
-        return ExpandResult((категория, f"{категория} (DC)"), 1, 0, 0, False)
+        return ExpandResult((категория, f"{категория} (DC)"), 1, 0, 0, False, 0)
 
     # Глубина, include и exclude заданы различимыми: обе последние — `tuple[str, ...]`, и
     # перестановка их местами прошла бы проверку типов молча.
@@ -484,6 +486,10 @@ def test_обход_подставляет_подкатегории_перед_�
     ]
     assert вызовы == [("Kia Rio", 2, ("Kia Rio (UB)",), ("Kia Rio (JB)",))]
     assert состояние.categories["kia__rio|Kia Rio"] == ("Kia Rio", "Kia Rio (DC)")
+    журнал = load_expand_rows(tmp_path / "expand_log.csv")
+    assert [(с.class_id, с.category, с.categories) for с in журнал] == [
+        ("kia__rio", "Kia Rio", 2)
+    ]
 
 
 def test_дерево_из_состояния_не_перезапрашивается(tmp_path: Path) -> None:
@@ -500,6 +506,7 @@ def test_дерево_из_состояния_не_перезапрашивае�
     список = _запросы(queries, deps, состояние)
 
     assert [з.category for з in список] == ["Kia Rio", "Kia Rio (QB)"]
+    assert load_expand_rows(tmp_path / "expand_log.csv") == []
 
 
 def test_отказ_попадает_в_журнал(tmp_path: Path) -> None:

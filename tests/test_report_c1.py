@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pipeline.harvest.expand_log import ExpandRow, append_expand_row
 from pipeline.harvest.manifest import HarvestRow, write_manifest
 from pipeline.harvest.rejects import Reject, append_reject_row
 from scripts.report_c1 import G_C1_MAX_MISSING, C1Numbers, check_c1, collect, main, render
@@ -49,6 +50,22 @@ def _отказ(**правки: object) -> Reject:
     return Reject(**поля)  # type: ignore[arg-type]
 
 
+def _обход(**правки: object) -> ExpandRow:
+    поля: dict[str, object] = {
+        "class_id": "lada__niva_2131",
+        "category": "Long-wheelbase Lada Nivas",
+        "categories": 1,
+        "requests": 1,
+        "rejected_stopword": 0,
+        "rejected_exclude": 0,
+        "rejected_not_child": 3,
+        "budget_exhausted": False,
+        "checked": "2026-09-01",
+    }
+    поля.update(правки)
+    return ExpandRow(**поля)  # type: ignore[arg-type]
+
+
 def _числа(**правки: object) -> C1Numbers:
     поля: dict[str, object] = {
         "rows": 10,
@@ -59,6 +76,11 @@ def _числа(**правки: object) -> C1Numbers:
         "conflicts": 0,
         "supersedes": 0,
         "reasons": {},
+        "expand_requests": 0,
+        "expand_rejected_stopword": 0,
+        "expand_rejected_exclude": 0,
+        "expand_rejected_not_child": 0,
+        "expand_budget_exhausted": 0,
     }
     поля.update(правки)
     return C1Numbers(**поля)  # type: ignore[arg-type]
@@ -83,6 +105,9 @@ def _подготовить(tmp_path: Path) -> tuple[list[str], Path]:
         "file,verdict\na.jpg,conflict\nb.jpg,drop:superseded\nc.jpg,drop:superseded\n",
         encoding="utf-8",
     )
+    журнал_обхода = tmp_path / "expand_log.csv"
+    append_expand_row(журнал_обхода, _обход())
+    append_expand_row(журнал_обхода, _обход(class_id="kia__rio", rejected_not_child=0))
     отчёт = tmp_path / "harvest-c1.md"
     флаги = [
         "--report",
@@ -93,6 +118,8 @@ def _подготовить(tmp_path: Path) -> tuple[list[str], Path]:
         str(журнал),
         "--dedup-verdicts",
         str(вердикты),
+        "--expand-log",
+        str(журнал_обхода),
     ]
     return флаги, отчёт
 
@@ -160,6 +187,42 @@ def test_причины_отказа_идут_по_убыванию_числа_�
     ]
 
 
+def test_потери_обхода_суммируются_по_журналу() -> None:
+    строки_обхода = [
+        _обход(requests=1, rejected_stopword=0, rejected_exclude=0, rejected_not_child=3),
+        _обход(requests=2, rejected_stopword=1, rejected_exclude=1, rejected_not_child=0),
+    ]
+
+    числа = collect(
+        rows=[], rejects=[], verdicts={}, classes_without_holdout=6, expand_rows=строки_обхода
+    )
+
+    assert числа.expand_requests == 3
+    assert числа.expand_rejected_stopword == 1
+    assert числа.expand_rejected_exclude == 1
+    assert числа.expand_rejected_not_child == 3
+    assert числа.expand_budget_exhausted == 0
+
+
+def test_отсутствие_журнала_обхода_даёт_нули() -> None:
+    числа = collect(rows=[], rejects=[], verdicts={}, classes_without_holdout=6)
+
+    assert числа.expand_requests == 0
+    assert числа.expand_rejected_not_child == 0
+
+
+def test_отчёт_показывает_чем_срезан_обход() -> None:
+    числа = _числа(expand_requests=5, expand_rejected_not_child=3, expand_budget_exhausted=1)
+    прошёл, провалы = check_c1(числа)
+
+    текст = render(числа, прошёл, провалы, "abc1234", "2026-08-31")
+
+    assert "## Обход категорий: чем срезан" in текст
+    assert "| запросов к Commons | 5 |" in текст
+    assert "| срезано `is_child_of` | 3 |" in текст
+    assert "| категорий с исчерпанным бюджетом | 1 |" in текст
+
+
 def test_main_на_красном_гейте_пишет_отчёт_и_возвращает_1(tmp_path: Path) -> None:
     флаги, отчёт = _подготовить(tmp_path)
 
@@ -172,6 +235,7 @@ def test_main_на_красном_гейте_пишет_отчёт_и_возвр
     assert "| споров `conflict` | 0 | 1 |" in текст
     assert "| вытеснений `supersede` | 0 | 2 |" in текст
     assert "| `not_a_car_photo` | 2 |" in текст
+    assert "| срезано `is_child_of` | 3 |" in текст
 
 
 def test_main_на_зелёном_гейте_возвращает_0(tmp_path: Path) -> None:
@@ -196,3 +260,14 @@ def test_main_без_файла_вердиктов_считает_их_пуст�
     текст = отчёт.read_text(encoding="utf-8")
     assert "| споров `conflict` | 0 | 0 |" in текст
     assert "| вытеснений `supersede` | 0 | 0 |" in текст
+
+
+def test_main_без_журнала_обхода_считает_потери_нулями(tmp_path: Path) -> None:
+    флаги, отчёт = _подготовить(tmp_path)
+    флаги[флаги.index("--expand-log") + 1] = str(tmp_path / "нет.csv")
+
+    код = main([*флаги, "--classes-without-holdout", "6"])
+
+    assert код == 0
+    текст = отчёт.read_text(encoding="utf-8")
+    assert "| срезано `is_child_of` | 0 |" in текст
