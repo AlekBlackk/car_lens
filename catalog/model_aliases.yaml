@@ -305,6 +305,6 @@ classes:
   volkswagen__touareg:
     needles: ["touareg", "vw touareg"]
   volkswagen__transporter:
-    needles: ["caravelle", "multivan", "t4", "t5", "t6", "transporter", "vw t4", "vw t5", "vw t6", "vw transporter"]
+    needles: ["caravelle", "eurovan", "multivan", "transporter", "volkswagen california", "volkswagen t4", "volkswagen t5", "volkswagen t6", "vw t4", "vw t5", "vw t6", "vw transporter"]
   volvo__xc60:
     needles: ["xc60"]
