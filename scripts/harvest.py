@@ -21,7 +21,16 @@ from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
 from pipeline.detectors.yolo import YoloDetector
 from pipeline.harvest.admission import build_admit
 from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, load_alias_table
-from pipeline.harvest.audit import apply_audit, audit_counts, load_audit, merge_verdicts
+from pipeline.harvest.audit import (
+    DEFAULT_APPLIED_PATH,
+    append_applied,
+    apply_audit,
+    audit_counts,
+    demote_over_human,
+    describe_applied,
+    load_audit,
+    merge_verdicts,
+)
 from pipeline.harvest.backends import (
     ClipImageEncoder,
     OnnxBoxDetector,
@@ -205,16 +214,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     # «поздний проход побеждает ранний, потому что человек пересмотрел своё решение». Если
     # бы автоматика шла последней, она перебивала бы человека, и кадр, снесённый дедупом
     # (`drop:superseded`), человек не смог бы вернуть своим `ok` — тот переписывался бы на
-    # каждом прогоне.
+    # каждом прогоне. Одного порядка мало: `ok`, который человек поставил в **прошлом**
+    # прогоне, лежит в колонке манифеста, а не в `--audit` этого запуска, и автомат сносил
+    # им подкреплённую строку молча. Поэтому автовердикты ещё и понижаются по манифесту
+    # (`demote_over_human`, §8 дизайна C1).
     файл_дедупа = корень / DEDUP_VERDICTS_FILENAME
-    пути_вердиктов = [файл_дедупа] if файл_дедупа.exists() else []
-    пути_вердиктов += [Path(п) for п in (аргументы.audit or [])]
-    if пути_вердиктов:
-        вердикты = merge_verdicts(*(load_audit(п) for п in пути_вердиктов))
+    авто = demote_over_human(load_audit(файл_дедупа), строки) if файл_дедупа.exists() else {}
+    ручные = [load_audit(Path(п)) for п in (аргументы.audit or [])]
+    if авто or ручные:
+        вердикты = merge_verdicts(авто, *ручные)
         с_вердиктами = [replace(s, audit=вердикты.get(s.file, s.audit)) for s in строки]
         audited_total, audited_dirty = audit_counts(с_вердиктами)
+        # След применения — до `apply_audit`: после него строки с `drop:*` в манифесте уже
+        # нет, и записывать в журнал будет нечего, кроме имени файла.
+        append_applied(
+            DEFAULT_APPLIED_PATH, describe_applied(авто, строки, date.today().isoformat())
+        )
         строки = apply_audit(строки, вердикты)
         write_manifest(DEFAULT_MANIFEST_PATH, строки)
+        # Усечение применённого: без него вердикт применяется на каждом следующем прогоне, а
+        # прополка (`scripts/prune_state.py`) пересобирает `done_items` из манифеста, где
+        # снесённой строки уже нет. Кадр снова стал бы кандидатом, снова был бы принят под тем
+        # же детерминированным именем `{sha}.jpg` и снова снесён тем же старым вердиктом —
+        # замкнутый цикл потери. След применения остаётся в журнале выше.
+        if авто:
+            файл_дедупа.write_text("", encoding="utf-8")
     гейт = check_gate(итоги, строки, audited_total, audited_dirty, allow_sa=аргументы.allow_sa)
     sha = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False

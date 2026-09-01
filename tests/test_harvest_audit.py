@@ -5,9 +5,13 @@ import pytest
 
 from pipeline.harvest.audit import (
     AuditError,
+    append_applied,
     apply_audit,
     audit_counts,
     audit_gap,
+    demote_over_human,
+    describe_applied,
+    load_applied,
     load_audit,
     merge_verdicts,
     required_audit_files,
@@ -132,3 +136,65 @@ def test_поздний_вердикт_побеждает_ранний() -> None
 
 def test_склейка_без_аргументов_пуста() -> None:
     assert merge_verdicts() == {}
+
+
+def test_автовердикт_не_сносит_проверенную_человеком_строку() -> None:
+    """Первое живое `supersede` снесло строку с `audit=ok`: автомат перебил человека."""
+    строки = [_строка("a.jpg", audit="ok"), _строка("b.jpg", audit="")]
+
+    итог = demote_over_human({"a.jpg": "drop:superseded", "b.jpg": "drop:superseded"}, строки)
+
+    assert итог["a.jpg"] == "conflict", "спор с человеком уходит человеку, а не в удаление"
+    assert итог["b.jpg"] == "drop:superseded", "строку без отметки человека дедуп решает сам"
+
+
+def test_понижение_не_трогает_conflict_и_ok() -> None:
+    строки = [_строка("a.jpg", audit="ok"), _строка("b.jpg", audit="ok")]
+
+    итог = demote_over_human({"a.jpg": "conflict", "b.jpg": "ok"}, строки)
+
+    assert итог == {"a.jpg": "conflict", "b.jpg": "ok"}
+
+
+def test_понижение_считает_проверенной_только_отметку_ok() -> None:
+    """`conflict` — это «человек не уверен», такая строка автомат не связывает."""
+    строки = [_строка("a.jpg", audit="conflict")]
+
+    assert demote_over_human({"a.jpg": "drop:superseded"}, строки) == {"a.jpg": "drop:superseded"}
+
+
+def test_журнал_применённых_переживает_запись_и_чтение(tmp_path: Path) -> None:
+    строки = [_строка("a.jpg", class_id="mitsubishi__pajero")]
+    записи = describe_applied({"a.jpg": "drop:superseded"}, строки, "2026-09-01")
+    путь = tmp_path / "dedup_verdicts.csv"
+
+    append_applied(путь, записи)
+    append_applied(путь, describe_applied({"a.jpg": "conflict"}, строки, "2026-09-02"))
+
+    прочитано = load_applied(путь)
+    assert [(з.file, з.verdict, з.applied) for з in прочитано] == [
+        ("a.jpg", "drop:superseded", "2026-09-01"),
+        ("a.jpg", "conflict", "2026-09-02"),
+    ]
+    assert прочитано[0].class_id == "mitsubishi__pajero"
+    assert прочитано[0].basis == "category:X"
+
+
+def test_журнал_не_записывает_вердикт_на_отсутствующую_строку() -> None:
+    """Вердикт на файл вне манифеста ничего не применил — врать о применении нечем."""
+    assert describe_applied({"нет.jpg": "drop:superseded"}, [_строка("a.jpg")], "2026-09-01") == []
+
+
+def test_отсутствие_журнала_читается_пустым(tmp_path: Path) -> None:
+    assert load_applied(tmp_path / "нет.csv") == []
+
+
+def test_укороченный_журнал_получает_шапку_заново(tmp_path: Path) -> None:
+    путь = tmp_path / "dedup_verdicts.csv"
+    записи = describe_applied({"a.jpg": "conflict"}, [_строка("a.jpg")], "2026-09-01")
+    append_applied(путь, записи)
+
+    путь.write_text("", encoding="utf-8")
+    append_applied(путь, записи)
+
+    assert load_applied(путь) == записи
