@@ -16,13 +16,13 @@ from __future__ import annotations
 import argparse
 import subprocess
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
-from pipeline.harvest.audit import DEFAULT_APPLIED_PATH, load_applied, load_audit
+from pipeline.harvest.audit import DEFAULT_APPLIED_PATH, load_applied, load_audit_events
 from pipeline.harvest.expand_log import ExpandRow, expand_totals, load_expand_rows
 from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, HarvestRow, load_manifest
 from pipeline.harvest.rejects import Reject, load_rejects, reason_counts
@@ -35,6 +35,17 @@ DEDUP_VERDICTS_NAME = "verdicts.dedup.csv"
 EXPAND_LOG_NAME = "expand_log.csv"
 
 G_C1_MAX_MISSING = 6
+
+# Базис «до C1» — замер задачи B по манифесту BASE `14a70bf`. Именованные константы, а не
+# литералы внутри `render`: иначе любой будущий прогон продолжит называть эти числа «до C1»,
+# когда «до» станет другим, а дата в заголовке колонки говорит, к какому именно «до» они
+# относятся. Знаменатель каталога у них свой и замороженный: «68 из 150» верно про каталог
+# того замера, и подставлять сюда сегодняшний размер каталога значило бы править историю.
+BEFORE_C1_MEASURED = "2026-08-31"
+BEFORE_C1_CATEGORY_SHARE = 0.238
+BEFORE_C1_CLASSES_WITH_CATEGORY = 68
+BEFORE_C1_CATALOG_CLASSES = 150
+BEFORE_C1_CLASSES_WITHOUT_HOLDOUT = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +71,7 @@ class C1Numbers:
     category_share: float
     classes_with_category: int
     classes_without_holdout: int
+    catalog_classes: int
     conflicts: int
     supersedes: int
     reasons: dict[str, int]
@@ -80,12 +92,17 @@ class C1Numbers:
 def collect(
     rows: Sequence[HarvestRow],
     rejects: Sequence[Reject],
-    verdicts: Mapping[str, str],
+    verdict_events: Sequence[str],
     catalog_classes: Sequence[str],
     expand_rows: Sequence[ExpandRow] = (),
     classes_without_holdout: int | None = None,
 ) -> C1Numbers:
-    """Числа отчёта. `verdicts` — содержимое `verdicts.dedup.csv`.
+    """Числа отчёта. `verdict_events` — по одной записи на событие дедупа.
+
+    Именно события, а не итоговые вердикты по файлам: §9 просит `supersede` и `conflict`
+    поштучно, а словарь `file -> verdict` считает файлы — два вытеснения одного файла дали бы
+    в отчёте одно. Собирает список вызывающий, из двух источников (журнал применённых и
+    очередь ещё не применённых), потому что после правки C1 очередь усекается.
 
     Блокирующее число считается здесь, а не приходит флагом: гейт, который нельзя
     пересчитать по репозиторию, держится на том, что оператор перенёс число из вывода
@@ -118,11 +135,12 @@ def collect(
         category_rows=категорийных,
         category_share=категорийных / len(rows) if rows else 0.0,
         classes_with_category=len(из_категорий),
+        catalog_classes=len(catalog_classes),
         classes_without_holdout=(
             len(скоуп) if classes_without_holdout is None else classes_without_holdout
         ),
-        conflicts=sum(1 for в in verdicts.values() if в == "conflict"),
-        supersedes=sum(1 for в in verdicts.values() if в == "drop:superseded"),
+        conflicts=sum(1 for в in verdict_events if в == "conflict"),
+        supersedes=sum(1 for в in verdict_events if в == "drop:superseded"),
         reasons=reason_counts(rejects),
         expand_requests=обход["requests"],
         expand_rejected_stopword=обход["rejected_stopword"],
@@ -175,12 +193,15 @@ def render(
         "",
         "## Наблюдаемые числа (не блокируют)",
         "",
-        "| Что | До C1 | После C1 |",
+        f"| Что | До C1 (замер {BEFORE_C1_MEASURED}) | После C1 |",
         "|---|---|---|",
-        f"| доля строк базиса `category:` | 23.8% | {numbers.category_share:.1%} |",
-        f"| классов с ≥1 строкой `category:` | 68 из 150 | "
-        f"{numbers.classes_with_category} из 150 |",
-        f"| классов без эталона | 16 | {numbers.classes_without_holdout} |",
+        f"| доля строк базиса `category:` | {BEFORE_C1_CATEGORY_SHARE:.1%} |"
+        f" {numbers.category_share:.1%} |",
+        f"| классов с ≥1 строкой `category:` |"
+        f" {BEFORE_C1_CLASSES_WITH_CATEGORY} из {BEFORE_C1_CATALOG_CLASSES} | "
+        f"{numbers.classes_with_category} из {numbers.catalog_classes} |",
+        f"| классов без эталона | {BEFORE_C1_CLASSES_WITHOUT_HOLDOUT} |"
+        f" {numbers.classes_without_holdout} |",
         f"| вытеснений `supersede` | 0 | {numbers.supersedes} |",
         f"| споров `conflict` | 0 | {numbers.conflicts} |",
         "",
@@ -285,19 +306,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     файл_вердиктов = аргументы.dedup_verdicts or (корень / DEDUP_VERDICTS_NAME)
     журнал_обхода = аргументы.expand_log or (корень / EXPAND_LOG_NAME)
     каталог = load_catalog(аргументы.catalog)
-    # Вердикты дедупа живут в двух файлах: ожидающие — в `verdicts.dedup.csv` каталога
-    # данных, применённые — в git-отслеживаемом журнале `provenance/dedup_verdicts.csv`,
-    # потому что `scripts/harvest.py` усекает первый сразу после применения. Отчёт обязан
-    # показывать события прогона, а не остаток очереди, поэтому считает по обоим. Ключ —
-    # имя файла, так что вердикт, оказавшийся в обоих, считается один раз, и побеждает
-    # ожидающий: он новее применённого.
-    вердикты = {з.file: з.verdict for з in load_applied(аргументы.applied_verdicts)}
-    if файл_вердиктов.exists():
-        вердикты.update(load_audit(файл_вердиктов))
+    # События дедупа лежат в двух файлах: git-отслеживаемый журнал применённых
+    # (`provenance/dedup_verdicts.csv`) и очередь ещё не применённых в каталоге данных, которую
+    # `scripts/harvest.py` усекает сразу после применения. Считаются строки, а не ключи: §9
+    # просит вердикты поштучно, и два вытеснения одного файла обязаны дать два. Пара
+    # «файл + вердикт», уже лежащая в журнале, из очереди не досчитывается — это одно и то же
+    # событие, чью очередь просто не усекли.
+    применённые = load_applied(аргументы.applied_verdicts)
+    ожидающие = load_audit_events(файл_вердиктов) if файл_вердиктов.exists() else []
+    в_журнале = {(з.file, з.verdict) for з in применённые}
+    события = [з.verdict for з in применённые] + [
+        вердикт for файл, вердикт in ожидающие if (файл, вердикт) not in в_журнале
+    ]
     числа = collect(
         rows=load_manifest(аргументы.manifest),
         rejects=load_rejects(журнал),
-        verdicts=вердикты,
+        verdict_events=события,
         catalog_classes=[к.class_id for к in каталог.classes],
         expand_rows=load_expand_rows(журнал_обхода),
         classes_without_holdout=аргументы.classes_without_holdout,

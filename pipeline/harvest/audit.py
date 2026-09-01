@@ -68,9 +68,16 @@ def _годен(вердикт: str) -> bool:
     return вердикт in {"ok", "conflict"} or вердикт.startswith("drop:")
 
 
-def load_audit(path: Path) -> dict[str, str]:
-    """Прочитать CSV `file,verdict` и провалидировать вердикты."""
-    вердикты: dict[str, str] = {}
+def load_audit_events(path: Path) -> list[tuple[str, str]]:
+    """Прочитать CSV `file,verdict` построчно: одна запись — одно событие.
+
+    Отдельный читатель от `load_audit` потому, что у файла две законные роли. Как очередь к
+    применению он важен итогом по файлу: поздняя строка обязана вытеснить раннюю, иначе
+    пересмотр решения потонул бы в прежнем. Как след прогона он важен числом строк: §9
+    просит `supersede` и `conflict` поштучно, а словарь этого не даёт — два вытеснения
+    одного файла схлопнулись бы в одно.
+    """
+    события: list[tuple[str, str]] = []
     for строка in csv.DictReader(path.read_text(encoding="utf-8").splitlines()):
         файл = (строка.get("file") or "").strip()
         вердикт = (строка.get("verdict") or "").strip()
@@ -78,8 +85,13 @@ def load_audit(path: Path) -> dict[str, str]:
             continue
         if not _годен(вердикт):
             raise AuditError(f"{path}: непонятный вердикт {вердикт!r} у {файл}")
-        вердикты[файл] = вердикт
-    return вердикты
+        события.append((файл, вердикт))
+    return события
+
+
+def load_audit(path: Path) -> dict[str, str]:
+    """Прочитать CSV `file,verdict`: итоговый вердикт по файлу, поздняя строка побеждает."""
+    return dict(load_audit_events(path))
 
 
 def merge_verdicts(*verdicts: Mapping[str, str]) -> dict[str, str]:

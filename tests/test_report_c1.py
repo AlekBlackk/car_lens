@@ -84,6 +84,7 @@ def _числа(**правки: object) -> C1Numbers:
         "category_share": 0.4,
         "classes_with_category": 3,
         "classes_without_holdout": 6,
+        "catalog_classes": 150,
         "conflicts": 0,
         "supersedes": 0,
         "reasons": {},
@@ -155,7 +156,7 @@ def _подготовить(tmp_path: Path, классов_в_каталоге: 
 
 def test_гейт_блокирует_по_классам_без_эталона() -> None:
     числа = collect(
-        rows=[], rejects=[], verdicts={}, catalog_classes=(), classes_without_holdout=16
+        rows=[], rejects=[], verdict_events=(), catalog_classes=(), classes_without_holdout=16
     )
 
     прошёл, провалы = check_c1(числа)
@@ -165,7 +166,9 @@ def test_гейт_блокирует_по_классам_без_эталона()
 
 
 def test_гейт_проходит_на_шести() -> None:
-    числа = collect(rows=[], rejects=[], verdicts={}, catalog_classes=(), classes_without_holdout=6)
+    числа = collect(
+        rows=[], rejects=[], verdict_events=(), catalog_classes=(), classes_without_holdout=6
+    )
 
     assert check_c1(числа) == (True, [])
 
@@ -180,7 +183,7 @@ def test_класс_без_строк_манифеста_считается_де
     числа = collect(
         rows=[_строка()],
         rejects=[],
-        verdicts={},
+        verdict_events=(),
         catalog_classes=("lada__granta", "chevrolet__lanos"),
     )
 
@@ -198,7 +201,7 @@ def test_скоуп_c2_считает_принятое_и_долю_катего�
         _строка(file="ef.jpg", sha256="ef" * 32, class_id="kia__rio", basis="search:Kia Rio"),
     ]
 
-    числа = collect(rows=строки, rejects=[], verdicts={}, catalog_classes=("lada__granta",))
+    числа = collect(rows=строки, rejects=[], verdict_events=(), catalog_classes=("lada__granta",))
 
     assert числа.classes_without_holdout == len(числа.c2_scope) == 1
     (гранта,) = числа.c2_scope
@@ -206,11 +209,24 @@ def test_скоуп_c2_считает_принятое_и_долю_катего�
     assert гранта.category_share == 0.5
 
 
+def test_вердикты_считаются_событиями_а_не_файлами() -> None:
+    """§9 просит поштучно: два вытеснения одного файла — два события, а не одно."""
+    числа = collect(
+        rows=[],
+        rejects=[],
+        verdict_events=["drop:superseded", "drop:superseded", "conflict"],
+        catalog_classes=(),
+        classes_without_holdout=0,
+    )
+
+    assert (числа.supersedes, числа.conflicts) == (2, 1)
+
+
 def test_доля_категорийного_базиса_считается_но_не_блокирует() -> None:
     строки = [_строка(basis="category:Kia Rio"), _строка(basis="search:Kia Rio")]
 
     числа = collect(
-        rows=строки, rejects=[], verdicts={}, catalog_classes=(), classes_without_holdout=6
+        rows=строки, rejects=[], verdict_events=(), catalog_classes=(), classes_without_holdout=6
     )
 
     assert числа.category_rows == 1
@@ -246,7 +262,7 @@ def test_причины_отказа_идут_по_убыванию_числа_�
         *(_отказ(reason="over_redacted") for _ in range(2)),
     ]
     числа = collect(
-        rows=[], rejects=отказы, verdicts={}, catalog_classes=(), classes_without_holdout=6
+        rows=[], rejects=отказы, verdict_events=(), catalog_classes=(), classes_without_holdout=6
     )
 
     текст = render(числа, True, [], "abc1234", "2026-08-31")
@@ -267,7 +283,7 @@ def test_потери_обхода_суммируются_по_журналу() 
     числа = collect(
         rows=[],
         rejects=[],
-        verdicts={},
+        verdict_events=(),
         catalog_classes=(),
         classes_without_holdout=6,
         expand_rows=строки_обхода,
@@ -281,7 +297,9 @@ def test_потери_обхода_суммируются_по_журналу() 
 
 
 def test_отсутствие_журнала_обхода_даёт_нули() -> None:
-    числа = collect(rows=[], rejects=[], verdicts={}, catalog_classes=(), classes_without_holdout=6)
+    числа = collect(
+        rows=[], rejects=[], verdict_events=(), catalog_classes=(), classes_without_holdout=6
+    )
 
     assert числа.expand_requests == 0
     assert числа.expand_rejected_not_own == 0
@@ -414,6 +432,29 @@ def test_main_считает_вердикты_и_из_журнала_приме�
 
     assert код == 0
     assert "| вытеснений `supersede` | 0 | 1 |" in отчёт.read_text(encoding="utf-8")
+
+
+def test_main_не_двоит_вердикт_из_журнала_и_очереди(tmp_path: Path) -> None:
+    """Неусечённая очередь не превращает одно событие в два: пара «файл + вердикт» одна."""
+    флаги, отчёт = _подготовить(tmp_path, классов_в_каталоге=6)
+    append_applied(
+        tmp_path / "dedup_verdicts.csv",
+        [
+            AppliedVerdict(
+                file="b.jpg",
+                class_id="lada__granta",
+                basis="category:Kia Rio",
+                verdict="drop:superseded",
+                applied="2026-09-01",
+            )
+        ],
+    )
+
+    код = main(флаги)
+
+    assert код == 0
+    # В очереди `b.jpg` и `c.jpg`, в журнале — только `b.jpg`: событий два, а не три.
+    assert "| вытеснений `supersede` | 0 | 2 |" in отчёт.read_text(encoding="utf-8")
 
 
 def test_main_без_журнала_обхода_считает_потери_нулями(tmp_path: Path) -> None:

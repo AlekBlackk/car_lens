@@ -13,6 +13,7 @@ from pipeline.harvest.audit import (
     describe_applied,
     load_applied,
     load_audit,
+    load_audit_events,
     merge_verdicts,
     required_audit_files,
 )
@@ -66,6 +67,21 @@ def test_неизвестный_вердикт_отвергается(tmp_path: 
     p.write_text("file,verdict\na.jpg,maybe\n", encoding="utf-8")
     with pytest.raises(AuditError, match="maybe"):
         load_audit(p)
+
+
+def test_события_читаются_построчно_а_словарь_схлопывает(tmp_path: Path) -> None:
+    """У файла две роли: очередь (итог по файлу) и след прогона (число событий, §9)."""
+    p = tmp_path / "verdicts.csv"
+    p.write_text(
+        "file,verdict\na.jpg,conflict\na.jpg,drop:superseded\nb.jpg,conflict\n", encoding="utf-8"
+    )
+
+    assert load_audit_events(p) == [
+        ("a.jpg", "conflict"),
+        ("a.jpg", "drop:superseded"),
+        ("b.jpg", "conflict"),
+    ]
+    assert load_audit(p) == {"a.jpg": "drop:superseded", "b.jpg": "conflict"}
 
 
 def test_apply_проставляет_отметку_и_выкидывает_dirty() -> None:
