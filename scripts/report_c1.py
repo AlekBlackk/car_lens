@@ -77,11 +77,11 @@ def collect(
         conflicts=sum(1 for в in verdicts.values() if в == "conflict"),
         supersedes=sum(1 for в in verdicts.values() if в == "drop:superseded"),
         reasons=reason_counts(rejects),
-        expand_requests=обход.get("requests", 0),
-        expand_rejected_stopword=обход.get("rejected_stopword", 0),
-        expand_rejected_exclude=обход.get("rejected_exclude", 0),
-        expand_rejected_not_child=обход.get("rejected_not_child", 0),
-        expand_budget_exhausted=обход.get("budget_exhausted", 0),
+        expand_requests=обход["requests"],
+        expand_rejected_stopword=обход["rejected_stopword"],
+        expand_rejected_exclude=обход["rejected_exclude"],
+        expand_rejected_not_child=обход["rejected_not_child"],
+        expand_budget_exhausted=обход["budget_exhausted"],
     )
 
 
@@ -141,7 +141,7 @@ def render(
     )
     строки += [
         "",
-        "## Обход категорий: чем срезан",
+        "## Обход категорий: запросы и потери",
         "",
         "| Что | Число |",
         "|---|---|",

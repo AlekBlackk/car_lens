@@ -6,14 +6,15 @@
 (манифест, `reject_log.csv`, `verdicts.dedup.csv`), и без этого журнала посчитанные
 `ExpandResult` числа до отчёта попросту не доезжают — задача 12.
 
-Формат — CSV по образцу `rejects.py`: третья копия того же писателя, и это осознанно —
-сведение писателей в один модуль заведено отдельной задачей (Task 5 minor deferred).
+Формат — CSV по образцу `rejects.py`: четвёртая копия того же писателя (после
+`aliases.append_reject`, `manifest.append_row`, `rejects.append_reject_row`), и это
+осознанно — сведение писателей в один модуль заведено отдельной задачей (Task 5 minor
+deferred).
 """
 
 from __future__ import annotations
 
 import csv
-from collections import Counter
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -72,12 +73,22 @@ def load_expand_rows(path: Path) -> list[ExpandRow]:
 
 
 def expand_totals(rows: Sequence[ExpandRow]) -> dict[str, int]:
-    """Сумма счётчиков обхода по всем строкам — материал таблицы «чем срезан обход»."""
-    итог: Counter[str] = Counter()
+    """Сумма счётчиков обхода по всем строкам — материал таблицы отчёта C1.
+
+    Контракт тотальный: все пять ключей возвращаются нулями и на пустом `rows`, чтобы
+    вызывающему (`scripts/report_c1.py`) не приходилось подстраховываться `.get(..., 0)`.
+    """
+    итог = {
+        "requests": 0,
+        "rejected_stopword": 0,
+        "rejected_exclude": 0,
+        "rejected_not_child": 0,
+        "budget_exhausted": 0,
+    }
     for строка in rows:
         итог["requests"] += строка.requests
         итог["rejected_stopword"] += строка.rejected_stopword
         итог["rejected_exclude"] += строка.rejected_exclude
         итог["rejected_not_child"] += строка.rejected_not_child
         итог["budget_exhausted"] += int(строка.budget_exhausted)
-    return dict(итог)
+    return итог

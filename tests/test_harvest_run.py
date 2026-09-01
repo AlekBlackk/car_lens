@@ -487,9 +487,7 @@ def test_обход_подставляет_подкатегории_перед_�
     assert вызовы == [("Kia Rio", 2, ("Kia Rio (UB)",), ("Kia Rio (JB)",))]
     assert состояние.categories["kia__rio|Kia Rio"] == ("Kia Rio", "Kia Rio (DC)")
     журнал = load_expand_rows(tmp_path / "expand_log.csv")
-    assert [(с.class_id, с.category, с.categories) for с in журнал] == [
-        ("kia__rio", "Kia Rio", 2)
-    ]
+    assert [(с.class_id, с.category, с.categories) for с in журнал] == [("kia__rio", "Kia Rio", 2)]
 
 
 def test_дерево_из_состояния_не_перезапрашивается(tmp_path: Path) -> None:
