@@ -138,3 +138,35 @@ def test_write_без_файла_состояния_не_падает(tmp_path: 
     assert код == 0
     assert not (tmp_path / "state.json.bak").exists()
     assert load_state(состояние_путь).done_items == {"commons:2"}
+
+
+def test_второй_write_отказывается_затирать_резервную_копию(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Точка возврата §7 одна, и второй прогон затирал бы её уже прополотым состоянием."""
+    состояние_путь = tmp_path / "state.json"
+    манифест_путь = tmp_path / "harvest_manifest.csv"
+    _записать_состояние(состояние_путь)
+    _записать_манифест(манифест_путь)
+    флаги = ["--state", str(состояние_путь), "--manifest", str(манифест_путь), "--write"]
+    assert main(флаги) == 0
+    копия = (tmp_path / "state.json.bak").read_text(encoding="utf-8")
+    прополотое = состояние_путь.read_text(encoding="utf-8")
+
+    код = main(флаги)
+
+    assert код == 2
+    assert (tmp_path / "state.json.bak").read_text(encoding="utf-8") == копия
+    assert состояние_путь.read_text(encoding="utf-8") == прополотое, "второй прогон не пишет"
+    assert "резервная копия уже есть" in capsys.readouterr().out
+
+
+def test_сухой_прогон_при_готовой_копии_не_отказывает(tmp_path: Path) -> None:
+    """Отказ — только на записи: посмотреть дельту повторно ничему не мешает."""
+    состояние_путь = tmp_path / "state.json"
+    манифест_путь = tmp_path / "harvest_manifest.csv"
+    _записать_состояние(состояние_путь)
+    _записать_манифест(манифест_путь)
+    (tmp_path / "state.json.bak").write_text("{}", encoding="utf-8")
+
+    assert main(["--state", str(состояние_путь), "--manifest", str(манифест_путь)]) == 0
