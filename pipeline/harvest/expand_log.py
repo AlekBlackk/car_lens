@@ -34,6 +34,9 @@ class ExpandRow:
     rejected_not_own: int
     budget_exhausted: bool
     checked: str
+    # Колонка добавлена позже остальных (M6 фикс-волны), поэтому у неё умолчание, а читатель
+    # терпит её отсутствие: журналы прежних прогонов лежат на диске без неё.
+    truncated: int = 0
 
 
 EXPAND_LOG_COLUMNS = tuple(поле.name for поле in fields(ExpandRow))
@@ -54,7 +57,11 @@ def append_expand_row(path: Path, row: ExpandRow) -> None:
 
 
 def load_expand_rows(path: Path) -> list[ExpandRow]:
-    """Прочитать журнал целиком; отсутствие файла — пустой журнал, а не ошибка."""
+    """Прочитать журнал целиком; отсутствие файла — пустой журнал, а не ошибка.
+
+    Колонка `truncated` читается терпимо: журналы прогонов до M6 фикс-волны её не имеют, а
+    отчёт обязан собираться и на них — ровно так же, как он собирается на данных до задачи 12.
+    """
     if not path.exists():
         return []
     return [
@@ -68,6 +75,7 @@ def load_expand_rows(path: Path) -> list[ExpandRow]:
             rejected_not_own=int(строка["rejected_not_own"]),
             budget_exhausted=строка["budget_exhausted"] == "True",
             checked=строка["checked"],
+            truncated=int(строка.get("truncated") or 0),
         )
         for строка in csv.DictReader(path.read_text(encoding="utf-8").splitlines())
     ]
@@ -76,7 +84,7 @@ def load_expand_rows(path: Path) -> list[ExpandRow]:
 def expand_totals(rows: Sequence[ExpandRow]) -> dict[str, int]:
     """Сумма счётчиков обхода по всем строкам — материал таблицы отчёта C1.
 
-    Контракт тотальный: все пять ключей возвращаются нулями и на пустом `rows`, чтобы
+    Контракт тотальный: все шесть ключей возвращаются нулями и на пустом `rows`, чтобы
     вызывающему (`scripts/report_c1.py`) не приходилось подстраховываться `.get(..., 0)`.
     """
     итог = {
@@ -85,6 +93,7 @@ def expand_totals(rows: Sequence[ExpandRow]) -> dict[str, int]:
         "rejected_exclude": 0,
         "rejected_not_own": 0,
         "budget_exhausted": 0,
+        "truncated": 0,
     }
     for строка in rows:
         итог["requests"] += строка.requests
@@ -92,4 +101,5 @@ def expand_totals(rows: Sequence[ExpandRow]) -> dict[str, int]:
         итог["rejected_exclude"] += строка.rejected_exclude
         итог["rejected_not_own"] += строка.rejected_not_own
         итог["budget_exhausted"] += int(строка.budget_exhausted)
+        итог["truncated"] += строка.truncated
     return итог

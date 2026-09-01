@@ -23,6 +23,37 @@ class ЗаписанныйТранспорт:
         return HttpResponse(200, json.dumps(тело).encode("utf-8"))
 
 
+class УсечённыйТранспорт(ЗаписанныйТранспорт):
+    """Тот же транспорт, но с токеном продолжения: у категории подкатегорий больше страницы."""
+
+    def get(self, url: str, params: Mapping[str, str]) -> HttpResponse:
+        ответ = super().get(url, params)
+        тело = json.loads(ответ.body.decode("utf-8"))
+        тело["continue"] = {"gcmcontinue": "subcat|1234|X"}
+        return HttpResponse(200, json.dumps(тело).encode("utf-8"))
+
+
+def test_усечённый_список_подкатегорий_считается() -> None:
+    """Молчащая потеря остатка — тот класс дефекта, на который ушли задачи 12 и 13.
+
+    Продолжение сознательно не запрашивается (докстринг `_подкатегории`), поэтому единственная
+    защита — счётчик: без него «подкатегорий больше нет» и «мы посмотрели пятьдесят» выглядят
+    одинаково и в журнале, и в отчёте.
+    """
+    транспорт = УсечённыйТранспорт({"Kia Rio": ["Kia Rio (DC)"]})
+
+    итог = expand(транспорт, "Kia Rio", sleep=lambda _: None, admit=ADMIT_ALL)
+
+    assert итог.truncated == 1
+    assert итог.categories == ("Kia Rio", "Kia Rio (DC)")
+
+
+def test_полный_список_усечённым_не_считается() -> None:
+    транспорт = ЗаписанныйТранспорт({"Kia Rio": ["Kia Rio (DC)"]})
+
+    assert expand(транспорт, "Kia Rio", sleep=lambda _: None, admit=ADMIT_ALL).truncated == 0
+
+
 def test_плоская_категория_возвращает_саму_себя() -> None:
     транспорт = ЗаписанныйТранспорт({"Kia Rio (DC)": []})
 

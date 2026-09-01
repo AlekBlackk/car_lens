@@ -411,6 +411,7 @@ def _категории(queries: ClassQueries, deps: HarvestDeps, state: Harvest
                     rejected_exclude=итог.rejected_exclude,
                     rejected_not_own=итог.rejected_not_own,
                     budget_exhausted=итог.budget_exhausted,
+                    truncated=итог.truncated,
                     checked=deps.checked,
                 ),
             )

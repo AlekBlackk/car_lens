@@ -28,6 +28,9 @@ from pipeline.harvest.commons import API_URL, Transport, request_with_backoff
 
 MAX_SUBCAT_REQUESTS = 12
 MAX_DEPTH = 2
+# Сколько подкатегорий берёт один запрос. Продолжение не запрашивается — см. докстринг
+# `_подкатегории`, — поэтому величина и есть граница, за которой список приходит усечённым.
+SUBCAT_PAGE_LIMIT = 50
 
 # Не попытка перечислить весь мусор Commons, а защита от заноса в поддеревья, заведомо не
 # дающие кадров каталожного домена: верная машина в чужом домене съёмки для CLIP законна.
@@ -69,12 +72,27 @@ class ExpandResult:
     rejected_exclude: int
     budget_exhausted: bool
     rejected_not_own: int
+    # Сколько запросов вернулись усечёнными: у категории больше `SUBCAT_PAGE_LIMIT`
+    # подкатегорий, а продолжение не запрашивается. Без счётчика остаток терялся бы молча —
+    # тот самый класс дефекта («знаменатель может незаметно сжаться»), на устранение которого
+    # ушли задачи 12 и 13.
+    truncated: int = 0
 
 
 def _подкатегории(
     transport: Transport, category: str, sleep: Callable[[float], None]
-) -> tuple[str, ...]:
-    """Один запрос: имена подкатегорий данной категории."""
+) -> tuple[tuple[str, ...], bool]:
+    """Один запрос: имена подкатегорий и признак того, что список пришёл усечённым.
+
+    Продолжение сознательно не запрашивается: страница подкатегорий — это `gcmlimit`
+    штук, и вторая страница означала бы ещё один запрос к чужому хранилищу на категорию,
+    у которой бюджет обхода (`MAX_SUBCAT_REQUESTS`) и так вычерпывается вглубь. Но
+    молчать об усечении нельзя: потерянный остаток — это исчезнувший знаменатель, и
+    отличить «подкатегорий больше нет» от «мы посмотрели пятьдесят» стало бы невозможно.
+    Поэтому обход возвращает флаг, счётчик доезжает до `expand_log.csv` и до отчёта, и
+    решение «пора листать» принимается по числу, а не по догадке. На снимке C1b усечения
+    нет ни одного: максимум — 34 потомка у `Toyota Corolla`.
+    """
     ответ = request_with_backoff(
         transport,
         API_URL,
@@ -84,14 +102,19 @@ def _подкатегории(
             "generator": "categorymembers",
             "gcmtitle": f"Category:{category}",
             "gcmtype": "subcat",
-            "gcmlimit": "50",
+            "gcmlimit": str(SUBCAT_PAGE_LIMIT),
         },
         sleep=sleep,
     )
     данные: Any = json.loads(ответ.body.decode("utf-8"))
     страницы = (данные.get("query") or {}).get("pages") or {}
-    return tuple(
-        str(страница.get("title", "")).removeprefix("Category:") for страница in страницы.values()
+    усечено = bool((данные.get("continue") or {}).get("gcmcontinue"))
+    return (
+        tuple(
+            str(страница.get("title", "")).removeprefix("Category:")
+            for страница in страницы.values()
+        ),
+        усечено,
     )
 
 
@@ -148,6 +171,7 @@ def expand(
     исключением = 0
     не_своим = 0
     исчерпан = False
+    усечённых = 0
 
     очередь: deque[tuple[str, int]] = deque([(category, 0)])
     while очередь:
@@ -158,7 +182,8 @@ def expand(
             исчерпан = True
             break
         запросов += 1
-        потомки = _подкатегории(transport, родитель, sleep)
+        потомки, усечено = _подкатегории(transport, родитель, sleep)
+        усечённых += int(усечено)
         for потомок in потомки:
             имя = normalize_filename(потомок)
             if имя in видели:
@@ -179,4 +204,6 @@ def expand(
             итог.append(потомок)
             очередь.append((потомок, уровень + 1))
 
-    return ExpandResult(tuple(итог), запросов, стоп_словом, исключением, исчерпан, не_своим)
+    return ExpandResult(
+        tuple(итог), запросов, стоп_словом, исключением, исчерпан, не_своим, усечённых
+    )

@@ -71,6 +71,7 @@ def _обход(**правки: object) -> ExpandRow:
         "rejected_exclude": 0,
         "rejected_not_own": 3,
         "budget_exhausted": False,
+        "truncated": 0,
         "checked": "2026-09-01",
     }
     поля.update(правки)
@@ -93,6 +94,7 @@ def _числа(**правки: object) -> C1Numbers:
         "expand_rejected_exclude": 0,
         "expand_rejected_not_own": 0,
         "expand_budget_exhausted": 0,
+        "expand_truncated": 0,
         "c2_scope": (),
     }
     поля.update(правки)
@@ -315,6 +317,7 @@ def test_отчёт_показывает_чем_срезан_обход() -> Non
     assert "| запросов к Commons | 5 |" in текст
     assert "| отвергнуто не своей полкой | 3 |" in текст
     assert "| категорий с исчерпанным бюджетом | 1 |" in текст
+    assert "| запросов с усечённым списком подкатегорий | 0 |" in текст
 
 
 def test_отчёт_показывает_скоуп_c2_по_классам() -> None:

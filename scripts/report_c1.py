@@ -82,6 +82,7 @@ class C1Numbers:
     expand_rejected_exclude: int
     expand_rejected_not_own: int
     expand_budget_exhausted: int
+    expand_truncated: int
     # Поимённый дефицит: та же величина, что блокирует гейт, только разложенная по классам.
     # `classes_without_holdout == len(c2_scope)`, поэтому таблица и вердикт не могут
     # разойтись — до этой правки таблица дописывалась в отчёт руками, а число приходило
@@ -147,6 +148,7 @@ def collect(
         expand_rejected_exclude=обход["rejected_exclude"],
         expand_rejected_not_own=обход["rejected_not_own"],
         expand_budget_exhausted=обход["budget_exhausted"],
+        expand_truncated=обход["truncated"],
         c2_scope=скоуп,
     )
 
@@ -235,6 +237,7 @@ def render(
         f"| срезано `exclude` | {numbers.expand_rejected_exclude} |",
         f"| отвергнуто не своей полкой | {numbers.expand_rejected_not_own} |",
         f"| категорий с исчерпанным бюджетом | {numbers.expand_budget_exhausted} |",
+        f"| запросов с усечённым списком подкатегорий | {numbers.expand_truncated} |",
         "",
         "## Классы без эталона (скоуп задачи C2)",
         "",
