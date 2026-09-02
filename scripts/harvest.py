@@ -62,7 +62,7 @@ from pipeline.harvest.queries import (
     load_latin_names,
     load_queries,
 )
-from pipeline.harvest.run import HarvestDeps, harvest_class
+from pipeline.harvest.run import ClassOutcome, HarvestDeps, harvest_class
 from pipeline.harvest.state import load_state, save_state
 from pipeline.harvest.tiling import TiledDetector
 from pipeline.paths import harvest_dir
@@ -94,8 +94,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--report-only",
         action="store_true",
         help=(
-            "не собирать; пересобрать bench/NOTICES из манифеста, применив накопленные "
-            "вердикты дедупа и --audit к манифесту"
+            "не собирать; применить накопленные вердикты дедупа и --audit к манифесту и "
+            "пересобрать NOTICES. Отчёт прогона не трогает: его числа — снимок прогона, а "
+            "сборка их не знает (числа сборки печатаются в stdout)"
         ),
     )
     return парсер
@@ -108,16 +109,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     порядок = tuple(класс.class_id for класс in каталог.classes)
     корень = harvest_dir()
 
+    # `None` — «чисел прогона нет» (сборка по манифесту), список — числа именно этого запуска.
+    итоги: list[ClassOutcome] | None
     if аргументы.report_only:
-        from collections import Counter
-
-        from pipeline.harvest.run import ClassOutcome
-
-        по_классам = Counter(с.class_id for с in load_manifest(DEFAULT_MANIFEST_PATH))
-        итоги = [
-            ClassOutcome(class_id=c, seen=0, accepted=по_классам.get(c, 0), rejects={})
-            for c in порядок
-        ]
+        # Подставных `ClassOutcome` здесь больше нет: `seen=0` и `rejects={}` были выдуманы, а
+        # `accepted` из накопительного манифеста — не дельта прогона. Сборка по манифесту
+        # насчитывала «классов, добравших 30: 134» там, где прогон не добрал ни одного
+        # (пункт 8 плана C1). `None` означает «чисел прогона нет», и гейт про это знает.
+        итоги = None
     else:
         import open_clip  # type: ignore[import-untyped]
 
@@ -264,21 +263,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     if запрошено:
         файл_дедупа.write_text("", encoding="utf-8")
     гейт = check_gate(итоги, строки, audited_total, audited_dirty, allow_sa=аргументы.allow_sa)
-    sha = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
-    ).stdout.strip()
-    REPORT_PATH.write_text(
-        render_report(
-            итоги,
-            строки,
-            гейт,
-            sha,
-            date.today().isoformat(),
-            audited_total=audited_total,
-            audited_dirty=audited_dirty,
-        ),
-        encoding="utf-8",
-    )
+    if итоги is None:
+        # Отчёт прогона сборка не пишет: перезапись затирала бы git-отслеживаемую запись
+        # прогона, а роль «свежие числа манифеста с честной шапкой» уже занята
+        # `bench/harvest-c1.md` (`scripts/report_c1.py`). Один файл — одна роль.
+        вердикт = "пройден" if гейт.passed else "НЕ ПРОЙДЕН"
+        print(
+            f"сборка из манифеста: строк {len(строки)}, аудит закрыт вердиктом {audited_total} "
+            f"(с дефектами {audited_dirty}), вердикт гейта {вердикт}"
+        )
+        for причина in (*гейт.blocking_failures, *гейт.advisory_failures):
+            print(f"  {причина}")
+        print(f"{REPORT_PATH} не тронут: его пишет только настоящий прогон")
+    else:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
+        ).stdout.strip()
+        REPORT_PATH.write_text(
+            render_report(
+                итоги,
+                строки,
+                гейт,
+                sha,
+                date.today().isoformat(),
+                audited_total=audited_total,
+                audited_dirty=audited_dirty,
+            ),
+            encoding="utf-8",
+        )
     DEFAULT_NOTICES_PATH.write_text(render_notices(строки), encoding="utf-8")
     return 0 if гейт.passed else 1
 
