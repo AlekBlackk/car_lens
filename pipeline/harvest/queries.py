@@ -33,7 +33,12 @@ class QueriesError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class ClassQueries:
-    """Чем искать один класс: категории Commons, текстовые термины и правила обхода."""
+    """Чем искать один класс: категории Commons, текстовые термины и правила обхода.
+
+    `flickr_terms` — запросы к Flickr, где категорий нет вовсе и полку задаёт один текст.
+    Поле есть не у всех: пустой кортеж означает «из Flickr этот класс не добирается» —
+    внешний донор открывается измеренным дефицитом, а не всей таблицей сразу.
+    """
 
     class_id: str
     categories: tuple[str, ...]
@@ -41,6 +46,7 @@ class ClassQueries:
     depth: int = 1
     include: tuple[str, ...] = ()
     exclude: tuple[str, ...] = ()
+    flickr_terms: tuple[str, ...] = ()
 
 
 def _строки(path: Path, class_id: str, тело: dict[str, Any], ключ: str) -> tuple[str, ...]:
@@ -90,6 +96,9 @@ def load_queries(path: Path) -> dict[str, ClassQueries]:
         термины = _строки(path, имя_класса, тело, "terms")
         if not категории and not термины:
             raise QueriesError(f"{path}: у {имя_класса} нет ни категорий, ни терминов")
+        # Отдельное поле, а не расширение `terms`: `terms` читает путь Commons, и новые
+        # строки здесь изменили бы поведение поиска в закрытой и отгейченной задаче C1.
+        фликр = _строки(path, имя_класса, тело, "flickr_terms")
         глубина = тело.get("depth", 1)
         if (
             not isinstance(глубина, int)
@@ -107,6 +116,7 @@ def load_queries(path: Path) -> dict[str, ClassQueries]:
             depth=глубина,
             include=_строки(path, имя_класса, тело, "include"),
             exclude=_строки(path, имя_класса, тело, "exclude"),
+            flickr_terms=фликр,
         )
     return результат
 

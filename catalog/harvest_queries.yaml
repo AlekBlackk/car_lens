@@ -57,6 +57,7 @@ classes:
   chevrolet__lanos:
     categories: [Chevrolet Lanos]
     terms: ["Chevrolet Lanos"]
+    flickr_terms: ["Chevrolet Lanos", "Шевроле Ланос", "ЗАЗ Ланос", "ZAZ Lanos", "Ланос"]
   chevrolet__niva:
     categories: [Chevrolet Niva, VAZ-2123]
     terms: ["Chevrolet Niva", "VAZ-2123"]
@@ -269,6 +270,7 @@ classes:
   lifan__x60:
     categories: [Lifan X60]
     terms: ["Lifan X60"]
+    flickr_terms: ["Lifan X60", "Лифан X60", "Лифан Икс 60"]
   mazda__3:
     categories: [Mazda 3, Mazda3, Mazda Axela]
     terms: ["Mazda 3", "Mazda3", "Mazda Axela"]

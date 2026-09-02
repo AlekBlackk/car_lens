@@ -193,6 +193,43 @@ def test_пробельное_значение_отбрасывается_мол
     assert load_queries(путь)["audi__q5"].exclude == ("Abt Q5",)
 
 
+def test_flickr_terms_читается_и_сохраняет_кириллицу(tmp_path: Path) -> None:
+    путь = _записать(
+        tmp_path,
+        "version: 1\n"
+        "classes:\n"
+        "  chevrolet__lanos:\n"
+        "    categories: [Chevrolet Lanos]\n"
+        '    terms: ["Chevrolet Lanos"]\n'
+        '    flickr_terms: ["Chevrolet Lanos", "ЗАЗ Ланос"]\n',
+    )
+    таблица = load_queries(путь)
+    assert таблица["chevrolet__lanos"].flickr_terms == ("Chevrolet Lanos", "ЗАЗ Ланос")
+
+
+def test_без_flickr_terms_поле_пустое(tmp_path: Path) -> None:
+    """148 классов поля не имеют: их загрузка обязана не измениться."""
+    путь = _записать(
+        tmp_path,
+        'version: 1\nclasses:\n  audi__a4:\n    categories: [Audi A4]\n    terms: ["Audi A4"]\n',
+    )
+    assert load_queries(путь)["audi__a4"].flickr_terms == ()
+
+
+def test_flickr_terms_скаляром_отвергается(tmp_path: Path) -> None:
+    """Скаляр вместо списка — законный YAML, но итерация пошла бы по символам."""
+    путь = _записать(
+        tmp_path,
+        "version: 1\n"
+        "classes:\n"
+        "  chevrolet__lanos:\n"
+        '    terms: ["Chevrolet Lanos"]\n'
+        "    flickr_terms: Chevrolet Lanos\n",
+    )
+    with pytest.raises(QueriesError, match="flickr_terms"):
+        load_queries(путь)
+
+
 def test_категория_заявленная_двумя_классами_отдаёт_оба() -> None:
     таблица = {
         "geely__coolray": ClassQueries("geely__coolray", ("Geely Coolray",), ("Geely Coolray",)),
