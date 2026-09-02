@@ -1,7 +1,7 @@
 import pytest
 
 from pipeline.harvest.flickr import license_string, requested_licenses
-from pipeline.harvest.licenses import LicenseTier, tier_of
+from pipeline.harvest.licenses import LicenseTier, is_allowed, tier_of
 
 
 @pytest.mark.parametrize(
@@ -11,6 +11,7 @@ from pipeline.harvest.licenses import LicenseTier, tier_of
         ("10", LicenseTier.PUBLIC_DOMAIN),
         ("4", LicenseTier.ATTRIBUTION),
         ("5", LicenseTier.SHARE_ALIKE),
+        (" 9 ", LicenseTier.PUBLIC_DOMAIN),
     ],
 )
 def test_разрешённые_id_ложатся_в_известный_тир(
@@ -28,6 +29,14 @@ def test_разрешённые_id_ложатся_в_известный_тир(
 def test_прочие_id_отвергаются(идентификатор: str) -> None:
     """`7` — заявление о неизвестности статуса, `8` — юрисдикция вне закрытого списка."""
     assert license_string(идентификатор) is None
+
+
+def test_пятёрка_без_флага_отвергается_общим_гейтом() -> None:
+    """Условную разрешённость SA решает не адаптер, а гейт приёма в `run.py`."""
+    строка = license_string("5")
+    assert строка is not None
+    assert is_allowed(строка, allow_sa=False) is False
+    assert is_allowed(строка, allow_sa=True) is True
 
 
 def test_запрошенные_лицензии_без_sa_не_содержат_пятёрку() -> None:

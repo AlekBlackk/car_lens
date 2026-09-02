@@ -23,11 +23,20 @@ _ЛИЦЕНЗИИ: dict[str, str] = {
 }
 
 _БЕЗ_SA = ("9", "10", "4")
-_С_SA = ("9", "10", "4", "5")
+_ВКЛЮЧАЯ_SA = (*_БЕЗ_SA, "5")
 
 
 def license_string(license_id: str) -> str | None:
-    """Строка лицензии для `tier_of` или `None`, если код не разрешён решением Р-11."""
+    """Строка лицензии для `tier_of` или `None`, если код не разрешён решением Р-11.
+
+    Разрешённость ShareAlike условна, но условие снимается не здесь: код `5` даёт
+    `CC BY-SA 2.0` и без `--allow-sa`. Флаг прогона применяет общий гейт приёма —
+    `process_candidate` (`run.py:137`) зовёт `is_allowed` с `allow_sa=deps.allow_sa` для
+    кандидата любого источника, и Commons устроен тем же порядком (`commons.py:210` зовёт
+    `is_allowed(..., allow_sa=True)` на своей стороне). Адаптеру звать `is_allowed` самому
+    незачем: тир решает источник, режим прогона — общий код. Без флага код `5` у API и не
+    запрашивается вовсе, см. `requested_licenses`.
+    """
     return _ЛИЦЕНЗИИ.get(license_id.strip())
 
 
@@ -38,4 +47,4 @@ def requested_licenses(allow_sa: bool) -> str:
     человека, разбор защищает от того, что выдача однажды вернёт что-то за пределами
     запрошенного.
     """
-    return ",".join(_С_SA if allow_sa else _БЕЗ_SA)
+    return ",".join(_ВКЛЮЧАЯ_SA if allow_sa else _БЕЗ_SA)
