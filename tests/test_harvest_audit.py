@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.harvest.audit import (
+    AppliedVerdict,
     AuditError,
     append_applied,
     apply_audit,
@@ -16,6 +17,7 @@ from pipeline.harvest.audit import (
     load_audit_events,
     merge_verdicts,
     required_audit_files,
+    suppress_applied,
 )
 from pipeline.harvest.manifest import HarvestRow
 
@@ -53,6 +55,25 @@ def _строка(
         bbox_area_frac=0.42,
         det_conf=0.91,
         audit=audit,
+    )
+
+
+def _применённый(
+    file: str,
+    *,
+    class_id: str = "kia__rio",
+    basis: str = "category:X",
+    verdict: str = "conflict",
+    applied: str = "2026-09-02",
+    requested: str = "",
+) -> AppliedVerdict:
+    return AppliedVerdict(
+        file=file,
+        class_id=class_id,
+        basis=basis,
+        verdict=verdict,
+        applied=applied,
+        requested=requested,
     )
 
 
@@ -181,11 +202,14 @@ def test_понижение_считает_проверенной_только_�
 
 def test_журнал_применённых_переживает_запись_и_чтение(tmp_path: Path) -> None:
     строки = [_строка("a.jpg", class_id="mitsubishi__pajero")]
-    записи = describe_applied({"a.jpg": "drop:superseded"}, строки, "2026-09-01")
+    решения = {"a.jpg": "drop:superseded"}
+    записи = describe_applied(решения, решения, строки, "2026-09-01")
     путь = tmp_path / "dedup_verdicts.csv"
 
     append_applied(путь, записи)
-    append_applied(путь, describe_applied({"a.jpg": "conflict"}, строки, "2026-09-02"))
+    append_applied(
+        путь, describe_applied({"a.jpg": "conflict"}, {"a.jpg": "conflict"}, строки, "2026-09-02")
+    )
 
     прочитано = load_applied(путь)
     assert [(з.file, з.verdict, з.applied) for з in прочитано] == [
@@ -196,9 +220,26 @@ def test_журнал_применённых_переживает_запись_�
     assert прочитано[0].basis == "category:X"
 
 
+def test_журнал_помнит_чего_хотел_дедуп_а_не_только_применённое() -> None:
+    """Понижение по человеку не должно стирать из следа сам факт вытеснения.
+
+    Иначе счёт `supersede` §9 недосчитает: строка с `ok`, которую дедуп хотел вытеснить,
+    попадёт в журнал как `conflict`, и «дедуп хотел вытеснить» из юридического следа исчезнет.
+    """
+    строки = [_строка(file="a.jpg", audit="ok")]
+    решения = {"a.jpg": "drop:superseded"}
+
+    применённые = demote_over_human(решения, строки)
+    журнал = describe_applied(решения, применённые, строки, "2026-09-02")
+
+    assert журнал[0].requested == "drop:superseded"
+    assert журнал[0].verdict == "conflict"
+
+
 def test_журнал_не_записывает_вердикт_на_отсутствующую_строку() -> None:
     """Вердикт на файл вне манифеста ничего не применил — врать о применении нечем."""
-    assert describe_applied({"нет.jpg": "drop:superseded"}, [_строка("a.jpg")], "2026-09-01") == []
+    решения = {"нет.jpg": "drop:superseded"}
+    assert describe_applied(решения, решения, [_строка("a.jpg")], "2026-09-01") == []
 
 
 def test_отсутствие_журнала_читается_пустым(tmp_path: Path) -> None:
@@ -207,10 +248,39 @@ def test_отсутствие_журнала_читается_пустым(tmp_p
 
 def test_укороченный_журнал_получает_шапку_заново(tmp_path: Path) -> None:
     путь = tmp_path / "dedup_verdicts.csv"
-    записи = describe_applied({"a.jpg": "conflict"}, [_строка("a.jpg")], "2026-09-01")
+    решения = {"a.jpg": "conflict"}
+    записи = describe_applied(решения, решения, [_строка("a.jpg")], "2026-09-01")
     append_applied(путь, записи)
 
     путь.write_text("", encoding="utf-8")
     append_applied(путь, записи)
 
     assert load_applied(путь) == записи
+
+
+def test_append_applied_не_плодит_дубли_по_файлу_и_вердикту(tmp_path: Path) -> None:
+    """Повторная запись той же пары «файл + вердикт» не должна удвоить строку журнала."""
+    путь = tmp_path / "dedup_verdicts.csv"
+    решения = {"a.jpg": "drop:superseded"}
+    записи = describe_applied(решения, решения, [_строка("a.jpg")], "2026-09-01")
+    append_applied(путь, записи)
+
+    append_applied(путь, записи)
+
+    assert load_applied(путь) == записи
+
+
+def test_уже_применённый_вердикт_не_применяется_повторно() -> None:
+    """Заряженная очередь не должна переписывать отметки человека на следующем прогоне."""
+    журнал = [_применённый(file="a.jpg", verdict="conflict")]
+
+    остаток = suppress_applied({"a.jpg": "conflict", "b.jpg": "conflict"}, журнал)
+
+    assert остаток == {"b.jpg": "conflict"}
+
+
+def test_тот_же_файл_с_другим_вердиктом_применяется() -> None:
+    """Совпадение по имени файла — не повод молчать: вердикт мог смениться."""
+    журнал = [_применённый(file="a.jpg", verdict="conflict")]
+
+    assert suppress_applied({"a.jpg": "drop:superseded"}, журнал) == {"a.jpg": "drop:superseded"}

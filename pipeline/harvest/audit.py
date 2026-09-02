@@ -55,6 +55,14 @@ class AppliedVerdict:
     basis: str
     verdict: str
     applied: str
+    # Колонка добавлена последней, с умолчанием (по образцу `ExpandRow.truncated`,
+    # задача 12/M6): в git уже лежит журнал с двумя строками старой схемы, и читатель
+    # обязан их терпеть. `verdict` — что применили к манифесту после понижения дедупа
+    # по человеку (`demote_over_human`), `requested` — чего хотел дедуп до понижения.
+    # Пустой `requested` означает строку, записанную до этой задачи, а не «дедуп ничего
+    # не хотел»: без разделения полей понижение `ok` → `conflict` стирало бы из следа
+    # сам факт вытеснения, и счёт `supersede` §9 недосчитывал бы понижённые случаи.
+    requested: str = ""
 
 
 APPLIED_COLUMNS = tuple(поле.name for поле in fields(AppliedVerdict))
@@ -141,10 +149,37 @@ def demote_over_human(verdicts: Mapping[str, str], rows: Sequence[HarvestRow]) -
     }
 
 
+def suppress_applied(
+    verdicts: Mapping[str, str], applied: Sequence[AppliedVerdict]
+) -> dict[str, str]:
+    """Убрать из `verdicts` то, что журнал уже помнит применённым.
+
+    Сверка идёт по паре «файл + вердикт», не по одному файлу: вердикт по тому же кадру
+    может смениться (человек пересмотрел строку, дедуп на следующем прогоне решил иначе),
+    и подавление по одному имени похоронило бы такую законную правку молча.
+
+    Обычно очередь `verdicts.dedup.csv` после применения усекается (`scripts/harvest.py`),
+    и до этой строки очередь пуста, а подавлять нечего. Это — вторая линия защиты на случай,
+    когда очередь усечение пережила: прогон прервался между применением и усечением, очередь
+    восстановили из копии, или вердикты применила версия кода без усечения (ровно случай,
+    найденный финальным ревью ветки C1).
+    """
+    применено = {(запись.file, запись.verdict) for запись in applied}
+    return {файл: вердикт for файл, вердикт in verdicts.items() if (файл, вердикт) not in применено}
+
+
 def describe_applied(
-    verdicts: Mapping[str, str], rows: Sequence[HarvestRow], applied: str
+    requested: Mapping[str, str],
+    applied: Mapping[str, str],
+    rows: Sequence[HarvestRow],
+    applied_at: str,
 ) -> list[AppliedVerdict]:
-    """Записи журнала по вердиктам и манифесту **до** их применения.
+    """Записи журнала по вердиктам дедупа и манифесту **до** их применения.
+
+    Два вердикта на входе, а не один: `requested` — что хотел дедуп до понижения по человеку,
+    `applied` — что фактически применилось к манифесту после него. Строка проходит по
+    `applied` (это то, что применилось), но обязана нести оба — иначе понижение `ok` →
+    `conflict` стёрло бы из следа сам факт вытеснения.
 
     Строки, которых в манифесте нет, пропускаются: вердикт на отсутствующий файл ничего не
     изменил, и записывать его в журнал применённых значило бы врать о применении.
@@ -156,31 +191,47 @@ def describe_applied(
             class_id=по_файлу[файл].class_id,
             basis=по_файлу[файл].basis,
             verdict=вердикт,
-            applied=applied,
+            applied=applied_at,
+            requested=requested.get(файл, вердикт),
         )
-        for файл, вердикт in verdicts.items()
+        for файл, вердикт in applied.items()
         if файл in по_файлу
     ]
 
 
 def append_applied(path: Path, verdicts: Sequence[AppliedVerdict]) -> None:
-    """Дописать применённые автовердикты в журнал, создав файл с шапкой при первом вызове."""
+    """Дописать применённые автовердикты в журнал, создав файл с шапкой при первом вызове.
+
+    Читает журнал перед записью, чтобы не дописать пару «файл + вердикт», которая там уже
+    есть. Лишнее чтение на каждый вызов — журнал юридический, а вызов один на прогон, так
+    что цена неощутима, а без неё заряженная (не усечённая) очередь дублировала бы уже
+    записанную строку при каждом следующем прогоне.
+    """
     if not verdicts:
+        return
+    уже_в_журнале = {(запись.file, запись.verdict) for запись in load_applied(path)}
+    новые = [запись for запись in verdicts if (запись.file, запись.verdict) not in уже_в_журнале]
+    if not новые:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     # Файл нулевой длины — файл без шапки (идиома `rejects.append_reject_row`): журнал
     # укорачивают `> файл`, и без проверки размера первая дописанная строка стала бы шапкой.
-    новый = not path.exists() or path.stat().st_size == 0
+    новый_файл = not path.exists() or path.stat().st_size == 0
     with path.open("a", encoding="utf-8", newline="") as файл:
         писатель = csv.DictWriter(файл, fieldnames=list(APPLIED_COLUMNS))
-        if новый:
+        if новый_файл:
             писатель.writeheader()
-        for запись in verdicts:
+        for запись in новые:
             писатель.writerow(asdict(запись))
 
 
 def load_applied(path: Path) -> list[AppliedVerdict]:
-    """Прочитать журнал целиком; отсутствие файла — пустой журнал, а не ошибка."""
+    """Прочитать журнал целиком; отсутствие файла — пустой журнал, а не ошибка.
+
+    Колонка `requested` читается терпимо (`.get(...) or ""`): в git уже лежат две строки
+    старой схемы без неё, записанные до этой задачи — ровно как `load_expand_rows` терпит
+    отсутствие `truncated` в журналах до M6.
+    """
     if not path.exists():
         return []
     return [
@@ -190,6 +241,7 @@ def load_applied(path: Path) -> list[AppliedVerdict]:
             basis=строка["basis"],
             verdict=строка["verdict"],
             applied=строка["applied"],
+            requested=строка.get("requested") or "",
         )
         for строка in csv.DictReader(path.read_text(encoding="utf-8").splitlines())
     ]

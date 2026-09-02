@@ -28,8 +28,10 @@ from pipeline.harvest.audit import (
     audit_counts,
     demote_over_human,
     describe_applied,
+    load_applied,
     load_audit,
     merge_verdicts,
+    suppress_applied,
 )
 from pipeline.harvest.backends import (
     ClipImageEncoder,
@@ -221,7 +223,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     # им подкреплённую строку молча. Поэтому автовердикты ещё и понижаются по манифесту
     # (`demote_over_human`, §8 дизайна C1).
     файл_дедупа = корень / DEDUP_VERDICTS_FILENAME
-    авто = demote_over_human(load_audit(файл_дедупа), строки) if файл_дедупа.exists() else {}
+    запрошено = load_audit(файл_дедупа) if файл_дедупа.exists() else {}
+    понижено = demote_over_human(запрошено, строки)
+    # Вторая линия защиты сверх усечения очереди ниже: усечение бережёт штатный путь, а
+    # подавление — путь, где очередь его пережила (прогон прервался между применением и
+    # усечением; очередь восстановили из копии; вердикты применила версия кода без усечения —
+    # ровно случай, найденный финальным ревью ветки C1). Сверяется с уже ПОНИЖЕННЫМ вердиктом:
+    # в журнале лежит то, что фактически применилось к манифесту, а не то, что хотел дедуп.
+    авто = suppress_applied(понижено, load_applied(DEFAULT_APPLIED_PATH))
     ручные = [load_audit(Path(п)) for п in (аргументы.audit or [])]
     if авто or ручные:
         вердикты = merge_verdicts(авто, *ручные)
@@ -230,7 +239,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         # След применения — до `apply_audit`: после него строки с `drop:*` в манифесте уже
         # нет, и записывать в журнал будет нечего, кроме имени файла.
         append_applied(
-            DEFAULT_APPLIED_PATH, describe_applied(авто, строки, date.today().isoformat())
+            DEFAULT_APPLIED_PATH,
+            describe_applied(запрошено, авто, строки, date.today().isoformat()),
         )
         строки = apply_audit(строки, вердикты)
         write_manifest(DEFAULT_MANIFEST_PATH, строки)
