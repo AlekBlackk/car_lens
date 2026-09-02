@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.harvest.audit import (
+    APPLIED_COLUMNS,
     AppliedVerdict,
     AuditError,
     append_applied,
@@ -284,3 +285,54 @@ def test_тот_же_файл_с_другим_вердиктом_применя�
     журнал = [_применённый(file="a.jpg", verdict="conflict")]
 
     assert suppress_applied({"a.jpg": "drop:superseded"}, журнал) == {"a.jpg": "drop:superseded"}
+
+
+def test_подавление_сверяется_с_сырым_запросом_старой_схемы() -> None:
+    """Живой случай C1b: журнал хранит непонижённый вердикт как `verdict` (пустой `requested`).
+
+    Строка записана до появления `demote_over_human` — тогда понижения не было вообще, и
+    колонка `verdict` несёт исходный запрос дедупа как есть. `suppress_applied` вызывается
+    ДО понижения (тем же сырым вердиктом из очереди), поэтому сверка обязана найти
+    совпадение по `verdict` журнала напрямую, а не ждать `requested`, которого в старой
+    записи нет.
+    """
+    журнал = [_применённый(file="a.jpg", verdict="drop:superseded", requested="")]
+
+    assert suppress_applied({"a.jpg": "drop:superseded"}, журнал) == {}
+
+
+def test_append_applied_переписывает_пятиколоночную_шапку(tmp_path: Path) -> None:
+    """Реальный `provenance/dedup_verdicts.csv` лежит в git пятиколоночным (без `requested`).
+
+    Дописывание новой строки не имеет права ни уронить старые значения, ни размазать новые
+    шесть полей под старую пятиколоночную шапку. Проверяется на настоящем формате файла —
+    самая дешёвая находка Critical 2, спрятанная тем, что все прочие тесты пишут в чистый
+    `tmp_path` и никогда не встречают старую шапку.
+    """
+    путь = tmp_path / "dedup_verdicts.csv"
+    путь.write_text(
+        "file,class_id,basis,verdict,applied\n"
+        "old.jpg,audi__q5,category:Audi Q5,conflict,2026-09-01\n",
+        encoding="utf-8",
+    )
+
+    новая = _применённый(
+        file="new.jpg",
+        class_id="kia__rio",
+        basis="category:X",
+        verdict="drop:superseded",
+        requested="drop:superseded",
+    )
+    append_applied(путь, [новая])
+
+    прочитано = load_applied(путь)
+    assert прочитано[0] == _применённый(
+        file="old.jpg",
+        class_id="audi__q5",
+        basis="category:Audi Q5",
+        verdict="conflict",
+        applied="2026-09-01",
+        requested="",
+    )
+    assert прочитано[1] == новая
+    assert путь.read_text(encoding="utf-8").splitlines()[0] == ",".join(APPLIED_COLUMNS)
