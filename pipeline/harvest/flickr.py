@@ -30,7 +30,7 @@ def license_string(license_id: str) -> str | None:
     """Строка лицензии для `tier_of` или `None`, если код не разрешён решением Р-11.
 
     Разрешённость ShareAlike условна, но условие снимается не здесь: код `5` даёт
-    `CC BY-SA 2.0` и без `--allow-sa`. Флаг прогона применяет общий гейт приёма —
+    `CC BY-SA 2.0` и без `--allow-sa`. Общий гейт приёма применяет флаг прогона —
     `process_candidate` (`run.py:137`) зовёт `is_allowed` с `allow_sa=deps.allow_sa` для
     кандидата любого источника, и Commons устроен тем же порядком (`commons.py:210` зовёт
     `is_allowed(..., allow_sa=True)` на своей стороне). Адаптеру звать `is_allowed` самому
