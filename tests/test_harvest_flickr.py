@@ -235,11 +235,23 @@ def test_без_оригинала_берётся_вариант_l() -> None:
     assert (кандидат.width, кандидат.height) == (1024, 768)
 
 
-def test_негодный_ключ_даёт_отказ_а_не_пустую_страницу() -> None:
-    """`stat: fail` приезжает кодом 200: без явного отказа класс закрылся бы без следа."""
-    отказ = {"stat": "fail", "code": 100, "message": "Invalid API Key"}
-    источник, _ = _источник([_ок(отказ)])
-    with pytest.raises(HarvestHttpError, match=r"100.*Invalid API Key"):
+@pytest.mark.parametrize(
+    ("тело", "ожидаемый_текст"),
+    [
+        ({"stat": "fail", "code": 100, "message": "Invalid API Key"}, r"100.*Invalid API Key"),
+        ({}, r"stat None"),
+    ],
+)
+def test_негодный_stat_даёт_отказ_а_не_пустую_страницу(
+    тело: dict[str, object], ожидаемый_текст: str
+) -> None:
+    """Отказ кодом 200: и `stat: fail`, и тело вовсе без `stat` — неизвестное значит отказ.
+
+    Второй случай держит именно `!= "ok"`: с `== "fail"` он прошёл бы зелёным, а класс снова
+    закрывался бы без единой строки отказов на любом ответе неожиданной формы.
+    """
+    источник, _ = _источник([_ок(тело)])
+    with pytest.raises(HarvestHttpError, match=ожидаемый_текст):
         источник.search(SourceQuery("chevrolet__lanos", None, "Chevrolet Lanos", 2, None))
 
 
