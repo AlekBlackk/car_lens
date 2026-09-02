@@ -22,7 +22,12 @@ from datetime import date
 from pathlib import Path
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
-from pipeline.harvest.audit import DEFAULT_APPLIED_PATH, load_applied, load_audit_events
+from pipeline.harvest.audit import (
+    DEFAULT_APPLIED_PATH,
+    AppliedVerdict,
+    load_applied,
+    load_audit_events,
+)
 from pipeline.harvest.expand_log import ExpandRow, expand_totals, load_expand_rows
 from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, HarvestRow, load_manifest
 from pipeline.harvest.rejects import Reject, load_rejects, reason_counts
@@ -63,6 +68,58 @@ class C2ScopeRow:
 
 
 @dataclass(frozen=True, slots=True)
+class DedupEvent:
+    """Одно событие дедупа для счёта §9: что считать и понижено ли оно по отметке человека.
+
+    `verdict` — не всегда `AppliedVerdict.verdict`: это решение, которое ХОТЕЛ дедуп
+    (`requested`), а не то, что в итоге осело в манифесте после `demote_over_human`. Иначе
+    понижение `drop:superseded` → `conflict` стёрло бы из счёта §9 сам факт вытеснения —
+    ради этого различения `AppliedVerdict.requested` и заводился (задача 14).
+    """
+
+    verdict: str
+    demoted: bool
+
+
+def dedup_events(
+    applied: Sequence[AppliedVerdict], pending: Sequence[tuple[str, str]]
+) -> list[DedupEvent]:
+    """Все события дедупа прогона: применённые (журнал) плюс ещё не применённые (очередь).
+
+    §9 перечисляет `supersede`/`conflict` в одном списке с «отвергнуто стоп-словом» —
+    соседи по абзацу считают решения обхода, а не то, что осталось в манифесте, значит и
+    эти два числа обязаны считать решение дедупа, а не итог после понижения. Событие
+    журнала — `requested or verdict`: пустой `requested` значит «запись до задачи 14», где
+    `verdict` и есть было запрошенным, а не «дедуп ничего не хотел» (тот же фоллбэк, что и в
+    `suppress_applied`).
+
+    `demoted` истинно только когда оба поля непусты и расходятся. У строк старой схемы
+    (`requested` пуст) понижение неизвестно, а не равно нулю — считать неизвестность нулём
+    ровно та ошибка, которую этот подсчёт обязан не повторить.
+
+    Дедупликация очереди против журнала — по паре «файл + запрошенный вердикт», не «файл +
+    применённый»: иначе понижённая запись журнала (несёт `verdict=conflict`) не погасила бы
+    свою же строку в очереди, где всё ещё лежит исходный `drop:superseded`.
+    """
+    из_журнала = [
+        DedupEvent(
+            verdict=запись.requested or запись.verdict,
+            demoted=bool(
+                запись.requested and запись.verdict and запись.requested != запись.verdict
+            ),
+        )
+        for запись in applied
+    ]
+    запрошено_журналом = {(запись.file, запись.requested or запись.verdict) for запись in applied}
+    из_очереди = [
+        DedupEvent(verdict=вердикт, demoted=False)
+        for файл, вердикт in pending
+        if (файл, вердикт) not in запрошено_журналом
+    ]
+    return из_журнала + из_очереди
+
+
+@dataclass(frozen=True, slots=True)
 class C1Numbers:
     """Числа отчёта C1: одно блокирующее и наблюдаемые, включая потери обхода."""
 
@@ -74,6 +131,11 @@ class C1Numbers:
     catalog_classes: int
     conflicts: int
     supersedes: int
+    # Понижение по отметке человека, отдельным числом от `conflicts`/`supersedes` (§9,
+    # задача 15): считать понижённое вытеснение как `supersede` значит соврать, что строку
+    # вытеснили, хотя она выжила; считать его как `conflict` значит потерять из отчёта сам
+    # факт, что дедуп хотел вытеснить. См. `DedupEvent.demoted`.
+    demoted: int
     reasons: dict[str, int]
     # Из журнала обхода категорий (задача 12): без него предикат допуска и стоп-слова срезали
     # подкатегории незаметно для отчёта — см. `pipeline/harvest/expand_log.py`.
@@ -93,16 +155,16 @@ class C1Numbers:
 def collect(
     rows: Sequence[HarvestRow],
     rejects: Sequence[Reject],
-    verdict_events: Sequence[str],
+    verdict_events: Sequence[DedupEvent],
     catalog_classes: Sequence[str],
     expand_rows: Sequence[ExpandRow] = (),
     classes_without_holdout: int | None = None,
 ) -> C1Numbers:
-    """Числа отчёта. `verdict_events` — по одной записи на событие дедупа.
+    """Числа отчёта. `verdict_events` — по одной записи на событие дедупа (`dedup_events`).
 
     Именно события, а не итоговые вердикты по файлам: §9 просит `supersede` и `conflict`
     поштучно, а словарь `file -> verdict` считает файлы — два вытеснения одного файла дали бы
-    в отчёте одно. Собирает список вызывающий, из двух источников (журнал применённых и
+    в отчёте одно. Вызывающий собирает список из двух источников (журнал применённых и
     очередь ещё не применённых), потому что после правки C1 очередь усекается.
 
     Блокирующее число считается здесь, а не приходит флагом: гейт, который нельзя
@@ -140,8 +202,9 @@ def collect(
         classes_without_holdout=(
             len(скоуп) if classes_without_holdout is None else classes_without_holdout
         ),
-        conflicts=sum(1 for в in verdict_events if в == "conflict"),
-        supersedes=sum(1 for в in verdict_events if в == "drop:superseded"),
+        conflicts=sum(1 for в in verdict_events if в.verdict == "conflict"),
+        supersedes=sum(1 for в in verdict_events if в.verdict == "drop:superseded"),
+        demoted=sum(1 for в in verdict_events if в.demoted),
         reasons=reason_counts(rejects),
         expand_requests=обход["requests"],
         expand_rejected_stopword=обход["rejected_stopword"],
@@ -166,8 +229,10 @@ def render(
     numbers: C1Numbers,
     passed: bool,
     failures: Sequence[str],
-    git_sha: str,
-    ran_at: str,
+    built_sha: str,
+    built_at: str,
+    ran_sha: str | None = None,
+    ran_at: str | None = None,
 ) -> str:
     """Собрать `bench/harvest-c1.md`: числа задачи в отслеживаемом git месте.
 
@@ -175,11 +240,23 @@ def render(
     `expand_log.csv` копятся между прогонами, а `bench/harvest-m0.md` считает те же причины
     отказа дельтой прогона. Два git-отслеживаемых отчёта одного `git_sha` дают разные числа,
     и без этой оговорки расхождение читается как ошибка одного из них.
+
+    `built_sha`/`built_at` — дата и HEAD **сборки этого файла**, известны всегда (`main`
+    вычисляет их сам). `ran_sha`/`ran_at` — дата и HEAD **прогона**, который дал числа ниже;
+    их не вычислить из репозитория, только назвать флагом. Оба умолчания — `None`: врать в
+    шапке умолчанием нельзя, поэтому без флагов отчёт называет вслух себя («собран»), а не
+    выдаёт дату сборки за дату прогона, которого не знает.
     """
+    if ran_sha is not None and ran_at is not None:
+        шапка_строка = f"Прогон от {ran_at}, `git_sha` — `{ran_sha}`."
+    else:
+        шапка_строка = (
+            f"Отчёт собран {built_at}, `git_sha` — `{built_sha}`; дата и sha прогона не заданы."
+        )
     строки = [
         "# Категорийный сбор с обходом подкатегорий, C1 — прогон",
         "",
-        f"Прогон от {ran_at}, `git_sha` — `{git_sha}`.",
+        шапка_строка,
         "",
         f"- строк в манифесте: {numbers.rows}",
         f"- вердикт гейта: {'пройден' if passed else 'НЕ ПРОЙДЕН'}",
@@ -206,6 +283,7 @@ def render(
         f" {numbers.classes_without_holdout} |",
         f"| вытеснений `supersede` | 0 | {numbers.supersedes} |",
         f"| споров `conflict` | 0 | {numbers.conflicts} |",
+        f"| из них понижено по отметке человека | 0 | {numbers.demoted} |",
         "",
         "## Причины отказа",
         "",
@@ -295,6 +373,17 @@ def build_parser() -> argparse.ArgumentParser:
     парсер.add_argument(
         "--expand-log", type=Path, default=None, help="по умолчанию в каталоге данных"
     )
+    парсер.add_argument(
+        "--ran-at",
+        default=None,
+        help="дата прогона, который дал эти числа (не дата сборки отчёта); по умолчанию не"
+        " задана, и шапка честно говорит, что называет сборку, а не прогон",
+    )
+    парсер.add_argument(
+        "--git-sha",
+        default=None,
+        help="`git_sha` прогона, который дал эти числа (не HEAD сборки отчёта)",
+    )
     return парсер
 
 
@@ -311,16 +400,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     каталог = load_catalog(аргументы.catalog)
     # События дедупа лежат в двух файлах: git-отслеживаемый журнал применённых
     # (`provenance/dedup_verdicts.csv`) и очередь ещё не применённых в каталоге данных, которую
-    # `scripts/harvest.py` усекает сразу после применения. Считаются строки, а не ключи: §9
-    # просит вердикты поштучно, и два вытеснения одного файла обязаны дать два. Пара
-    # «файл + вердикт», уже лежащая в журнале, из очереди не досчитывается — это одно и то же
-    # событие, чью очередь просто не усекли.
+    # `scripts/harvest.py` усекает сразу после применения. `dedup_events` считает решение
+    # дедупа (`requested or verdict`), а не итог после понижения по человеку — см. её докстринг.
     применённые = load_applied(аргументы.applied_verdicts)
     ожидающие = load_audit_events(файл_вердиктов) if файл_вердиктов.exists() else []
-    в_журнале = {(з.file, з.verdict) for з in применённые}
-    события = [з.verdict for з in применённые] + [
-        вердикт for файл, вердикт in ожидающие if (файл, вердикт) not in в_журнале
-    ]
+    события = dedup_events(применённые, ожидающие)
     числа = collect(
         rows=load_manifest(аргументы.manifest),
         rejects=load_rejects(журнал),
@@ -343,7 +427,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     ).stdout.strip()
     аргументы.report.parent.mkdir(parents=True, exist_ok=True)
     аргументы.report.write_text(
-        render(числа, прошёл, провалы, sha, date.today().isoformat()), encoding="utf-8"
+        render(
+            числа,
+            прошёл,
+            провалы,
+            built_sha=sha,
+            built_at=date.today().isoformat(),
+            ran_sha=аргументы.git_sha,
+            ran_at=аргументы.ran_at,
+        ),
+        encoding="utf-8",
     )
     print(f"отчёт записан в {аргументы.report}; гейт {'пройден' if прошёл else 'НЕ ПРОЙДЕН'}")
     for провал in провалы:

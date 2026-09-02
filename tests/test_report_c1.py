@@ -15,6 +15,28 @@ from scripts.report_c1 import (
     main,
     render,
 )
+from scripts.report_c1 import dedup_events as _события
+
+
+def _применённый(
+    file: str,
+    *,
+    class_id: str = "kia__rio",
+    basis: str = "category:X",
+    verdict: str = "conflict",
+    applied: str = "2026-09-02",
+    requested: str = "",
+) -> AppliedVerdict:
+    """Локальная копия хелпера `test_harvest_audit._применённый`: не публичный API, чтобы
+    один тестовый модуль не тянул детали другого."""
+    return AppliedVerdict(
+        file=file,
+        class_id=class_id,
+        basis=basis,
+        verdict=verdict,
+        applied=applied,
+        requested=requested,
+    )
 
 
 def _строка(**правки: object) -> HarvestRow:
@@ -88,6 +110,7 @@ def _числа(**правки: object) -> C1Numbers:
         "catalog_classes": 150,
         "conflicts": 0,
         "supersedes": 0,
+        "demoted": 0,
         "reasons": {},
         "expand_requests": 0,
         "expand_rejected_stopword": 0,
@@ -213,15 +236,40 @@ def test_скоуп_c2_считает_принятое_и_долю_катего�
 
 def test_вердикты_считаются_событиями_а_не_файлами() -> None:
     """§9 просит поштучно: два вытеснения одного файла — два события, а не одно."""
+    журнал = [
+        _применённый(file="a.jpg", verdict="drop:superseded"),
+        _применённый(file="b.jpg", verdict="drop:superseded"),
+        _применённый(file="c.jpg", verdict="conflict"),
+    ]
+
     числа = collect(
         rows=[],
         rejects=[],
-        verdict_events=["drop:superseded", "drop:superseded", "conflict"],
+        verdict_events=_события(журнал, []),
         catalog_classes=(),
         classes_without_holdout=0,
     )
 
     assert (числа.supersedes, числа.conflicts) == (2, 1)
+
+
+def test_понижённое_вытеснение_считается_вытеснением() -> None:
+    """§9 считает решения дедупа, а не состояние манифеста: понижение по отметке человека
+    не должно стирать сам факт вытеснения из числа."""
+    журнал = [_применённый(file="a.jpg", verdict="conflict", requested="drop:superseded")]
+
+    числа = collect(rows=[], rejects=[], verdict_events=_события(журнал, []), catalog_classes=[])
+
+    assert (числа.supersedes, числа.conflicts, числа.demoted) == (1, 0, 1)
+
+
+def test_строка_старой_схемы_считается_по_применённому() -> None:
+    """Пустой `requested` — «запись до Задачи 14», и тогда `verdict` и есть запрошенное."""
+    журнал = [_применённый(file="a.jpg", verdict="drop:superseded", requested="")]
+
+    числа = collect(rows=[], rejects=[], verdict_events=_события(журнал, []), catalog_classes=[])
+
+    assert (числа.supersedes, числа.demoted) == (1, 0)
 
 
 def test_доля_категорийного_базиса_считается_но_не_блокирует() -> None:
