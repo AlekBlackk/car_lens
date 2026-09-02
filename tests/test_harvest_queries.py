@@ -145,7 +145,7 @@ def test_граница_глубины_взята_из_обхода(tmp_path: Pa
     assert load_queries(путь)["kia__rio"].depth == MAX_DEPTH
 
 
-@pytest.mark.parametrize("поле", ["categories", "terms", "include", "exclude"])
+@pytest.mark.parametrize("поле", ["categories", "terms", "include", "exclude", "flickr_terms"])
 def test_скаляр_вместо_списка_роняет(tmp_path: Path, поле: str) -> None:
     """Скаляр — законный YAML, но итерация пошла бы по строке, по одной букве на значение.
 
@@ -216,17 +216,14 @@ def test_без_flickr_terms_поле_пустое(tmp_path: Path) -> None:
     assert load_queries(путь)["audi__a4"].flickr_terms == ()
 
 
-def test_flickr_terms_скаляром_отвергается(tmp_path: Path) -> None:
-    """Скаляр вместо списка — законный YAML, но итерация пошла бы по символам."""
+def test_класс_с_одним_flickr_terms_отвергается(tmp_path: Path) -> None:
+    """Поле Flickr не заменяет путь Commons: донор добирает дефицит, а не создаёт полку."""
     путь = _записать(
         tmp_path,
-        "version: 1\n"
-        "classes:\n"
-        "  chevrolet__lanos:\n"
-        '    terms: ["Chevrolet Lanos"]\n'
-        "    flickr_terms: Chevrolet Lanos\n",
+        'version: 1\nclasses:\n  lifan__x60:\n    flickr_terms: ["Lifan X60"]\n',
     )
-    with pytest.raises(QueriesError, match="flickr_terms"):
+
+    with pytest.raises(QueriesError, match="lifan__x60"):
         load_queries(путь)
 
 
