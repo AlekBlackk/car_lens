@@ -3,7 +3,7 @@ from collections.abc import Mapping
 
 import pytest
 
-from pipeline.harvest.commons import HttpResponse
+from pipeline.harvest.commons import HarvestHttpError, HttpResponse
 from pipeline.harvest.flickr import FlickrSource, license_string, requested_licenses
 from pipeline.harvest.licenses import LicenseTier, is_allowed, tier_of
 from pipeline.harvest.sources import SourceQuery
@@ -91,14 +91,19 @@ def test_запрошенные_лицензии_с_sa_содержат_пятё
 
 
 class ЗаписанныйТранспорт:
-    """Подставной транспорт: отдаёт заготовленные ответы, считает вызовы."""
+    """Подставной транспорт: отдаёт заготовленные ответы, записывает адрес и параметры.
+
+    Адрес пишется рядом с параметрами, а не отбрасывается: без него тест не отличит запрос
+    к API от запроса к CDN, и подмена `file_url` на `page_url` внутри `fetch` прошла бы
+    зелёной — то есть размеры описывали бы один файл, а байты приехали бы от другого.
+    """
 
     def __init__(self, ответы: list[HttpResponse]) -> None:
         self.ответы = list(ответы)
-        self.вызовы: list[Mapping[str, str]] = []
+        self.вызовы: list[tuple[str, Mapping[str, str]]] = []
 
     def get(self, url: str, params: Mapping[str, str]) -> HttpResponse:
-        self.вызовы.append(dict(params))
+        self.вызовы.append((url, dict(params)))
         return self.ответы.pop(0)
 
 
@@ -146,11 +151,23 @@ def test_шлюз_игл_получает_заголовок_и_теги() -> No
 def test_запрос_несёт_ключ_и_список_лицензий() -> None:
     источник, транспорт = _источник([_ок(ОТВЕТ)])
     источник.search(SourceQuery("chevrolet__lanos", None, "Chevrolet Lanos", 2, None))
-    вызов = транспорт.вызовы[0]
+    адрес, вызов = транспорт.вызовы[0]
+    # Адрес литералом, а не через `API_URL`: сверка константы с собой прошла бы и после
+    # опечатки в ней самой, а опечатка в адресе — молчаливый ноль принятых у всего класса.
+    assert адрес == "https://api.flickr.com/services/rest/"
     assert вызов["api_key"] == "КЛЮЧ"
     assert вызов["license"] == "9,10,4"
     assert вызов["text"] == "Chevrolet Lanos"
     assert вызов["method"] == "flickr.photos.search"
+    assert вызов["per_page"] == "2"
+
+
+def test_с_флагом_sa_запрос_просит_и_пятёрку() -> None:
+    """§6 требует «плюс `5` при `--allow-sa`», и просить его надо у самого API."""
+    источник, транспорт = _источник([_ок(ОТВЕТ)], allow_sa=True)
+    источник.search(SourceQuery("chevrolet__lanos", None, "Chevrolet Lanos", 2, None))
+    _, вызов = транспорт.вызовы[0]
+    assert вызов["license"] == "9,10,4,5"
 
 
 def test_токен_продолжения_есть_пока_есть_страницы() -> None:
@@ -170,7 +187,8 @@ def test_токен_продолжения_доезжает_до_запроса(
     """Рестарт обязан продолжать с сохранённой страницы, а не начинать заново."""
     источник, транспорт = _источник([_ок(ОТВЕТ)])
     источник.search(SourceQuery("chevrolet__lanos", None, "Chevrolet Lanos", 2, "2"))
-    assert транспорт.вызовы[0]["page"] == "2"
+    _, вызов = транспорт.вызовы[0]
+    assert вызов["page"] == "2"
 
 
 def test_фото_без_годного_размера_пропускается() -> None:
@@ -189,10 +207,49 @@ def test_фото_без_годного_размера_пропускается(
     assert страница.candidates == ()
 
 
+def test_без_оригинала_берётся_вариант_l() -> None:
+    """Владелец закрыл оригинал — обычный случай Flickr, и тогда класс держится на `l`."""
+    только_l = {
+        "stat": "ok",
+        "photos": {
+            "page": 1,
+            "pages": 1,
+            "photo": [
+                {
+                    "id": "444",
+                    "owner": "9@N00",
+                    "ownername": "Х",
+                    "title": "т",
+                    "license": "4",
+                    "url_l": "https://live.staticflickr.com/444_l.jpg",
+                    "width_l": "1024",
+                    "height_l": "768",
+                }
+            ],
+        },
+    }
+    источник, _ = _источник([_ок(только_l)])
+    страница = источник.search(SourceQuery("chevrolet__lanos", None, "Chevrolet Lanos", 2, None))
+    кандидат = страница.candidates[0]
+    assert кандидат.file_url == "https://live.staticflickr.com/444_l.jpg"
+    assert (кандидат.width, кандидат.height) == (1024, 768)
+
+
+def test_негодный_ключ_даёт_отказ_а_не_пустую_страницу() -> None:
+    """`stat: fail` приезжает кодом 200: без явного отказа класс закрылся бы без следа."""
+    отказ = {"stat": "fail", "code": 100, "message": "Invalid API Key"}
+    источник, _ = _источник([_ок(отказ)])
+    with pytest.raises(HarvestHttpError, match=r"100.*Invalid API Key"):
+        источник.search(SourceQuery("chevrolet__lanos", None, "Chevrolet Lanos", 2, None))
+
+
 def test_скачивание_возвращает_байты() -> None:
-    источник, _ = _источник([_ок(ОТВЕТ), HttpResponse(200, b"JPEG")])
+    """Байты обязаны приехать с того URL, чьи размеры проверил гейт, а не со страницы фото."""
+    источник, транспорт = _источник([_ок(ОТВЕТ), HttpResponse(200, b"JPEG")])
     страница = источник.search(SourceQuery("chevrolet__lanos", None, "Chevrolet Lanos", 2, None))
     assert источник.fetch(страница.candidates[0]) == b"JPEG"
+    адрес, _ = транспорт.вызовы[1]
+    assert адрес == "https://live.staticflickr.com/111_o.jpg"
 
 
 def test_неудачное_скачивание_даёт_пустые_байты() -> None:
