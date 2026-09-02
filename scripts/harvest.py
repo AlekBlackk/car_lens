@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import subprocess
 from collections.abc import Sequence
-from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -25,7 +24,7 @@ from pipeline.harvest.audit import (
     DEFAULT_APPLIED_PATH,
     append_applied,
     apply_audit,
-    audit_counts,
+    counts_with_verdicts,
     demote_over_human,
     describe_applied,
     load_applied,
@@ -213,7 +212,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
 
     строки = load_manifest(DEFAULT_MANIFEST_PATH)
-    audited_total, audited_dirty = 0, 0
     # Файл дедупа идёт первым, а `--audit` — следом: `merge_verdicts` документирован как
     # «поздний проход побеждает ранний, потому что человек пересмотрел своё решение». Если
     # бы автоматика шла последней, она перебивала бы человека, и кадр, снесённый дедупом
@@ -239,10 +237,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     незалогированное = suppress_applied(запрошено, load_applied(DEFAULT_APPLIED_PATH))
     авто = demote_over_human(незалогированное, строки)
     ручные = [load_audit(Path(п)) for п in (аргументы.audit or [])]
-    if авто or ручные:
-        вердикты = merge_verdicts(авто, *ручные)
-        с_вердиктами = [replace(s, audit=вердикты.get(s.file, s.audit)) for s in строки]
-        audited_total, audited_dirty = audit_counts(с_вердиктами)
+    вердикты = merge_verdicts(авто, *ручные) if (авто or ручные) else {}
+    # Счёт — безусловно и до `apply_audit`: отметки `audit` живут в манифесте постоянно
+    # (не только на прогонах с новыми вердиктами), а `apply_audit` ниже выкидывает строки
+    # с `drop:*` из манифеста — счёт после него навсегда давал бы `audited_dirty == 0`.
+    audited_total, audited_dirty = counts_with_verdicts(строки, вердикты)
+    if вердикты:
         # След применения — до `apply_audit`: после него строки с `drop:*` в манифесте уже
         # нет, и записывать в журнал будет нечего, кроме имени файла.
         append_applied(

@@ -317,6 +317,27 @@ def audit_counts(rows: Sequence[HarvestRow]) -> tuple[int, int]:
     return total, dirty
 
 
+def counts_with_verdicts(
+    rows: Sequence[HarvestRow], verdicts: Mapping[str, str]
+) -> tuple[int, int]:
+    """`audit_counts` с новыми вердиктами, наложенными поверх колонки `audit` манифеста.
+
+    Считает безусловно, а не только когда `verdicts` непусты: отметка аудита — свойство
+    манифеста, накопленное за все прошлые прогоны, а не самого текущего запуска. После
+    усечения очереди (задача 14) пустой файл вердиктов — штатное состояние между
+    прогонами `--audit`, а не признак того, что аудита не было; строка `drop:plate`,
+    поставленная человеком когда-то раньше, обязана попасть в счёт и сегодня.
+
+    Наложение идёт ДО `apply_audit`: тот выкидывает из манифеста все строки с `drop:*`, и
+    счёт после него навсегда получал бы `audited_dirty == 0` — ровно та тишина, из-за
+    которой гейт H3 не сработал бы никогда на рукописной отметке `drop:plate`.
+    """
+    с_вердиктами = [
+        replace(строка, audit=verdicts.get(строка.file, строка.audit)) for строка in rows
+    ]
+    return audit_counts(с_вердиктами)
+
+
 def required_audit_files(rows: Sequence[HarvestRow], seed: int = 0) -> set[str]:
     """Какие `file` обязаны быть в аудите по протоколу §14."""
     надо: set[str] = set()

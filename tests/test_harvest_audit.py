@@ -11,6 +11,7 @@ from pipeline.harvest.audit import (
     apply_audit,
     audit_counts,
     audit_gap,
+    counts_with_verdicts,
     demote_over_human,
     describe_applied,
     load_applied,
@@ -126,6 +127,30 @@ def test_счётчики_h3_считают_dirty_до_удаления() -> Non
     total, dirty = audit_counts(строки)
     assert total == 4
     assert dirty == 2, "drop:wrong_model — не нарушение приватности, в dirty не идёт"
+
+
+def test_числа_аудита_считаются_и_без_новых_вердиктов() -> None:
+    """Отметки живут в манифесте постоянно; пустой файл вердиктов — штатное состояние
+    после усечения очереди, и оно не повод отчитаться нулём."""
+    строки = [_строка("a.jpg", audit="ok"), _строка("b.jpg", audit="drop:plate")]
+
+    assert counts_with_verdicts(строки, {}) == (2, 1)
+
+
+def test_новые_вердикты_накладываются_поверх_манифеста() -> None:
+    строки = [_строка("a.jpg", audit=""), _строка("b.jpg", audit="ok")]
+
+    assert counts_with_verdicts(строки, {"a.jpg": "drop:face"}) == (2, 1)
+
+
+def test_грязные_считаются_до_удаления() -> None:
+    """`apply_audit` выкидывает `drop:*`, поэтому считать надо раньше него — иначе
+    `audited_dirty` всегда ноль, и гейт H3 не сработает никогда."""
+    строки = [_строка("a.jpg", audit="")]
+
+    всего, грязных = counts_with_verdicts(строки, {"a.jpg": "drop:plate"})
+
+    assert (всего, грязных) == (1, 1)
 
 
 def test_обязательный_охват_аудита() -> None:
