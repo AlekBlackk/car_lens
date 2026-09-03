@@ -1,0 +1,123 @@
+import csv
+from dataclasses import replace
+from pathlib import Path
+
+import numpy as np
+
+from pipeline.crop import Detection
+from scripts.measure_redaction import (
+    MEASURE_COLUMNS,
+    ЯЧЕЙКА_H,
+    ЯЧЕЙКА_W,
+    Остаток,
+    записать_замер,
+    измерить_кадр,
+    корзина,
+    листы,
+    ячейка,
+)
+
+
+class Список:
+    def __init__(self, боксы: list[list[Detection]]) -> None:
+        self.боксы = list(боксы)
+
+    def detect(self, image: np.ndarray) -> list[Detection]:
+        return self.боксы.pop(0) if self.боксы else []
+
+
+def _остаток(aspect: float, overlap: float) -> Остаток:
+    return Остаток(
+        source_item_id="1",
+        class_id="lifan__x60",
+        sha256="ab",
+        x=0,
+        y=0,
+        w=int(100 * aspect),
+        h=100,
+        conf=0.5,
+        aspect=aspect,
+        overlap=overlap,
+        filled_count=1,
+    )
+
+
+def test_корзина_A_когда_остаток_под_заливкой() -> None:  # noqa: N802
+    assert корзина(_остаток(0.5, 0.9), aspect_min=1.0, overlap_min=0.5) == "A"
+
+
+def test_корзина_B_когда_форма_невозможна_а_заливки_нет() -> None:  # noqa: N802
+    assert корзина(_остаток(0.5, 0.0), aspect_min=1.0, overlap_min=0.5) == "B"
+
+
+def test_корзина_V_когда_не_гасится_ничем() -> None:  # noqa: N802
+    assert корзина(_остаток(4.0, 0.0), aspect_min=1.0, overlap_min=0.5) == "V"
+
+
+def test_измерение_кадра_считает_aspect_и_overlap_по_остатку() -> None:
+    кадр = np.full((300, 600, 3), 200, dtype=np.uint8)
+    номер = Detection(100.0, 100.0, 80.0, 20.0, 0.9, 0)
+    остаток_в_заливке = Detection(100.0, 100.0, 40.0, 20.0, 0.4, 0)
+
+    _, остатки = измерить_кадр(
+        кадр,
+        [],
+        [Список([[номер], [остаток_в_заливке]])],
+        source_item_id="1",
+        class_id="lifan__x60",
+        sha256="ab",
+    )
+
+    assert len(остатки) == 1
+    assert остатки[0].aspect == 2.0
+    assert остатки[0].overlap == 1.0
+    assert остатки[0].filled_count == 1
+
+
+def test_листы_разбиваются_по_сто_ячеек() -> None:
+    ячейки = [np.zeros((120, 160, 3), dtype=np.uint8) for _ in range(101)]
+
+    страницы = листы(ячейки)
+
+    assert len(страницы) == 2
+    assert страницы[0].shape == (1200, 1600, 3)
+
+
+def test_ячейка_берёт_поле_контекста_вокруг_бокса() -> None:
+    кадр = np.full((300, 600, 3), 50, dtype=np.uint8)
+    кадр[100:120, 100:200] = 200
+    # `ячейка` читает только геометрию остатка, поэтому подменяется именно она.
+    остаток = replace(_остаток(5.0, 0.0), x=100, y=100, w=100, h=20)
+
+    плитка = ячейка(кадр, остаток)
+
+    assert плитка.shape == (ЯЧЕЙКА_H, ЯЧЕЙКА_W, 3)
+    assert плитка[60, 80].tolist() == [200, 200, 200], "середина плитки — сам бокс"
+    assert плитка[60, 5].tolist() == [50, 50, 50], "слева от бокса — фон кадра"
+    assert плитка[60, 150].tolist() == [50, 50, 50], "справа от бокса — фон кадра"
+
+
+def test_ячейка_вырожденного_бокса_остаётся_чёрной_плиткой() -> None:
+    """Ветка пустого среза защитная: без теста ревью справедливо назовёт её мёртвой."""
+    кадр = np.full((300, 600, 3), 200, dtype=np.uint8)
+    нулевой = _остаток(0.0, 0.0)  # ширина 0 на левой границе кадра — срез пустой
+
+    плитка = ячейка(кадр, нулевой)
+
+    assert плитка.shape == (ЯЧЕЙКА_H, ЯЧЕЙКА_W, 3)
+    assert not плитка[20:100].any(), "пустой срез даёт чёрную плитку, а не падение"
+
+
+def test_csv_замера_читается_обратно_целиком(tmp_path: Path) -> None:
+    """Формат держится тестом, а не докстрингом: этот файл читает задача 5."""
+    путь = tmp_path / "measure" / "reject_measure.csv"
+    остаток = _остаток(2.0, 0.75)
+
+    записать_замер(путь, [остаток])
+
+    строки = путь.read_text(encoding="utf-8").splitlines()
+    assert строки[0].split(",") == list(MEASURE_COLUMNS)
+    assert len(строки) == 2, "пустых строк между записями нет"
+    assert list(csv.DictReader(строки)) == [
+        {имя: str(getattr(остаток, имя)) for имя in MEASURE_COLUMNS}
+    ]
