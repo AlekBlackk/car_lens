@@ -2,20 +2,39 @@ import csv
 from dataclasses import replace
 from pathlib import Path
 
+import cv2
 import numpy as np
+import pytest
 
 from pipeline.crop import Detection
 from scripts.measure_redaction import (
-    MEASURE_COLUMNS,
     ЯЧЕЙКА_H,
     ЯЧЕЙКА_W,
     Остаток,
     записать_замер,
+    записать_лист,
     измерить_кадр,
     корзина,
     листы,
     ячейка,
 )
+
+# Контракт CSV для задачи 5: имена и порядок захардкожены нарочно. Сравнение шапки с
+# `MEASURE_COLUMNS` было бы самореферентным — переименование поля `Остаток` уехало бы
+# в обе стороны сравнения, тест остался бы зелёным, а читатель CSV сломался.
+КОЛОНКИ_ЗАМЕРА = [
+    "source_item_id",
+    "class_id",
+    "sha256",
+    "x",
+    "y",
+    "w",
+    "h",
+    "conf",
+    "aspect",
+    "overlap",
+    "filled_count",
+]
 
 
 class Список:
@@ -52,6 +71,15 @@ def test_корзина_B_когда_форма_невозможна_а_зали
 
 def test_корзина_V_когда_не_гасится_ничем() -> None:  # noqa: N802
     assert корзина(_остаток(4.0, 0.0), aspect_min=1.0, overlap_min=0.5) == "V"
+
+
+def test_корзина_A_на_ровной_границе_перекрытия() -> None:  # noqa: N802
+    """Ровные границы — это и есть выбираемые пороги: потолки Global Constraints."""
+    assert корзина(_остаток(4.0, 0.5), aspect_min=1.0, overlap_min=0.5) == "A"
+
+
+def test_корзина_V_на_ровной_границе_формы() -> None:  # noqa: N802
+    assert корзина(_остаток(1.0, 0.0), aspect_min=1.0, overlap_min=0.5) == "V"
 
 
 def test_измерение_кадра_считает_aspect_и_overlap_по_остатку() -> None:
@@ -116,8 +144,30 @@ def test_csv_замера_читается_обратно_целиком(tmp_pat
     записать_замер(путь, [остаток])
 
     строки = путь.read_text(encoding="utf-8").splitlines()
-    assert строки[0].split(",") == list(MEASURE_COLUMNS)
+    assert строки[0].split(",") == КОЛОНКИ_ЗАМЕРА
     assert len(строки) == 2, "пустых строк между записями нет"
     assert list(csv.DictReader(строки)) == [
-        {имя: str(getattr(остаток, имя)) for имя in MEASURE_COLUMNS}
+        {имя: str(getattr(остаток, имя)) for имя in КОЛОНКИ_ЗАМЕРА}
     ]
+
+
+def test_подпись_ячейки_обведена_чёрным() -> None:
+    """На светлой ячейке одна зелёная подпись теряется, а по ней ячейка ищется в CSV."""
+    кадр = np.full((300, 600, 3), 255, dtype=np.uint8)
+
+    полоса = ячейка(кадр, _остаток(2.0, 0.5))[:20]
+
+    assert (полоса == (0, 0, 0)).all(axis=2).any(), "обводка подписи чёрная"
+    assert (полоса == (0, 255, 0)).all(axis=2).any(), "поверх обводки — зелёный текст"
+
+
+def test_лист_пишется_через_imencode_когда_imwrite_отказал(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`imwrite` отдаёт False на не-ASCII пути молча — страница обязана лечь всё равно."""
+    monkeypatch.setattr(cv2, "imwrite", lambda *_: False)
+    путь = tmp_path / "sheet_A_01.png"
+
+    записать_лист(путь, np.zeros((ЯЧЕЙКА_H, ЯЧЕЙКА_W, 3), dtype=np.uint8))
+
+    assert путь.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
