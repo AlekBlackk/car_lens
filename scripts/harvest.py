@@ -11,8 +11,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
-from collections.abc import Sequence
+import sys
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -40,7 +43,7 @@ from pipeline.harvest.backends import (
     build_text_matrix,
 )
 from pipeline.harvest.categories import ExpandResult, expand
-from pipeline.harvest.commons import CommonsSource
+from pipeline.harvest.commons import CommonsSource, Transport
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.detectors import (
     DEFAULT_DETECTORS_MANIFEST,
@@ -48,6 +51,7 @@ from pipeline.harvest.detectors import (
     verify_weights,
 )
 from pipeline.harvest.filters import NEGATIVE_PROMPTS
+from pipeline.harvest.flickr import FlickrSource
 from pipeline.harvest.gate import check_gate, render_report
 from pipeline.harvest.manifest import (
     DEFAULT_MANIFEST_PATH,
@@ -58,11 +62,13 @@ from pipeline.harvest.notices import DEFAULT_NOTICES_PATH, render_notices
 from pipeline.harvest.queries import (
     DEFAULT_LATIN_NAMES_PATH,
     DEFAULT_QUERIES_PATH,
+    ClassQueries,
     claimed_categories,
     load_latin_names,
     load_queries,
 )
 from pipeline.harvest.run import ClassOutcome, HarvestDeps, harvest_class
+from pipeline.harvest.sources import HarvestSource
 from pipeline.harvest.state import load_state, save_state
 from pipeline.harvest.tiling import TiledDetector
 from pipeline.paths import harvest_dir
@@ -76,12 +82,76 @@ DEDUP_VERDICTS_FILENAME = "verdicts.dedup.csv"
 EXPAND_LOG_FILENAME = "expand_log.csv"
 
 
+# N818 просит суффикс `Error`; по-русски вышло бы `ОтсутствуетКлючError`. Имя пришло из
+# интерфейса задачи (план C2, задача 4) и живёт в тесте, поэтому глушится правило, а не имя.
+class ОтсутствуетКлюч(RuntimeError):  # noqa: N818
+    """Ключ Flickr не задан: прогон обязан встать до первого сетевого запроса."""
+
+
+def build_source(
+    name: str, transport: Transport, environ: Mapping[str, str], allow_sa: bool
+) -> HarvestSource:
+    """Источник по имени. Ключ Flickr — только из окружения (§11 дизайна C2).
+
+    Окружение приходит параметром, а не читается из `os.environ` внутри: иначе тест на
+    отсутствие ключа зависел бы от машины, на которой запущен.
+
+    Ключ не берётся из аргумента командной строки сознательно: контакт мы обязаны
+    раскрывать по §3.2 SPEC, ключ обязаны не раскрывать, и общий механизм смешал бы два
+    противоположных требования. Аргумент осел бы в истории шелла и в `ps`.
+    """
+    if name == "commons":
+        return CommonsSource(transport)
+    ключ = environ.get("FLICKR_API_KEY", "").strip()
+    if not ключ:
+        raise ОтсутствуетКлюч("FLICKR_API_KEY не задан в окружении")
+    return FlickrSource(transport, ключ, allow_sa=allow_sa)
+
+
+def source_queries(table: dict[str, ClassQueries], source_name: str) -> dict[str, ClassQueries]:
+    """Таблица запросов под выбранный источник: у Flickr свои строки и никаких категорий.
+
+    Подмена здесь, а не в `run.py`: цепочка решений прогона имён источников не знает
+    (§5 дизайна C2), а `_запросы` (`run.py:438`) читает ровно `categories` и `terms`. Без
+    подмены `flickr_terms` не читал бы никто, и прогон Flickr спрашивал бы у Flickr
+    коммонсовские `terms`.
+
+    Категории обнуляются, потому что у Flickr их нет вовсе. Оставленные, они стоили бы
+    обхода дерева Commons по сети (`_категории`, `run.py:362`) ради запросов, которые
+    `FlickrSource._параметры` всё равно отвергает. `depth`, `include` и `exclude` вместе с
+    ними становятся недостижимы — их читает только обход.
+
+    Класс без `flickr_terms` получает пустой набор запросов и просмотренный ноль. Это
+    заявленное значение поля («из Flickr этот класс не добирается», `queries.py:38`), а не
+    потеря.
+
+    Оговорка про состояние: ключ токена пагинации — `f"{class_id}|{basis_of(запрос)}"`
+    (`run.py:311`), и источник в нём не назван. `"Chevrolet Lanos"` стоит и в `terms`, и в
+    `flickr_terms` одного класса, поэтому номер страницы Flickr ложится под коммонсовский
+    ключ. Ущерб ограничен смещением, а не падением: будущий прогон Commons прочтёт `page=2`
+    как `gsroffset=2`. Правка ключа тронула бы запрещённую §5 цепочку решений и обнулила бы
+    живые коммонсовские токены, поэтому здесь оговорка, а не лечение.
+    """
+    if source_name != "flickr":
+        return table
+    return {
+        class_id: replace(запросы, categories=(), terms=запросы.flickr_terms)
+        for class_id, запросы in table.items()
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Разбор аргументов. Контакт обязателен, остальное имеет умолчания."""
     парсер = argparse.ArgumentParser(description="Харвест открытого провенанса (Р-11)")
     парсер.add_argument("--contact", required=True, help="контакт для User-Agent (§3.2)")
     парсер.add_argument("--classes", nargs="*", default=None, help="подмножество класcов")
     парсер.add_argument("--allow-sa", action="store_true", help="разрешить Tier 3 CC-BY-SA")
+    парсер.add_argument(
+        "--source",
+        choices=("commons", "flickr"),
+        default="commons",
+        help="хранилище кандидатов; для flickr нужен FLICKR_API_KEY в окружении",
+    )
     парсер.add_argument("--clip-model", default="ViT-B-32", help="архитектура open_clip")
     парсер.add_argument("--clip-weights", default="laion2b_s34b_b79k", help="веса open_clip")
     парсер.add_argument(
@@ -118,12 +188,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         # (пункт 8 плана C1). `None` означает «чисел прогона нет», и гейт про это знает.
         итоги = None
     else:
+        # Один транспорт на источник и на обход: контактный User-Agent (§3.2) и интервал
+        # между запросами (≤ 1 запрос / 2 с на домен, там же) задаются в одном месте.
+        # Пейсер живёт в транспорте и потому общий для поиска, скачивания и обхода: два
+        # прежних счётчика на вызывающих не срабатывали — у `search` его не было вовсе, а
+        # у `expand` он обнулялся на каждом вызове.
+        # Транспорт и источник стоят первыми в ветке: отказ по ключу Flickr обязан прийти
+        # до первого сетевого байта (§11 дизайна C2), а `create_model_and_transforms` ниже
+        # на холодном кеше тянет веса по сети.
+        транспорт = UrllibTransport(аргументы.contact)
+        try:
+            источник = build_source(аргументы.source, транспорт, os.environ, аргументы.allow_sa)
+        except ОтсутствуетКлюч as ошибка:
+            print(f"{ошибка}: экспортируйте ключ и повторите", file=sys.stderr)
+            return 2
+
         import open_clip  # type: ignore[import-untyped]
 
         пины = load_detectors_manifest(DEFAULT_DETECTORS_MANIFEST)
         verify_weights(пины, корень / "models")
 
-        запросы = load_queries(DEFAULT_QUERIES_PATH)
+        запросы = source_queries(load_queries(DEFAULT_QUERIES_PATH), аргументы.source)
         имена = load_latin_names(DEFAULT_LATIN_NAMES_PATH)
         иглы = load_alias_table(DEFAULT_ALIASES_PATH)
         без_игл = [c for c in (аргументы.classes or порядок) if c not in иглы]
@@ -152,12 +237,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             ),
         )
-        # Один транспорт на источник и на обход: контактный User-Agent (§3.2) и интервал
-        # между запросами (≤ 1 запрос / 2 с на домен, там же) задаются в одном месте.
-        # Пейсер живёт в транспорте и потому общий для поиска, скачивания и обхода: два
-        # прежних счётчика на вызывающих не срабатывали — у `search` его не было вовсе, а
-        # у `expand` он обнулялся на каждом вызове.
-        транспорт = UrllibTransport(аргументы.contact)
         # Один раз на весь прогон: карта не меняется между классами, а строить её заново на
         # каждый вызов `развернуть` значило бы пересчитывать одно и то же 150 раз.
         заявлено = claimed_categories(запросы)
@@ -173,7 +252,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return expand(транспорт, категория, глубина, include, exclude, admit=допустить)
 
         зависимости = HarvestDeps(
-            source=CommonsSource(транспорт),
+            source=источник,
             vehicle_detector=YoloDetector(),
             plate_detectors=plate_detectors,
             face_detector=YuNetFaceDetector(корень / "models" / "face.onnx"),
