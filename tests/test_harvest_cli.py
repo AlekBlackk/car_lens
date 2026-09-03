@@ -6,23 +6,28 @@
 Все пути в теле `main` — модульные константы, поэтому тест подменяет их на `tmp_path`:
 иначе он переписал бы настоящий манифест провенанса.
 
-Вторая половина файла — задача C2: `build_source` и `source_queries` проверяются прямо,
-без `main`. И ключ Flickr, и подмена терминов решаются до первого запроса, поэтому тесту
-не нужны ни сеть, ни подставная выдача — транспорт здесь только доказывает, что его не
-трогали.
+Вторая половина файла — задача C2: `build_source`, `source_queries`, умолчание `--source` и
+отказной путь `main` по незаданному ключу. Ни сети, ни весов и здесь не нужно: отказ по
+ключу стоит выше всего дорогого, а состав запроса проверяется на подставном транспорте —
+у одного теста он доказывает, что до сети дело не дошло вовсе, у другого записывает
+параметры единственного вызова.
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
 from pipeline.harvest.audit import load_applied
 from pipeline.harvest.commons import HttpResponse
+from pipeline.harvest.flickr import requested_licenses
 from pipeline.harvest.manifest import HarvestRow, load_manifest, write_manifest
 from pipeline.harvest.queries import DEFAULT_QUERIES_PATH, ClassQueries, load_queries
-from scripts.harvest import ОтсутствуетКлюч, build_source, main, source_queries
+from pipeline.harvest.sources import SourceQuery
+from scripts.harvest import ОтсутствуетКлюч, build_parser, build_source, main, source_queries
 
 
 def _строка(file: str, class_id: str = "kia__rio", audit: str = "") -> HarvestRow:
@@ -153,6 +158,40 @@ def test_без_ключа_flickr_падает_до_сети(окружение:
         build_source("flickr", ПустойТранспорт(), окружение, allow_sa=False)
 
 
+class ЗаписанныйТранспорт:
+    """Подставной транспорт: отдаёт заготовленный ответ и записывает параметры запроса.
+
+    Своя копия, а не импорт из `tests/test_harvest_flickr.py`: тесты не берут друг у друга
+    внутреннюю оснастку, иначе правка фикстуры чужого файла роняет этот.
+    """
+
+    def __init__(self, ответ: HttpResponse) -> None:
+        self.ответ = ответ
+        self.вызовы: list[dict[str, str]] = []
+
+    def get(self, url: str, params: Mapping[str, str]) -> HttpResponse:
+        self.вызовы.append(dict(params))
+        return self.ответ
+
+
+def test_ключ_и_allow_sa_доезжают_до_источника() -> None:
+    """Жёсткий `allow_sa=False` вместо флага прогона потерял бы все CC BY-SA молча.
+
+    Проверяется состав запроса, а не приватные атрибуты источника (приём
+    `tests/test_harvest_flickr.py:114-119`). Без флага код `5` у API не запрашивается вовсе
+    (`flickr.py:58`), и потеря выглядела бы как «Flickr не даёт SA» — то есть как вывод §13 о
+    потолке открытых источников, сделанный по нашему собственному дефекту.
+    """
+    выдача = {"stat": "ok", "photos": {"page": 1, "pages": 1, "photo": []}}
+    транспорт = ЗаписанныйТранспорт(HttpResponse(200, json.dumps(выдача).encode("utf-8")))
+
+    источник = build_source("flickr", транспорт, {"FLICKR_API_KEY": "КЛЮЧ-42"}, allow_sa=True)
+    источник.search(SourceQuery("chevrolet__lanos", None, "Ланос", 2, None))
+
+    assert транспорт.вызовы[0]["api_key"] == "КЛЮЧ-42"
+    assert транспорт.вызовы[0]["license"] == requested_licenses(allow_sa=True)
+
+
 def _таблица(flickr_terms: tuple[str, ...]) -> dict[str, ClassQueries]:
     """Таблица из одного класса: подмена решается на класс, а не на таблицу целиком."""
     return {
@@ -195,3 +234,35 @@ def test_живой_каталог_даёт_запросы_обоим_класс
 
     assert итог["chevrolet__lanos"].terms, "класс задачи остался без фликровских запросов"
     assert итог["lifan__x60"].terms, "класс задачи остался без фликровских запросов"
+
+
+def test_умолчание_источника_коммонс() -> None:
+    """Прогон без флага обязан идти в Commons: §11 открывает внешнего донора только явно.
+
+    Мутация `default="flickr"` — или снятое `default=` вовсе, тогда в фликровскую ветку
+    уводит `None != "commons"` — иначе проходит весь набор молча. Цена: обычный
+    `--contact X` на машине с экспортированным `FLICKR_API_KEY` ушёл бы во Flickr по всем
+    150 классам с обнулёнными категориями и перезаписал бы отчёт нулями.
+    """
+    базовые = ["--contact", "m@e.com"]
+
+    assert build_parser().parse_args(базовые).source == "commons"
+    assert build_parser().parse_args([*базовые, "--source", "flickr"]).source == "flickr"
+
+
+def test_flickr_без_ключа_даёт_код_2(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Не дубль теста про `build_source`: тот проверяет функцию, этот — порядок внутри `main`.
+
+    Держит четыре вещи разом: флаг существует, `аргументы.source` доезжает до `build_source`,
+    `except` отдаёт код 2 — и отказ стоит выше `import open_clip`. Последнее и есть главное:
+    в CI установлена только группа `dev`, а `open_clip` живёт в `train`, поэтому опущенный
+    ниже импорта fail-fast уронит этот тест `ModuleNotFoundError`, а не расхождением кода
+    возврата. На машине разработчика, где группа `train` стоит, тот же порядок ловится только
+    замером времени, то есть руками — здесь его держит тест.
+
+    Фикстура `стенд` не нужна: до `return 2` `main` читает каталог и путь данных, в сеть не
+    ходит и на диск не пишет. Ключ снимается из окружения, чтобы тест не зависел от машины.
+    """
+    monkeypatch.delenv("FLICKR_API_KEY", raising=False)
+
+    assert main(["--contact", "m@e.com", "--source", "flickr"]) == 2
