@@ -5,6 +5,7 @@ from pipeline.harvest.redact import (
     MIN_FACE_SIDE_PX,
     MIN_PLATE_W_PX,
     blur_kernel,
+    fill_overlap,
     redact_frame,
     redact_plates,
     vehicle_search_box,
@@ -156,3 +157,29 @@ def test_стадия_номеров_отдаёт_остатки_второго_
     стадия = redact_plates(кадр, [], [СписокДетектор([[номер], [мусор]])])
 
     assert стадия.residuals == (мусор,)
+
+
+def test_перекрытие_ноль_когда_заливки_нет() -> None:
+    бокс = Detection(10.0, 10.0, 40.0, 20.0, 0.9, 0)
+    assert fill_overlap(бокс, []) == 0.0
+
+
+def test_перекрытие_единица_когда_бокс_целиком_в_заливке() -> None:
+    бокс = Detection(10.0, 10.0, 40.0, 20.0, 0.9, 0)
+    assert fill_overlap(бокс, [(0, 0, 100, 100)]) == 1.0
+
+
+def test_перекрытие_половина_когда_накрыта_половина_бокса() -> None:
+    бокс = Detection(10.0, 10.0, 40.0, 20.0, 0.9, 0)
+    assert fill_overlap(бокс, [(10, 10, 30, 30)]) == 0.5
+
+
+def test_перекрытие_считается_по_объединению_а_не_суммой() -> None:
+    бокс = Detection(0.0, 0.0, 40.0, 20.0, 0.9, 0)
+    два_пересекающихся = [(0, 0, 30, 20), (10, 0, 40, 20)]
+    assert fill_overlap(бокс, два_пересекающихся) == 1.0
+
+
+def test_перекрытие_ноль_на_вырожденном_боксе() -> None:
+    бокс = Detection(10.0, 10.0, 0.0, 20.0, 0.9, 0)
+    assert fill_overlap(бокс, [(0, 0, 100, 100)]) == 0.0

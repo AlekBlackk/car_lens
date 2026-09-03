@@ -159,6 +159,29 @@ def redact_plates(
     return PlateStage(len(номера), tuple(залито), tuple(остатки))
 
 
+def fill_overlap(box: Detection, filled: Sequence[tuple[int, int, int, int]]) -> float:
+    """Доля площади бокса, накрытая объединением залитых срезов.
+
+    Объединение считается растеризацией в булеву маску размером с сам бокс: площадь
+    остатка мала, стоимость незаметна, а формула включений-исключений на произвольном
+    числе пересекающихся прямоугольников — источник тихих ошибок ровно в ту сторону,
+    в которую ошибаться нельзя (перекрытие больше настоящего гасит живой остаток).
+    """
+    x0, y0 = int(box.x), int(box.y)
+    x1, y1 = int(box.x + box.w), int(box.y + box.h)
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    маска = np.zeros((y1 - y0, x1 - x0), dtype=bool)
+    for зал_x0, зал_y0, зал_x1, зал_y1 in filled:
+        общий_x0 = max(x0, зал_x0)
+        общий_y0 = max(y0, зал_y0)
+        общий_x1 = min(x1, зал_x1)
+        общий_y1 = min(y1, зал_y1)
+        if общий_x1 > общий_x0 and общий_y1 > общий_y0:
+            маска[общий_y0 - y0 : общий_y1 - y0, общий_x0 - x0 : общий_x1 - x0] = True
+    return float(маска.mean())
+
+
 def redact_frame(
     image: np.ndarray,
     vehicle_boxes: Sequence[Detection],
