@@ -6,6 +6,7 @@ from pipeline.harvest.redact import (
     MIN_PLATE_W_PX,
     blur_kernel,
     redact_frame,
+    redact_plates,
     vehicle_search_box,
 )
 
@@ -133,3 +134,25 @@ def test_номер_вне_боксов_машин_но_в_кадре_ловит
     assert итог.ok
     assert итог.plates == 1
     assert int(итог.image[25, 520].max()) == 0
+
+
+def test_стадия_номеров_отдаёт_срез_заливки_с_учётом_запаса() -> None:
+    кадр = np.full((200, 400, 3), 200, dtype=np.uint8)
+    номер = Detection(100.0, 80.0, 60.0, 20.0, 0.9, 0)
+
+    стадия = redact_plates(кадр, [], [СписокДетектор([[номер], []])])
+
+    assert стадия.found == 1
+    assert стадия.filled == ((91, 77, 169, 103),)
+    assert стадия.residuals == ()
+    assert int(кадр[80, 100].max()) == 0
+
+
+def test_стадия_номеров_отдаёт_остатки_второго_прохода_без_фильтрации() -> None:
+    кадр = np.full((200, 400, 3), 200, dtype=np.uint8)
+    номер = Detection(100.0, 80.0, 60.0, 20.0, 0.9, 0)
+    мусор = Detection(10.0, 10.0, 40.0, 90.0, 0.3, 0)
+
+    стадия = redact_plates(кадр, [], [СписокДетектор([[номер], [мусор]])])
+
+    assert стадия.residuals == (мусор,)

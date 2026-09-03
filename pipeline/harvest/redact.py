@@ -42,6 +42,20 @@ class RedactionResult:
     ok: bool
 
 
+@dataclass(frozen=True, slots=True)
+class PlateStage:
+    """Итог стадии номеров: что залито и что нашёл поверх этого повторный проход.
+
+    `found` — сколько боксов нашёл первый проход, `filled` — сколько срезов он успел
+    нарисовать. Числа расходятся на вырожденных боксах, и в манифест идёт `found`:
+    колонку `plates` читает аудит, и её смысл — «сколько номеров было в кадре».
+    """
+
+    found: int
+    filled: tuple[tuple[int, int, int, int], ...]
+    residuals: tuple[Detection, ...]
+
+
 def blur_kernel(bbox_w: int) -> int:
     """Нечётный радиус размытия, пропорциональный ширине бокса."""
     return max(MIN_KERNEL, (bbox_w // 3) | 1)
@@ -84,8 +98,13 @@ def _детект_номера(
     return nms_merge(_крупные(найдено, MIN_PLATE_W_PX, 1))
 
 
-def _залить_номер(image: np.ndarray, box: Detection) -> None:
-    """Сплошная заливка нулём, расширенная на PLATE_FILL_PAD."""
+def _залить_номер(image: np.ndarray, box: Detection) -> tuple[int, int, int, int] | None:
+    """Сплошная заливка нулём, расширенная на PLATE_FILL_PAD.
+
+    Возвращает нарисованный срез, чтобы повторная проверка могла отличить собственную
+    заливку от пропущенного номера. `None` — бокс выродился после обрезки границами
+    кадра и заливки не было.
+    """
     высота, ширина = image.shape[:2]
     dx = box.w * PLATE_FILL_PAD
     dy = box.h * PLATE_FILL_PAD
@@ -93,8 +112,10 @@ def _залить_номер(image: np.ndarray, box: Detection) -> None:
     y0 = max(0, int(box.y - dy))
     x1 = min(ширина, int(box.x + box.w + dx))
     y1 = min(высота, int(box.y + box.h + dy))
-    if x1 > x0 and y1 > y0:
-        image[y0:y1, x0:x1] = 0
+    if x1 <= x0 or y1 <= y0:
+        return None
+    image[y0:y1, x0:x1] = 0
+    return x0, y0, x1, y1
 
 
 def _замыть_лицо(image: np.ndarray, box: Detection, заливкой: bool) -> None:
@@ -113,6 +134,31 @@ def _замыть_лицо(image: np.ndarray, box: Detection, заливкой: 
     image[y0:y1, x0:x1] = cv2.GaussianBlur(image[y0:y1, x0:x1], (ядро, ядро), 0)
 
 
+def redact_plates(
+    image: np.ndarray,
+    vehicle_boxes: Sequence[Detection],
+    detectors: Sequence[Detector],
+) -> PlateStage:
+    """Залить номера на месте и вернуть срезы заливки с остатками второго прохода.
+
+    Стадия вынесена из `redact_frame` публичной функцией не ради красоты: порог
+    значимости остатка обязан считаться тем же кодом, который потом по нему решает.
+    Офлайн-замер, повторяющий эту логику своими руками, дал бы правдоподобное неверное
+    число — проект уже платил за такую копию.
+
+    Остатки возвращаются без фильтрации: решает `significant_residuals`, а замеру нужны
+    все, вместе с теми, которые правило погасит.
+    """
+    номера = _детект_номера(image, vehicle_boxes, detectors)
+    залито: list[tuple[int, int, int, int]] = []
+    for бокс in номера:
+        срез = _залить_номер(image, бокс)
+        if срез is not None:
+            залито.append(срез)
+    остатки = _детект_номера(image, vehicle_boxes, detectors)
+    return PlateStage(len(номера), tuple(залито), tuple(остатки))
+
+
 def redact_frame(
     image: np.ndarray,
     vehicle_boxes: Sequence[Detection],
@@ -122,11 +168,9 @@ def redact_frame(
     """Очистить весь кадр: номера — заливкой, лица — лестницей, с повторной проверкой."""
     рабочая = image.copy()
 
-    номера = _детект_номера(рабочая, vehicle_boxes, plate_detectors)
-    for бокс in номера:
-        _залить_номер(рабочая, бокс)
-    if _детект_номера(рабочая, vehicle_boxes, plate_detectors):
-        return RedactionResult(рабочая, len(номера), 0, False)
+    номера = redact_plates(рабочая, vehicle_boxes, plate_detectors)
+    if номера.residuals:
+        return RedactionResult(рабочая, номера.found, 0, False)
 
     лица = _крупные(face_detector.detect(рабочая), MIN_FACE_SIDE_PX, MIN_FACE_SIDE_PX)
     лица_число = len(лица)
@@ -137,4 +181,4 @@ def redact_frame(
             _замыть_лицо(рабочая, бокс, заливкой)
         лица = _крупные(face_detector.detect(рабочая), MIN_FACE_SIDE_PX, MIN_FACE_SIDE_PX)
     ok = not лица
-    return RedactionResult(рабочая, len(номера), лица_число, ok)
+    return RedactionResult(рабочая, номера.found, лица_число, ok)
