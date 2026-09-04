@@ -1,7 +1,24 @@
 # tests/test_harvest_rejects.py
 from pathlib import Path
 
-from pipeline.harvest.rejects import Reject, append_reject_row, load_rejects, reason_counts
+from pipeline.harvest.rejects import (
+    Reject,
+    append_reject_row,
+    load_rejects,
+    reason_counts,
+    unique_by_reason,
+)
+
+
+def _отказ(pageid: str, reason: str) -> Reject:
+    return Reject(
+        class_id="lifan__x60",
+        basis="category:Lifan X60",
+        source="commons",
+        source_item_id=pageid,
+        reason=reason,
+        checked="2026-09-01",
+    )
 
 
 def test_журнал_дописывается_с_шапкой(tmp_path: Path) -> None:
@@ -82,3 +99,14 @@ def test_запись_в_обрезанный_журнал_не_теряет_с�
 def test_отсутствующий_журнал_читается_пустым(tmp_path: Path) -> None:
     """До первого отказа файла нет, и это не ошибка чтения."""
     assert load_rejects(tmp_path / "reject_log.csv") == []
+
+
+def test_unique_by_reason_снимает_повторы_и_держит_порядок_первой_встречи() -> None:
+    журнал = [
+        _отказ("111", "redaction_failed"),
+        _отказ("222", "multi_car"),
+        _отказ("111", "redaction_failed"),
+        _отказ("333", "redaction_failed"),
+    ]
+    отобранные = unique_by_reason(журнал, "redaction_failed")
+    assert [отказ.source_item_id for отказ in отобранные] == ["111", "333"]

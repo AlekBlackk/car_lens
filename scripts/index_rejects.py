@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from pipeline.harvest.commons import API_URL, Transport, request_with_backoff
-from pipeline.harvest.rejects import Reject, load_rejects
+from pipeline.harvest.rejects import Reject, load_rejects, unique_by_reason
 from pipeline.paths import harvest_dir
 
 BATCH = 50
@@ -38,22 +38,6 @@ class IndexRow:
 
 
 INDEX_COLUMNS = tuple(поле.name for поле in fields(IndexRow))
-
-
-def отобрать_кандидатов(rejects: Sequence[Reject], reason: str) -> list[Reject]:
-    """Уникальные кандидаты одной причины, в порядке первой встречи.
-
-    Журнал накопительный: один и тот же кандидат отбит в каждом прогоне заново, и
-    без снятия повторов замер прогнал бы половину кадров дважды.
-    """
-    видели: set[str] = set()
-    отобранные: list[Reject] = []
-    for отказ in rejects:
-        if отказ.reason != reason or отказ.source_item_id in видели:
-            continue
-        видели.add(отказ.source_item_id)
-        отобранные.append(отказ)
-    return отобранные
 
 
 def карта_кэша(root: Path, source: str) -> dict[str, str]:
@@ -140,7 +124,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     аргументы = build_parser().parse_args(argv)
     корень = аргументы.data_root if аргументы.data_root is not None else harvest_dir()
 
-    кандидаты = отобрать_кандидатов(load_rejects(корень / "reject_log.csv"), аргументы.reason)
+    кандидаты = unique_by_reason(load_rejects(корень / "reject_log.csv"), аргументы.reason)
     print(f"кандидатов с причиной {аргументы.reason}: {len(кандидаты)}")
 
     кэш = карта_кэша(корень, аргументы.source)

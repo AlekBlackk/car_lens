@@ -6,13 +6,7 @@ from pathlib import Path
 from pipeline.harvest.cache import cache_path
 from pipeline.harvest.commons import HttpResponse
 from pipeline.harvest.rejects import Reject
-from scripts.index_rejects import (
-    IndexRow,
-    build_index,
-    запросить_sha1,
-    карта_кэша,
-    отобрать_кандидатов,
-)
+from scripts.index_rejects import IndexRow, build_index, запросить_sha1, карта_кэша
 
 
 class Транспорт:
@@ -36,14 +30,6 @@ def _отказ(pageid: str, reason: str = "redaction_failed") -> Reject:
         reason=reason,
         checked="2026-09-01",
     )
-
-
-def test_отбираются_только_уникальные_кандидаты_нужной_причины() -> None:
-    журнал = [_отказ("1"), _отказ("1"), _отказ("2"), _отказ("3", "multi_car")]
-
-    отобранные = отобрать_кандидатов(журнал, "redaction_failed")
-
-    assert [отказ.source_item_id for отказ in отобранные] == ["1", "2"]
 
 
 def test_карта_кэша_ключуется_sha1_содержимого(tmp_path: Path) -> None:

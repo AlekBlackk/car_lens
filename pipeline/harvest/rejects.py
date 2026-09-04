@@ -70,3 +70,19 @@ def load_rejects(path: Path) -> list[Reject]:
 def reason_counts(rejects: Sequence[Reject]) -> dict[str, int]:
     """Сколько кандидатов съела каждая причина."""
     return dict(Counter(отказ.reason for отказ in rejects))
+
+
+def unique_by_reason(rejects: Sequence[Reject], reason: str) -> list[Reject]:
+    """Уникальные кандидаты одной причины, в порядке первой встречи.
+
+    Журнал накопительный: один и тот же кандидат отбит в каждом прогоне заново, и без
+    снятия повторов вызывающий прогнал бы половину кадров дважды.
+    """
+    видели: set[str] = set()
+    отобранные: list[Reject] = []
+    for отказ in rejects:
+        if отказ.reason != reason or отказ.source_item_id in видели:
+            continue
+        видели.add(отказ.source_item_id)
+        отобранные.append(отказ)
+    return отобранные
