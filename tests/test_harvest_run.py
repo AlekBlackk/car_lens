@@ -25,7 +25,7 @@ from pipeline.harvest.run import (
     is_crop_over_redacted,
     process_candidate,
 )
-from pipeline.harvest.sources import Candidate, SearchPage, SourceQuery
+from pipeline.harvest.sources import Candidate, HarvestSource, SearchPage, SourceQuery
 from pipeline.harvest.state import ACCEPTED_TARGET, SEEN_BUDGET, HarvestState
 
 
@@ -110,7 +110,7 @@ def _обход_без_сети(
 
 def _зависимости(
     tmp_path: Path,
-    источник: ПодставнойИсточник | None = None,
+    источник: HarvestSource | None = None,
     **правки: object,
 ) -> HarvestDeps:
     машина = Detection(x=100.0, y=100.0, w=700.0, h=500.0, conf=0.9, cls=2)
