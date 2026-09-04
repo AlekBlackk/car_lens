@@ -22,7 +22,7 @@ from pathlib import Path
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
 from pipeline.detectors.yolo import YoloDetector
 from pipeline.harvest.admission import build_admit
-from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, load_alias_table
+from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, AliasTable, load_alias_table
 from pipeline.harvest.audit import (
     DEFAULT_APPLIED_PATH,
     append_applied,
@@ -67,7 +67,7 @@ from pipeline.harvest.queries import (
     load_latin_names,
     load_queries,
 )
-from pipeline.harvest.run import ClassOutcome, HarvestDeps, harvest_class
+from pipeline.harvest.run import CategoryExpander, ClassOutcome, HarvestDeps, harvest_class
 from pipeline.harvest.sources import HarvestSource
 from pipeline.harvest.state import load_state, save_state
 from pipeline.harvest.tiling import TiledDetector
@@ -147,6 +147,78 @@ def source_queries(table: dict[str, ClassQueries], source_name: str) -> dict[str
     }
 
 
+def build_deps(
+    source: HarvestSource,
+    expand_categories: CategoryExpander,
+    *,
+    root: Path,
+    class_order: tuple[str, ...],
+    latin_names: Mapping[str, str],
+    alias_table: AliasTable,
+    manifest_path: Path,
+    clip_model: str,
+    clip_weights: str,
+    allow_sa: bool,
+    checked: str,
+) -> HarvestDeps:
+    """Собрать зависимости прогона: модели, детекторы и пути. Единственное такое место.
+
+    Извлечено из `main`, потому что теми же весами и той же текстовой матрицей обязан считать
+    переприём (`scripts/readmit_rejects.py`). Копия этой сборки разошлась бы с боевой при
+    первой правке модели CLIP — молча, и переприём принимал бы кадры не тем конвейером.
+
+    `import open_clip` остаётся внутри тела: пакет живёт в группе `train`, в `dev` его нет, и
+    импорт на уровне модуля уронил бы обычный `pytest`. `expand_categories` приходит
+    параметром — у боевого прогона это замыкание на транспорт, у переприёма заглушка.
+    """
+    import open_clip  # type: ignore[import-untyped]
+
+    пины = load_detectors_manifest(DEFAULT_DETECTORS_MANIFEST)
+    verify_weights(пины, root / "models")
+
+    модель, _, препроцесс = open_clip.create_model_and_transforms(
+        clip_model, pretrained=clip_weights
+    )
+    токенизатор = open_clip.get_tokenizer(clip_model)
+    матрица_классов = build_text_matrix(
+        [latin_names[класс] for класс in class_order], модель, токенизатор
+    )
+    матрица_негативов = build_text_matrix(
+        [текст.removeprefix("a photo of a ") for текст in NEGATIVE_PROMPTS],
+        модель,
+        токенизатор,
+    )
+    plate_detectors = (
+        TiledDetector(OnnxBoxDetector(root / "models" / f"plate.{пины['plate'].format}")),
+        TiledDetector(
+            YoloDetector(
+                weights=str(root / "models" / f"plate_hires.{пины['plate_hires'].format}"),
+                conf=0.25,
+            )
+        ),
+    )
+    return HarvestDeps(
+        source=source,
+        vehicle_detector=YoloDetector(),
+        plate_detectors=plate_detectors,
+        face_detector=YuNetFaceDetector(root / "models" / "face.onnx"),
+        encoder=ClipImageEncoder(модель, препроцесс),
+        class_matrix=матрица_классов,
+        class_order=class_order,
+        negative_matrix=матрица_негативов,
+        allow_sa=allow_sa,
+        root=root,
+        manifest_path=manifest_path,
+        checked=checked,
+        alias_table=alias_table,
+        alias_rejects_path=root / "alias_rejects.csv",
+        reject_log_path=root / "reject_log.csv",
+        expand_categories=expand_categories,
+        dedup_verdicts_path=root / DEDUP_VERDICTS_FILENAME,
+        expand_log_path=root / EXPAND_LOG_FILENAME,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Разбор аргументов. Контакт обязателен, остальное имеет умолчания."""
     парсер = argparse.ArgumentParser(description="Харвест открытого провенанса (Р-11)")
@@ -201,19 +273,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         # прежних счётчика на вызывающих не срабатывали — у `search` его не было вовсе, а
         # у `expand` он обнулялся на каждом вызове.
         # Транспорт и источник стоят первыми в ветке: отказ по ключу Flickr обязан прийти
-        # до первого сетевого байта (§11 дизайна C2), а `create_model_and_transforms` ниже
-        # на холодном кеше тянет веса по сети.
+        # до первого сетевого байта (§11 дизайна C2), а `create_model_and_transforms` внутри
+        # `build_deps` ниже на холодном кеше тянет веса по сети.
         транспорт = UrllibTransport(аргументы.contact)
         try:
             источник = build_source(аргументы.source, транспорт, os.environ, аргументы.allow_sa)
         except ОтсутствуетКлюч as ошибка:
             print(f"{ошибка}: экспортируйте ключ и повторите", file=sys.stderr)
             return 2
-
-        import open_clip  # type: ignore[import-untyped]
-
-        пины = load_detectors_manifest(DEFAULT_DETECTORS_MANIFEST)
-        verify_weights(пины, корень / "models")
 
         запросы = source_queries(load_queries(DEFAULT_QUERIES_PATH), аргументы.source)
         имена = load_latin_names(DEFAULT_LATIN_NAMES_PATH)
@@ -224,26 +291,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"нет игл у классов: {перечень}. Шлюз забракует их целиком. Останов.")
             return 2
 
-        модель, _, препроцесс = open_clip.create_model_and_transforms(
-            аргументы.clip_model, pretrained=аргументы.clip_weights
-        )
-        токенизатор = open_clip.get_tokenizer(аргументы.clip_model)
-        матрица_классов = build_text_matrix([имена[c] for c in порядок], модель, токенизатор)
-        матрица_негативов = build_text_matrix(
-            [текст.removeprefix("a photo of a ") for текст in NEGATIVE_PROMPTS],
-            модель,
-            токенизатор,
-        )
-
-        plate_detectors = (
-            TiledDetector(OnnxBoxDetector(корень / "models" / f"plate.{пины['plate'].format}")),
-            TiledDetector(
-                YoloDetector(
-                    weights=str(корень / "models" / f"plate_hires.{пины['plate_hires'].format}"),
-                    conf=0.25,
-                )
-            ),
-        )
         # Один раз на весь прогон: карта не меняется между классами, а строить её заново на
         # каждый вызов `развернуть` значило бы пересчитывать одно и то же 150 раз.
         заявлено = claimed_categories(запросы)
@@ -258,25 +305,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             допустить = build_admit(class_id, иглы, заявлено)
             return expand(транспорт, категория, глубина, include, exclude, admit=допустить)
 
-        зависимости = HarvestDeps(
-            source=источник,
-            vehicle_detector=YoloDetector(),
-            plate_detectors=plate_detectors,
-            face_detector=YuNetFaceDetector(корень / "models" / "face.onnx"),
-            encoder=ClipImageEncoder(модель, препроцесс),
-            class_matrix=матрица_классов,
-            class_order=порядок,
-            negative_matrix=матрица_негативов,
-            allow_sa=аргументы.allow_sa,
+        # `DEFAULT_MANIFEST_PATH` передаётся параметром, а не читается внутри `build_deps`:
+        # `tests/test_harvest_cli.py` подменяет этот модульный путь `monkeypatch.setattr`, и
+        # чтение его в момент вызова — то, на чём подмена работает.
+        зависимости = build_deps(
+            источник,
+            развернуть,
             root=корень,
-            manifest_path=DEFAULT_MANIFEST_PATH,
-            checked=date.today().isoformat(),
+            class_order=порядок,
+            latin_names=имена,
             alias_table=иглы,
-            alias_rejects_path=корень / "alias_rejects.csv",
-            reject_log_path=корень / "reject_log.csv",
-            expand_categories=развернуть,
-            dedup_verdicts_path=корень / DEDUP_VERDICTS_FILENAME,
-            expand_log_path=корень / EXPAND_LOG_FILENAME,
+            manifest_path=DEFAULT_MANIFEST_PATH,
+            clip_model=аргументы.clip_model,
+            clip_weights=аргументы.clip_weights,
+            allow_sa=аргументы.allow_sa,
+            checked=date.today().isoformat(),
         )
 
         состояние = load_state(корень / "state.json")
