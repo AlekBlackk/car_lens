@@ -17,8 +17,11 @@ from pipeline.harvest.cache import cache_path, digest
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.manifest import HarvestRow, append_row, load_manifest
 from pipeline.harvest.readmit import CachedSource
-from pipeline.harvest.state import HarvestState, load_state
-from scripts.readmit_rejects import commit, readmit, sha256_by_page
+from pipeline.harvest.rejects import Reject, append_reject_row
+from pipeline.harvest.run import HarvestDeps
+from pipeline.harvest.sources import Candidate, HarvestSource
+from pipeline.harvest.state import HarvestState, load_state, save_state
+from scripts.readmit_rejects import build_parser, commit, main, readmit, sha256_by_page
 from tests.test_harvest_run import _jpeg, _зависимости, _кандидат
 
 
@@ -189,3 +192,123 @@ def test_манифест_фиксируется_раньше_состояния
 
     assert len(load_manifest(манифест)) == 2
     assert not (tmp_path / "state.json").exists()
+
+
+class ПодставнойПоиск:
+    """Подставной `CommonsSource`: отдаёт кандидатов по заявкам, в сеть не ходит."""
+
+    def __init__(self, transport: object) -> None:
+        self.заявки: dict[str, tuple[str, str]] = {}
+
+    def lookup(self, pages: dict[str, tuple[str, str]]) -> tuple[Candidate, ...]:
+        self.заявки = dict(pages)
+        return tuple(
+            _кандидат(class_id=class_id, source_item_id=pageid, basis=основание)
+            for pageid, (class_id, основание) in pages.items()
+        )
+
+
+@pytest.fixture
+def стенд(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    """Журнал, карта и кэш на диске; сеть и сборка зависимостей подменены.
+
+    `build_deps` подменяется, а не вызывается: `open-clip-torch` живёт только в группе
+    `train`, и настоящая сборка уронила бы обычный `pytest`.
+    """
+    корень = tmp_path / "harvest"
+    корень.mkdir()
+    манифест = tmp_path / "harvest_manifest.csv"
+    страницы = {"111": _в_кэш(корень, seed=1), "222": _в_кэш(корень, seed=2)}
+    for pageid in страницы:
+        append_reject_row(
+            корень / "reject_log.csv",
+            Reject(
+                class_id="lada__granta",
+                basis="category:Lada Granta",
+                source="commons",
+                source_item_id=pageid,
+                reason="redaction_failed",
+                checked="2026-09-01",
+            ),
+        )
+    (корень / "reject_index.csv").write_text(
+        "class_id,source_item_id,sha256\n"
+        + "".join(f"lada__granta,{pageid},{sha}\n" for pageid, sha in страницы.items()),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("scripts.readmit_rejects.UrllibTransport", lambda contact: object())
+    monkeypatch.setattr("scripts.readmit_rejects.CommonsSource", ПодставнойПоиск)
+
+    def подставная_сборка(source: HarvestSource, expand: object, **прочее: object) -> HarvestDeps:
+        return _зависимости(корень, источник=source, manifest_path=манифест)
+
+    monkeypatch.setattr("scripts.readmit_rejects.build_deps", подставная_сборка)
+    return {"корень": корень, "манифест": манифест, "состояние": корень / "state.json"}
+
+
+def _аргументы(стенд: dict[str, Path], *хвост: str) -> list[str]:
+    return [
+        "--contact",
+        "mail@example.com",
+        "--data-root",
+        str(стенд["корень"]),
+        "--manifest",
+        str(стенд["манифест"]),
+        *хвост,
+    ]
+
+
+def test_сухой_прогон_ничего_не_пишет(
+    стенд: dict[str, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(_аргументы(стенд)) == 0
+
+    assert not стенд["манифест"].exists()
+    assert not стенд["состояние"].exists()
+    вывод = capsys.readouterr().out
+    assert "сухой прогон" in вывод
+    assert "accepted lada__granta: 0 -> 2" in вывод
+
+
+def test_запись_дописывает_строки_и_патчит_состояние(стенд: dict[str, Path]) -> None:
+    save_state(
+        стенд["состояние"],
+        HarvestState({"lada__granta": 12}, {}, {"k": "t"}, {"commons:9"}),
+    )
+
+    assert main(_аргументы(стенд, "--write")) == 0
+
+    строки = load_manifest(стенд["манифест"])
+    assert len(строки) == 2
+    состояние = load_state(стенд["состояние"])
+    assert состояние.accepted == {"lada__granta": 2}
+    assert состояние.done_items == {"commons:9", "commons:111", "commons:222"}
+    # Стоп-критерий не тронут: переприём ничего не просматривал.
+    assert состояние.seen == {"lada__granta": 12}
+    assert состояние.tokens == {"k": "t"}
+    assert (стенд["корень"] / "state.json.bak.readmit").exists()
+
+
+def test_регресс_accepted_останавливает_до_записи(стенд: dict[str, Path]) -> None:
+    save_state(стенд["состояние"], HarvestState({}, {"kia__rio": 30}, {}, set()))
+    было = стенд["состояние"].read_bytes()
+
+    assert main(_аргументы(стенд, "--write")) == 2
+
+    assert not стенд["манифест"].exists()
+    assert стенд["состояние"].read_bytes() == было
+
+
+def test_лимит_режет_число_кандидатов(стенд: dict[str, Path]) -> None:
+    assert main(_аргументы(стенд, "--limit", "1", "--write")) == 0
+    assert len(load_manifest(стенд["манифест"])) == 1
+
+
+def test_умолчания_разбора_аргументов() -> None:
+    аргументы = build_parser().parse_args(["--contact", "mail@example.com"])
+
+    assert аргументы.reason == "redaction_failed"
+    assert аргументы.source == "commons"
+    assert аргументы.write is False
+    assert аргументы.limit == 0
