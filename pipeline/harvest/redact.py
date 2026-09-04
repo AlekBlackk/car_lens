@@ -31,6 +31,14 @@ PLATE_FILL_PAD = 0.15
 VEHICLE_SEARCH_PAD = 0.15
 MIN_KERNEL = 15
 
+# Пороги выбраны замером 554 отбитых кандидатов, `bench/redaction-thresholds.md`.
+# Правило 1 Р-11 требует убрать читаемый номер, а не отбить кадр по любому повторному
+# срабатыванию: детектор ловит собственную чёрную заливку и боксы, номером быть не
+# могущие. Оба порога действуют только на повторную проверку — первый проход заливает
+# всё, что нашёл.
+MIN_PLATE_ASPECT = 0.66
+FILL_OVERLAP_LIMIT = 0.7
+
 
 @dataclass(frozen=True, slots=True)
 class RedactionResult:
@@ -182,6 +190,35 @@ def fill_overlap(box: Detection, filled: Sequence[tuple[int, int, int, int]]) ->
     return float(маска.mean())
 
 
+def significant_residuals(stage: PlateStage) -> list[Detection]:
+    """Остатки повторного прохода, которые правда означают «номер остался».
+
+    Два предиката стоят на разных основаниях, и разницу важно держать в голове.
+
+    Перекрытие — структурное: если больше чем `FILL_OVERLAP_LIMIT` площади остатка лежит
+    под собственной заливкой, детектор увидел чёрный прямоугольник, который редакция сама
+    и нарисовала. Читаемому номеру там взяться неоткуда.
+
+    Отношение сторон — эмпирическое. Замер 554 отбитых кадров
+    (`bench/redaction-thresholds.md`) опроверг ходовую посылку «номера такой формы не
+    бывает ни в одной стране»: детектор ловит фрагменты настоящих номеров — блок региона,
+    половину двухрядного, — а у фрагмента отношение сторон любое. Значение держится не на
+    форме номеров, а на замере: `0.66` — наименьшее круглое число, при котором ни один из
+    семи остатков с читаемыми символами номера в гасимую корзину не попадает. Менять его
+    можно только вместе с новым замером.
+
+    Всё остальное отбивает кадр, как отбивало.
+    """
+    значимые: list[Detection] = []
+    for бокс in stage.residuals:
+        if fill_overlap(бокс, stage.filled) >= FILL_OVERLAP_LIMIT:
+            continue
+        if бокс.w / max(бокс.h, 1.0) < MIN_PLATE_ASPECT:
+            continue
+        значимые.append(бокс)
+    return значимые
+
+
 def redact_frame(
     image: np.ndarray,
     vehicle_boxes: Sequence[Detection],
@@ -192,7 +229,7 @@ def redact_frame(
     рабочая = image.copy()
 
     номера = redact_plates(рабочая, vehicle_boxes, plate_detectors)
-    if номера.residuals:
+    if significant_residuals(номера):
         return RedactionResult(рабочая, номера.found, 0, False)
 
     лица = _крупные(face_detector.detect(рабочая), MIN_FACE_SIDE_PX, MIN_FACE_SIDE_PX)
