@@ -14,13 +14,18 @@
 
 from __future__ import annotations
 
+import csv
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from pipeline.harvest.audit import load_audit
 from pipeline.harvest.cache import cache_path
+from pipeline.harvest.manifest import HarvestRow
 from pipeline.harvest.rejects import Reject
 from pipeline.harvest.sources import Candidate, SearchPage, SourceQuery
+from pipeline.harvest.state import HarvestState
 
 
 class CachedSource:
@@ -83,3 +88,74 @@ def plan_readmission(
             continue
         готовые.append(Readmission(отказ.source_item_id, отказ.class_id, отказ.basis, sha))
     return tuple(готовые), tuple(отброшенные)
+
+
+def patch_state(state: HarvestState, manifest_rows: Sequence[HarvestRow]) -> HarvestState:
+    """Состояние после переприёма: `accepted` выводится из манифеста, метки добавляются.
+
+    `manifest_rows` — **весь** манифест после дописывания, а не дельта прогона. Имя параметра
+    называет это, потому что ошибка тихая по форме и громкая по последствиям: на дельте из
+    ста строк `Counter` пересчитает `accepted` по затронутым классам, а остальные обнулит.
+
+    Выводится, а не накапливается: сложение уехало бы при обрыве между записью манифеста и
+    записью состояния, а вывод из строк идемпотентен — повторный прогон даёт то же самое.
+
+    `seen`, `tokens` и `categories` не трогаются. Это и есть отличие от `prune_state.py`,
+    который обнуляет их все и потому для возврата отбитых кадров не годится.
+    """
+    метки = {f"{строка.source}:{строка.source_item_id}" for строка in manifest_rows}
+    return HarvestState(
+        seen=dict(state.seen),
+        accepted=dict(Counter(строка.class_id for строка in manifest_rows)),
+        tokens=dict(state.tokens),
+        done_items=state.done_items | метки,
+        categories=dict(state.categories),
+    )
+
+
+def accepted_delta(
+    state: HarvestState, manifest_rows: Sequence[HarvestRow]
+) -> dict[str, tuple[int, int]]:
+    """Классы, у которых `accepted` расходится с числом строк: `класс -> (было, станет)`."""
+    станет = Counter(строка.class_id for строка in manifest_rows)
+    классы = set(state.accepted) | set(станет)
+    return {
+        класс: (state.accepted.get(класс, 0), станет.get(класс, 0))
+        for класс in sorted(классы)
+        if state.accepted.get(класс, 0) != станет.get(класс, 0)
+    }
+
+
+def accepted_regressions(delta: Mapping[str, tuple[int, int]]) -> list[str]:
+    """Классы, теряющие принятые кадры. Переприём на них останавливается без записи.
+
+    Уменьшение означает расхождение манифеста со счётчиком — например, строки удалил аудит.
+    Это предмет прополки, а не переприёма: молча переоткрывать чужой класс нельзя.
+    """
+    return [класс for класс, (было, станет) in sorted(delta.items()) if станет < было]
+
+
+def merge_verdicts_file(source: Path, target: Path) -> int:
+    """Перелить вердикты дедупа из временного файла в боевой. Возвращает число строк.
+
+    Временный файл нужен потому, что `process_candidate` дописывает `supersede`/`conflict` сам,
+    по ходу цикла: в боевом файле такой вердикт приговорил бы живую строку манифеста ещё до
+    того, как переприём решил фиксироваться, и обрыв оставил бы приговор без новой строки
+    взамен. Перелив идёт третьим шагом фиксации, после манифеста.
+
+    Читается штатным `load_audit` — тот же формат `file,verdict`, что ждёт `--audit`. Пишется
+    идиомой `run._записать_вердикт`: шапка появляется на пустом или отсутствующем файле, потому
+    что журнал укорачивают `> файл`, и без проверки размера первая строка стала бы шапкой.
+    """
+    вердикты = load_audit(source) if source.exists() else {}
+    if not вердикты:
+        return 0
+    target.parent.mkdir(parents=True, exist_ok=True)
+    новый = not target.exists() or target.stat().st_size == 0
+    with target.open("a", encoding="utf-8", newline="") as файл:
+        писатель = csv.DictWriter(файл, fieldnames=["file", "verdict"])
+        if новый:
+            писатель.writeheader()
+        for имя, вердикт in вердикты.items():
+            писатель.writerow({"file": имя, "verdict": вердикт})
+    return len(вердикты)
