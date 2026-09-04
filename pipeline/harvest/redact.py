@@ -190,6 +190,17 @@ def fill_overlap(box: Detection, filled: Sequence[tuple[int, int, int, int]]) ->
     return float(маска.mean())
 
 
+def plate_aspect(box: Detection) -> float:
+    """Отношение сторон бокса, по которому судит порог `MIN_PLATE_ASPECT`.
+
+    Одна на предикат и на офлайн-замер (`scripts/measure_redaction.py`) по той же причине,
+    что и `fill_overlap`: порог обязан считать тот код, который потом по нему решает.
+    Замер, повторивший формулу своими руками, дал бы правдоподобное неверное число —
+    проект уже платил за такую копию.
+    """
+    return box.w / max(box.h, 1.0)
+
+
 def significant_residuals(stage: PlateStage) -> list[Detection]:
     """Остатки повторного прохода, которые правда означают «номер остался».
 
@@ -217,7 +228,7 @@ def significant_residuals(stage: PlateStage) -> list[Detection]:
     for бокс in stage.residuals:
         if fill_overlap(бокс, stage.filled) >= FILL_OVERLAP_LIMIT:
             continue
-        if бокс.w / max(бокс.h, 1.0) < MIN_PLATE_ASPECT:
+        if plate_aspect(бокс) < MIN_PLATE_ASPECT:
             continue
         значимые.append(бокс)
     return значимые
@@ -229,7 +240,11 @@ def redact_frame(
     plate_detectors: Sequence[Detector],
     face_detector: Detector,
 ) -> RedactionResult:
-    """Очистить весь кадр: номера — заливкой, лица — лестницей, с повторной проверкой."""
+    """Очистить весь кадр: номера — заливкой, лица — лестницей, с повторной проверкой.
+
+    Кадр отбивается не по любому остатку повторной проверки номеров, а только по значимому:
+    что значимо, решает `significant_residuals`.
+    """
     рабочая = image.copy()
 
     номера = redact_plates(рабочая, vehicle_boxes, plate_detectors)

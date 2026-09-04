@@ -27,7 +27,7 @@ import numpy as np
 
 from pipeline.crop import VEHICLE_CLASSES, Detection, Detector
 from pipeline.harvest.cache import cache_path, decode_image
-from pipeline.harvest.redact import fill_overlap, redact_plates
+from pipeline.harvest.redact import fill_overlap, plate_aspect, redact_plates
 from pipeline.paths import harvest_dir
 
 ЯЧЕЙКА_W = 160
@@ -101,7 +101,7 @@ def измерить_кадр(
             w=int(бокс.w),
             h=int(бокс.h),
             conf=float(бокс.conf),
-            aspect=float(бокс.w / max(бокс.h, 1.0)),
+            aspect=float(plate_aspect(бокс)),
             overlap=fill_overlap(бокс, стадия.filled),
             filled_count=len(стадия.filled),
         )
