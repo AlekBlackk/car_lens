@@ -149,3 +149,68 @@ def test_пустая_или_несуществующая_категория_о�
     """Ответ без `pages` — это и «категории нет», и «в ней ничего»: разницы для нас нет."""
     транспорт = ЗаписанныйТранспорт([_ок({"batchcomplete": ""})])
     assert category_is_populated(транспорт, "VAZ-2113", sleep=lambda _: None) is False
+
+
+def _страница(pageid: int, лицензия: str = "CC BY 4.0") -> dict[str, object]:
+    return {
+        "pageid": pageid,
+        "title": f"File:Car {pageid}.jpg",
+        "imageinfo": [
+            {
+                "url": f"https://upload.wikimedia.org/{pageid}.jpg",
+                "descriptionurl": f"https://commons.wikimedia.org/wiki/File:{pageid}.jpg",
+                "width": 1600,
+                "height": 1200,
+                "extmetadata": {
+                    "LicenseShortName": {"value": лицензия},
+                    "Artist": {"value": "Иван Петров"},
+                },
+            }
+        ],
+    }
+
+
+def test_lookup_батчит_pageid_по_пятьдесят() -> None:
+    страницы = {str(номер): ("lada__granta", "category:Lada Granta") for номер in range(1, 121)}
+    партии = [list(страницы)[:50], list(страницы)[50:100], list(страницы)[100:]]
+    ответы = [
+        _ок({"query": {"pages": {ключ: _страница(int(ключ)) for ключ in партия}}})
+        for партия in партии
+    ]
+    транспорт = ЗаписанныйТранспорт(ответы)
+    кандидаты = CommonsSource(транспорт, sleep=lambda _: None).lookup(страницы)
+
+    assert len(транспорт.вызовы) == 3
+    assert транспорт.вызовы[0]["pageids"].count("|") == 49
+    assert транспорт.вызовы[2]["pageids"] == "|".join(партии[2])
+    assert len(кандидаты) == 120
+
+
+def test_lookup_держит_порядок_ключей_а_не_ответа() -> None:
+    страницы = {
+        "300": ("lada__granta", "category:Lada Granta"),
+        "100": ("uaz__patriot", "search:uaz patriot"),
+        "200": ("lada__granta", "category:Lada Granta"),
+    }
+    # Порядок ключей в ответе API произволен и здесь намеренно не тот, что на входе.
+    ответ = _ок(
+        {"query": {"pages": {"100": _страница(100), "200": _страница(200), "300": _страница(300)}}}
+    )
+    кандидаты = CommonsSource(ЗаписанныйТранспорт([ответ]), sleep=lambda _: None).lookup(страницы)
+
+    assert [кандидат.source_item_id for кандидат in кандидаты] == ["300", "100", "200"]
+    assert кандидаты[1].class_id == "uaz__patriot"
+    assert кандидаты[1].basis == "search:uaz patriot"
+
+
+def test_lookup_роняет_страницу_с_несвободной_лицензией() -> None:
+    страницы = {
+        "1": ("lada__granta", "category:Lada Granta"),
+        "2": ("lada__granta", "category:Lada Granta"),
+    }
+    ответ = _ок(
+        {"query": {"pages": {"1": _страница(1), "2": _страница(2, лицензия="All rights reserved")}}}
+    )
+    кандидаты = CommonsSource(ЗаписанныйТранспорт([ответ]), sleep=lambda _: None).lookup(страницы)
+
+    assert [кандидат.source_item_id for кандидат in кандидаты] == ["1"]

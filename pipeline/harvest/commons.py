@@ -28,6 +28,8 @@ from pipeline.harvest.licenses import is_allowed
 from pipeline.harvest.sources import Candidate, SearchPage, SourceQuery, basis_of
 
 API_URL = "https://commons.wikimedia.org/w/api.php"
+# Предел `pageids` у Action API для анонимного клиента — 50 идентификаторов на запрос.
+LOOKUP_BATCH = 50
 RETRY_STATUSES = frozenset({429, 503})
 BACKOFF_SECONDS = (2.0, 4.0, 8.0)
 MIN_INTERVAL_SECONDS = 2.0
@@ -168,6 +170,42 @@ class CommonsSource:
         except HarvestHttpError:
             return b""
         return ответ.body
+
+    def lookup(self, pages: Mapping[str, tuple[str, str]]) -> tuple[Candidate, ...]:
+        """Кандидаты по известным `pageid`: переприём не ищет, а перечитывает страницы.
+
+        Ключ — `pageid`, значение — `(class_id, basis)`: и класс, и основание известны из
+        журнала отказов, а Commons про них не знает.
+
+        Порядок результата — порядок ключей, а не ответа API: страницы в JSON приходят как
+        попало, а прогон обязан воспроизводиться. Страница, которой API не отдал (файл
+        удалён) или которую отсеяла лицензия, в результат не попадает; недостачу считает
+        вызывающий по разнице ключей — молчаливая потеря выглядела бы как отказ цепочки.
+        """
+        ключи = list(pages)
+        собрано: dict[str, Candidate] = {}
+        for начало in range(0, len(ключи), LOOKUP_BATCH):
+            батч = ключи[начало : начало + LOOKUP_BATCH]
+            ответ = request_with_backoff(
+                self._transport,
+                API_URL,
+                {
+                    "action": "query",
+                    "format": "json",
+                    "pageids": "|".join(батч),
+                    "prop": "imageinfo",
+                    "iiprop": "url|size|extmetadata",
+                },
+                sleep=self._sleep,
+            )
+            данные: Any = json.loads(ответ.body.decode("utf-8"))
+            for ключ, страница in ((данные.get("query") or {}).get("pages") or {}).items():
+                заявка = pages.get(str(ключ))
+                if заявка is None or not self._годится(страница):
+                    continue
+                class_id, основание = заявка
+                собрано[str(ключ)] = self._кандидат(страница, class_id, основание)
+        return tuple(собрано[ключ] for ключ in ключи if ключ in собрано)
 
     def _параметры(self, query: SourceQuery) -> dict[str, str]:
         общие = {
