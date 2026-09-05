@@ -172,11 +172,24 @@ def kmeans_factory(seed: int) -> Callable[[np.ndarray, int], np.ndarray]:
     return kmeans
 
 
+def resolve_crops_root(value: Path | None) -> Path:
+    """Корень, относительно которого раскрываются `crop_path` сплита.
+
+    Умолчание сохраняет поведение M-1.3: без флага индекс собирается по тем же
+    кропам Stanford. Кропы русского пула лежат отдельно, под
+    `harvest_dir() / "crops"`, и задаются флагом — сплит `pool` их уже перечисляет.
+    """
+    if value is not None:
+        return value
+    return crops_dir() / "stanford"
+
+
 def _parse_args() -> argparse.Namespace:
     парсер = argparse.ArgumentParser(description="Сборка catalog_index.bin по §13.2")
     парсер.add_argument("--checkpoint", type=Path, required=True)
     парсер.add_argument("--catalog", type=Path, default=STANFORD_CATALOG_PATH)
     парсер.add_argument("--split", default="train")
+    парсер.add_argument("--crops-root", type=Path, default=None)
     парсер.add_argument("--weights", choices=("raw", "ema"), default="raw")
     парсер.add_argument("--device", default="cuda")
     парсер.add_argument("--embedder", default="torch", help="torch | tflite:<путь>")
@@ -215,7 +228,7 @@ def main() -> None:
     загрузчик = make_loader(
         read_samples(
             splits_dir() / f"{аргументы.split}.parquet",
-            crops_dir() / "stanford",
+            resolve_crops_root(аргументы.crops_root),
             num_classes=len(индекс),
             skip_multi_car=True,
         ),

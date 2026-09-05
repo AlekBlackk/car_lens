@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from pipeline.catalog import STANFORD_CATALOG_PATH, Catalog, class_index, load_catalog
-from training.build_index import BuildIndexError, check_class_index, parse_embedder, stack_centroids
+from training.build_index import (
+    BuildIndexError,
+    _parse_args,
+    check_class_index,
+    parse_embedder,
+    resolve_crops_root,
+    stack_centroids,
+)
 
 
 def _нормировать(матрица: np.ndarray) -> np.ndarray:
@@ -216,3 +224,32 @@ def test_stack_с_allow_empty_оставляет_нули_классу_без_э
     assert результат.shape == (2, 4, 8)
     assert np.all(результат[1] == 0.0)
     assert np.any(результат[0] != 0.0)
+
+
+def test_корень_кропов_по_умолчанию_stanford(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Без флага корень тот же, что в M-1.3: индекс Stanford собирается как раньше.
+
+    Корень данных подменяется переменной среды, а не берётся тем же `crops_dir()`:
+    сравнение с вызовом из реализации прошло бы и с любым другим подкаталогом.
+    """
+    monkeypatch.setenv("CARLENS_DATA_ROOT", "/tmp/cl")
+    assert resolve_crops_root(None) == Path("/tmp/cl/crops/stanford")
+
+
+def test_корень_кропов_из_флага() -> None:
+    """Заданный корень возвращается как есть: кропы харвеста лежат вне `crops/`."""
+    assert resolve_crops_root(Path("/x/y")) == Path("/x/y")
+
+
+def test_флаг_корня_кропов_разбирается(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--crops-root` доезжает до сборки как `Path`, без флага — `None`.
+
+    Подменяется `sys.argv`, а не добавляется параметр `argv`: сигнатура
+    `_parse_args` в задачу не входит, а без подмены разбор увидел бы
+    аргументы самого pytest.
+    """
+    базовые = ["build_index.py", "--checkpoint", "/tmp/ckpt.pt"]
+    monkeypatch.setattr(sys, "argv", [*базовые, "--crops-root", "/x/y"])
+    assert _parse_args().crops_root == Path("/x/y")
+    monkeypatch.setattr(sys, "argv", базовые)
+    assert _parse_args().crops_root is None
