@@ -121,6 +121,20 @@ def test_справочная_трасса_идёт_через_голову() ->
 
 def test_имена_классов_из_меты_индекса(tmp_path: Path) -> None:
     """При расхождении порядка в YAML и в мете берётся порядок из меты индекса."""
+    yaml_контент = (
+        "classes:\n"
+        "  - id: lada__2107\n"
+        "    brand: Lada\n"
+        "    models: [lada__2107]\n"
+        "  - id: uaz__patriot\n"
+        "    brand: UAZ\n"
+        "    models: [uaz__patriot]\n"
+        "  - id: kia__rio\n"
+        "    brand: Kia\n"
+        "    models: [kia__rio]\n"
+    )
+    (tmp_path / "catalog.yaml").write_text(yaml_контент, encoding="utf-8")
+
     мета = {
         "classes": [
             {"class_id": "uaz__patriot", "members": ["uaz__patriot"]},
@@ -133,6 +147,7 @@ def test_имена_классов_из_меты_индекса(tmp_path: Path) 
 
     имена = load_index_classes(tmp_path)
 
+    # Порядок строго из catalog_meta.json (0: uaz, 1: lada, 2: kia), не из YAML (lada=0)
     assert имена == {0: "uaz__patriot", 1: "lada__2107", 2: "kia__rio"}
     assert idx_to_class_id_of(мета) == {0: "uaz__patriot", 1: "lada__2107", 2: "kia__rio"}
 
@@ -230,6 +245,11 @@ def test_отчёт_записан_по_пути_из_флага(monkeypatch: py
     текст = целевой_отчёт.read_text(encoding="utf-8")
     assert "## Лицом к лицу: одна линейка, один код метрики" in текст
     assert "| величина | дообучение | few-shot базис M2 | дельта |" in текст
+    assert "## Две трассы одного прогона" in текст
+    assert "## Пороги G_FS1–G_FS3: справочная линия" in текст
+    assert "## Поклассовые дельты: десять вверх и десять вниз" in текст
+    assert "## Ожидание против факта" in текст
+    assert "## Четыре искажения, названные до прогона" in текст
     assert "top-1" in текст
     assert "top-3" in текст
 
@@ -318,4 +338,153 @@ def test_отсутствие_ema_state_роняет_замер_с_понятн�
             crops_root=tmp_path / "crops",
             weights="ema",
             device="cpu",
+        )
+
+
+@pytest.mark.parametrize("пропущенный_ключ", ["config", "class_index", "head_state", "model_state"])
+def test_отсутствие_обязательного_ключа_чекпоинта_роняет_замер(
+    tmp_path: Path, пропущенный_ключ: str
+) -> None:
+    """Отсутствие любого обязательного ключа чекпоинта роняет замер с понятным ValueError."""
+    pytest.importorskip("torch")
+    import torch
+
+    from scripts.eval_finetune_ru import _run_model_evaluation
+
+    чекпоинт = {
+        "config": {"backbone": "mobilenetv4_conv_medium.e500_r256_in1k", "embedding_dim": 256},
+        "class_index": {"lada__2107": 0},
+        "model_state": {},
+        "head_state": {},
+    }
+    del чекпоинт[пропущенный_ключ]
+
+    чекпоинт_файл = tmp_path / f"broken_{пропущенный_ключ}.pt"
+    torch.save(чекпоинт, чекпоинт_файл)
+
+    with pytest.raises(ValueError, match=rf"ключ '{пропущенный_ключ}' отсутствует в чекпоинте"):
+        _run_model_evaluation(
+            checkpoint_path=чекпоинт_файл,
+            centroids=np.zeros((1, 4, 256), dtype=np.float32),
+            idx_to_class_id={0: "lada__2107"},
+            holdout_path=tmp_path / "holdout.parquet",
+            crops_root=tmp_path / "crops",
+            weights="raw",
+            device="cpu",
+        )
+
+
+def test_рассогласование_классов_чекпоинта_и_индекса_роняет_замер(tmp_path: Path) -> None:
+    """Если классы чекпоинта разошлись с метой индекса (Р-21), выполнение завершается с ошибкой."""
+    pytest.importorskip("torch")
+    import torch
+
+    from scripts.eval_finetune_ru import _run_model_evaluation
+
+    чекпоинт = {
+        "config": {"backbone": "mobilenetv4_conv_medium.e500_r256_in1k", "embedding_dim": 256},
+        "class_index": {"lada__2107": 0, "kia__rio": 1},
+        "model_state": {},
+        "head_state": {},
+    }
+    чекпоинт_файл = tmp_path / "last.pt"
+    torch.save(чекпоинт, чекпоинт_файл)
+
+    # Мета с другими классами (uaz вместо kia)
+    idx_to_class_id = {0: "lada__2107", 1: "uaz__patriot"}
+
+    with pytest.raises(
+        ValueError, match=r"нумерация классов чекпоинта разошлась с каталогом индекса"
+    ):
+        _run_model_evaluation(
+            checkpoint_path=чекпоинт_файл,
+            centroids=np.zeros((2, 4, 256), dtype=np.float32),
+            idx_to_class_id=idx_to_class_id,
+            holdout_path=tmp_path / "holdout.parquet",
+            crops_root=tmp_path / "crops",
+            weights="raw",
+            device="cpu",
+        )
+
+
+def test_несовпадение_размерности_центроидов_и_меты_роняет_evaluate_index_track() -> None:
+    """Размерность первого измерения центроидов должна совпадать с числом классов в мете."""
+    центроиды = np.zeros((3, 4, 16), dtype=np.float32)
+    эмбеддинги = np.zeros((2, 16), dtype=np.float32)
+    имена = {0: "a", 1: "b"}  # 2 класса против 3 центроидов
+
+    with pytest.raises(
+        ValueError, match=r"размерность центроидов \(3\) не совпадает с числом классов в мете \(2\)"
+    ):
+        evaluate_index_track(эмбеддинги, [0, 1], центроиды, имена)
+
+
+def test_несуществующие_файлы_роняют_main(tmp_path: Path) -> None:
+    """Отсутствие чекпоинта, индекса или базиса роняет main с FileNotFoundError."""
+    существующий_чекпоинт = tmp_path / "last.pt"
+    существующий_чекпоинт.write_bytes(b"dummy")
+
+    каталог_индекса = tmp_path / "index"
+    каталог_индекса.mkdir()
+    (каталог_индекса / "catalog_index.bin").write_bytes(b"dummy")
+    (каталог_индекса / "catalog_meta.json").write_bytes(b"{}")
+
+    существующий_базис = tmp_path / "baseline.json"
+    существующий_базис.write_bytes(b"{}")
+
+    # 1. Нет чекпоинта
+    with pytest.raises(FileNotFoundError, match=r"чекпоинт не найден"):
+        main(["--checkpoint", str(tmp_path / "missing.pt"), "--index", str(каталог_индекса)])
+
+    # 2. Нет бинарного индекса
+    (каталог_индекса / "catalog_index.bin").unlink()
+    with pytest.raises(FileNotFoundError, match=r"файл индекса не найден"):
+        main(["--checkpoint", str(существующий_чекпоинт), "--index", str(каталог_индекса)])
+    (каталог_индекса / "catalog_index.bin").write_bytes(b"dummy")
+
+    # 3. Нет catalog_meta.json
+    (каталог_индекса / "catalog_meta.json").unlink()
+    with pytest.raises(FileNotFoundError, match=r"файл меты индекса не найден"):
+        main(["--checkpoint", str(существующий_чекпоинт), "--index", str(каталог_индекса)])
+    (каталог_индекса / "catalog_meta.json").write_bytes(b"{}")
+
+    # 4. Нет базиса
+    with pytest.raises(FileNotFoundError, match=r"файл базиса не найден"):
+        main(
+            [
+                "--checkpoint",
+                str(существующий_чекпоинт),
+                "--index",
+                str(каталог_индекса),
+                "--baseline",
+                str(tmp_path / "missing_baseline.json"),
+            ]
+        )
+
+
+def test_отрицательное_время_обучения_роняет_main(tmp_path: Path) -> None:
+    """Отрицательное значение --train-minutes недопустимо."""
+    чекпоинт = tmp_path / "last.pt"
+    чекпоинт.write_bytes(b"dummy")
+
+    индекс = tmp_path / "index"
+    индекс.mkdir()
+    (индекс / "catalog_index.bin").write_bytes(b"dummy")
+    (индекс / "catalog_meta.json").write_bytes(b"{}")
+
+    базис = tmp_path / "baseline.json"
+    базис.write_bytes(b"{}")
+
+    with pytest.raises(ValueError, match=r"train_minutes не может быть отрицательным"):
+        main(
+            [
+                "--checkpoint",
+                str(чекпоинт),
+                "--index",
+                str(индекс),
+                "--baseline",
+                str(базис),
+                "--train-minutes",
+                "-10.5",
+            ]
         )

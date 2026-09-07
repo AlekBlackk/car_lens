@@ -68,7 +68,7 @@ def _config_sha256(checkpoint_path: Path, config: Mapping[str, Any]) -> str:
     рядом = checkpoint_path.parent / "config.yaml"
     if рядом.is_file():
         return sha256_of_file(рядом)
-    дамп = json.dumps(dict(config), sort_keys=True).encode("utf-8")
+    дамп = json.dumps(dict(config), sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(дамп).hexdigest()
 
 
@@ -105,6 +105,11 @@ def evaluate_index_track(
     idx_to_class_id: Mapping[int, str],
 ) -> tuple[list[list[int]], FewShotMetrics]:
     """Главная трасса замера: ранжирование по центроидам индекса и сведение метрик Р-11."""
+    if centroids.shape[0] != len(idx_to_class_id):
+        raise ValueError(
+            f"размерность центроидов ({centroids.shape[0]}) не совпадает с числом классов в мете "
+            f"({len(idx_to_class_id)})"
+        )
     ранжирование = ranked_by_centroids(embeddings, centroids, k=FEWSHOT_TOP_K)
     метрики = aggregate_fewshot(ранжирование, targets, idx_to_class_id=idx_to_class_id)
     return ранжирование, метрики
@@ -145,20 +150,28 @@ def _run_model_evaluation(
     from training.samples import read_samples
 
     чекпоинт: dict[str, Any] = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    ключ_модели = "model_state" if weights == "raw" else "ema_state"
+    for обязательный in ("config", "class_index", "head_state", ключ_модели):
+        if обязательный not in чекпоинт:
+            raise ValueError(f"{checkpoint_path}: ключ {обязательный!r} отсутствует в чекпоинте")
+
     конфиг = dict(чекпоинт["config"])
     индекс = dict(чекпоинт["class_index"])
+    чекпоинт_по_индексу = {номер: класс for класс, номер in индекс.items()}
+    if чекпоинт_по_индексу != dict(idx_to_class_id):
+        raise ValueError(
+            f"{checkpoint_path}: нумерация классов чекпоинта разошлась с каталогом индекса "
+            f"({len(индекс)} против {len(idx_to_class_id)} классов)"
+        )
     чекпоинт_git_sha: str | None = чекпоинт.get("git_sha")
 
     модель, голова = create_model(
-        str(конфиг["backbone"]),
+        str(конфиг.get("backbone", "mobilenetv4_conv_medium.e500_r256_in1k")),
         num_classes=len(индекс),
-        embedding_dim=int(конфиг["embedding_dim"]),
+        embedding_dim=int(конфиг.get("embedding_dim", 256)),
         pretrained=False,
     )
-    ключ = "model_state" if weights == "raw" else "ema_state"
-    if ключ not in чекпоинт:
-        raise ValueError(f"{checkpoint_path}: ключ {ключ!r} отсутствует в чекпоинте")
-    модель.load_state_dict(чекпоинт[ключ])
+    модель.load_state_dict(чекпоинт[ключ_модели])
     голова.load_state_dict(чекпоинт["head_state"])
 
     устройство = torch.device(device)
@@ -171,18 +184,24 @@ def _run_model_evaluation(
         num_classes=len(индекс),
         skip_multi_car=True,
     )
+    сырое_среднее = чекпоинт.get("mean", модель.mean)
+    сырое_отклонение = чекпоинт.get("std", модель.std)
     среднее = (
-        float(чекпоинт["mean"][0]),
-        float(чекпоинт["mean"][1]),
-        float(чекпоинт["mean"][2]),
+        float(сырое_среднее[0]),
+        float(сырое_среднее[1]),
+        float(сырое_среднее[2]),
     )
     отклонение = (
-        float(чекпоинт["std"][0]),
-        float(чекпоинт["std"][1]),
-        float(чекпоинт["std"][2]),
+        float(сырое_отклонение[0]),
+        float(сырое_отклонение[1]),
+        float(сырое_отклонение[2]),
     )
+    сырой_размер = чекпоинт.get("img_size")
+    if сырой_размер is None:
+        сырой_размер = конфиг.get("img_size", 320)
+    img_size = int(сырой_размер)
     трансформы = build_transforms(
-        int(чекпоинт["img_size"]),
+        img_size,
         train=False,
         mean=среднее,
         std=отклонение,
@@ -280,8 +299,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     парсер = build_parser()
     аргументы = парсер.parse_args(argv)
 
-    заголовок, центроиды = read_index(аргументы.index / "catalog_index.bin")
-    байты_меты = (аргументы.index / "catalog_meta.json").read_bytes()
+    if not аргументы.checkpoint.is_file():
+        raise FileNotFoundError(f"чекпоинт не найден: {аргументы.checkpoint}")
+    путь_бинарного_индекса = аргументы.index / "catalog_index.bin"
+    if not путь_бинарного_индекса.is_file():
+        raise FileNotFoundError(f"файл индекса не найден: {путь_бинарного_индекса}")
+    путь_меты = аргументы.index / "catalog_meta.json"
+    if not путь_меты.is_file():
+        raise FileNotFoundError(f"файл меты индекса не найден: {путь_меты}")
+    if not аргументы.baseline.is_file():
+        raise FileNotFoundError(f"файл базиса не найден: {аргументы.baseline}")
+    if аргументы.train_minutes < 0.0:
+        raise ValueError(f"train_minutes не может быть отрицательным: {аргументы.train_minutes}")
+
+    заголовок, центроиды = read_index(путь_бинарного_индекса)
+    байты_меты = путь_меты.read_bytes()
     verify_meta(заголовок, байты_меты)
     мета = json.loads(байты_меты)
     имена = idx_to_class_id_of(мета)
@@ -313,10 +345,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     хеш_весов = (
         sha256_of_file(аргументы.checkpoint) if аргументы.checkpoint.is_file() else "unknown"
     )
-    путь_бинарного_индекса = аргументы.index / "catalog_index.bin"
-    хеш_индекса = (
-        sha256_of_file(путь_бинарного_индекса) if путь_бинарного_индекса.is_file() else "unknown"
-    )
+    хеш_индекса = sha256_of_file(путь_бинарного_индекса)
 
     провенанс = RunProvenance(
         git_sha=_git_sha(чекпоинт_sha),
@@ -358,6 +387,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print(f"Базис few-shot: top-1 {базис.top1:.4f}, top-3 {базис.top3:.4f}")
     print(decision_rule(baseline_top3=базис.top3, finetune_top3=метрики_индекс.top3))
+    вердикт = "ПРОЙДЕН" if гейт.passed else "НЕ ПРОЙДЕН"
+    print(f"Гейт по главной трассе: {вердикт}")
+    for провал in гейт.failures:
+        print(f"  ✗ {провал}")
 
     return 0
 
