@@ -42,6 +42,7 @@ from pipeline.fewshot.gate import (
     FewShotGateResult,
     _знак,
     _покрытие,
+    check_gate,
 )
 from pipeline.fewshot.metrics import FewShotMetrics
 
@@ -176,6 +177,10 @@ def render_comparison(
     ArcFace), `gate` посчитан по главной. Отчёт перезаписывается целиком, поэтому рукописных
     разделов в нём нет: всё, что должно в нём быть, живёт в этом модуле.
     """
+    ожидаемый_гейт = check_gate(finetune, catalog_classes=provenance.catalog_classes)
+    if gate != ожидаемый_гейт:
+        raise ValueError("гейт не соответствует главной трассе дообучения")
+
     return "\n".join(
         [
             *_шапка(provenance, finetune),
