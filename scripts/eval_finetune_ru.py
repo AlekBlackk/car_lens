@@ -136,6 +136,7 @@ def _run_model_evaluation(
     checkpoint_path: Path,
     centroids: np.ndarray,
     idx_to_class_id: Mapping[int, str],
+    index_embedding_dim: int,
     holdout_path: Path,
     crops_root: Path,
     weights: str,
@@ -172,10 +173,31 @@ def _run_model_evaluation(
 
     индекс = dict(чекпоинт["class_index"])
     чекпоинт_по_индексу = {номер: класс for класс, номер in индекс.items()}
-    if чекпоинт_по_индексу != dict(idx_to_class_id):
+    мета_по_индексу = dict(idx_to_class_id)
+    # Расхождения перечисляются поимённо: при равном числе классов счётчики читаются как
+    # «150 против 150» и не говорят, какой класс уехал и в каком слоте его искать.
+    расхождения = [
+        f"слот {номер}: в чекпоинте {чекпоинт_по_индексу.get(номер, '—')}, "
+        f"в мете {мета_по_индексу.get(номер, '—')}"
+        for номер in sorted(set(чекпоинт_по_индексу) | set(мета_по_индексу))
+        if чекпоинт_по_индексу.get(номер) != мета_по_индексу.get(номер)
+    ]
+    if расхождения:
+        хвост = "" if len(расхождения) <= 3 else f" и ещё {len(расхождения) - 3}"
         raise ValueError(
             f"{checkpoint_path}: нумерация классов чекпоинта разошлась с каталогом индекса "
-            f"({len(индекс)} против {len(idx_to_class_id)} классов)"
+            f"({len(индекс)} против {len(мета_по_индексу)} классов); "
+            + "; ".join(расхождения[:3])
+            + хвост
+        )
+
+    # Эмбеддинг чекпоинта и центроид индекса обязаны быть одной длины: косинус между
+    # 256 и 512 не определён вовсе. Проверка стоит до модели, потому что иначе отказ
+    # придёт из numpy на matmul — без имён и уже после полного прохода по эталону.
+    if int(конфиг["embedding_dim"]) != index_embedding_dim:
+        raise ValueError(
+            f"{checkpoint_path}: embedding_dim чекпоинта ({конфиг['embedding_dim']}) "
+            f"не совпадает с индексом ({index_embedding_dim})"
         )
     чекпоинт_git_sha: str | None = чекпоинт.get("git_sha")
 
@@ -307,6 +329,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     парсер = build_parser()
     аргументы = парсер.parse_args(argv)
 
+    # Значение флага проверяется до файлов: диск для этого не нужен.
+    if аргументы.train_minutes < 0.0:
+        raise ValueError(f"train_minutes не может быть отрицательным: {аргументы.train_minutes}")
+
     if not аргументы.checkpoint.is_file():
         raise FileNotFoundError(f"чекпоинт не найден: {аргументы.checkpoint}")
     путь_бинарного_индекса = аргументы.index / "catalog_index.bin"
@@ -317,8 +343,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise FileNotFoundError(f"файл меты индекса не найден: {путь_меты}")
     if not аргументы.baseline.is_file():
         raise FileNotFoundError(f"файл базиса не найден: {аргументы.baseline}")
-    if аргументы.train_minutes < 0.0:
-        raise ValueError(f"train_minutes не может быть отрицательным: {аргументы.train_minutes}")
+    if not аргументы.holdout.is_file():
+        raise FileNotFoundError(f"эталон не найден: {аргументы.holdout}")
 
     заголовок, центроиды = read_index(путь_бинарного_индекса)
     байты_меты = путь_меты.read_bytes()
@@ -330,6 +356,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         checkpoint_path=аргументы.checkpoint,
         centroids=центроиды,
         idx_to_class_id=имена,
+        index_embedding_dim=заголовок.embedding_dim,
         holdout_path=аргументы.holdout,
         crops_root=аргументы.crops_root,
         weights=аргументы.weights,
@@ -349,10 +376,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         хеш_пула = "unknown"
         кадров_пула = 0
 
-    хеш_эталона = sha256_of_file(аргументы.holdout) if аргументы.holdout.is_file() else "unknown"
-    хеш_весов = (
-        sha256_of_file(аргументы.checkpoint) if аргументы.checkpoint.is_file() else "unknown"
-    )
+    # Три файла проверены на входе, поэтому хеши считаются без оговорки: "unknown" в
+    # провенансе означал бы, что замер прошёл по файлу, которого нет.
+    хеш_эталона = sha256_of_file(аргументы.holdout)
+    хеш_весов = sha256_of_file(аргументы.checkpoint)
     хеш_индекса = sha256_of_file(путь_бинарного_индекса)
 
     провенанс = RunProvenance(

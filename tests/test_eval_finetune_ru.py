@@ -185,6 +185,10 @@ def test_отчёт_записан_по_пути_из_флага(monkeypatch: py
 
     чекпоинт_файл = tmp_path / "last.pt"
     чекпоинт_файл.write_bytes(b"dummy_pt")
+    # Эталон свой, а не умолчание: иначе тест молча опирался бы на настоящий
+    # holdout_ru.parquet в каталоге данных и падал бы там, где данных нет.
+    эталон_файл = tmp_path / "holdout_ru.parquet"
+    эталон_файл.write_bytes(b"dummy_parquet")
 
     фиктивные_метрики_индекс = FewShotMetrics(
         top1=0.48,
@@ -235,6 +239,8 @@ def test_отчёт_записан_по_пути_из_флага(monkeypatch: py
             str(каталог_индекса),
             "--baseline",
             str(базис_json),
+            "--holdout",
+            str(эталон_файл),
             "--out",
             str(целевой_отчёт),
         ]
@@ -334,6 +340,7 @@ def test_отсутствие_ema_state_роняет_замер_с_понятн�
             checkpoint_path=чекпоинт_файл,
             centroids=np.zeros((1, 4, 256), dtype=np.float32),
             idx_to_class_id={0: "lada__2107"},
+            index_embedding_dim=256,
             holdout_path=tmp_path / "holdout.parquet",
             crops_root=tmp_path / "crops",
             weights="ema",
@@ -367,6 +374,7 @@ def test_отсутствие_обязательного_ключа_чекпои
             checkpoint_path=чекпоинт_файл,
             centroids=np.zeros((1, 4, 256), dtype=np.float32),
             idx_to_class_id={0: "lada__2107"},
+            index_embedding_dim=256,
             holdout_path=tmp_path / "holdout.parquet",
             crops_root=tmp_path / "crops",
             weights="raw",
@@ -403,6 +411,7 @@ def test_рассогласование_классов_чекпоинта_и_и�
             checkpoint_path=чекпоинт_файл,
             centroids=np.zeros((2, 4, 256), dtype=np.float32),
             idx_to_class_id=idx_to_class_id,
+            index_embedding_dim=256,
             holdout_path=tmp_path / "holdout.parquet",
             crops_root=tmp_path / "crops",
             weights="raw",
@@ -527,6 +536,7 @@ def test_отсутствие_параметра_предобработки_ро
             checkpoint_path=чекпоинт_файл,
             centroids=np.zeros((1, 4, 256), dtype=np.float32),
             idx_to_class_id={0: "lada__2107"},
+            index_embedding_dim=256,
             holdout_path=tmp_path / "holdout.parquet",
             crops_root=tmp_path / "crops",
             weights="raw",
@@ -569,8 +579,111 @@ def test_отсутствие_поля_конфига_роняет_замер(tm
             checkpoint_path=чекпоинт_файл,
             centroids=np.zeros((1, 4, 256), dtype=np.float32),
             idx_to_class_id={0: "lada__2107"},
+            index_embedding_dim=256,
             holdout_path=tmp_path / "holdout.parquet",
             crops_root=tmp_path / "crops",
             weights="raw",
             device="cpu",
+        )
+
+
+def test_рассогласование_классов_называет_разошедшийся_класс(tmp_path: Path) -> None:
+    """Сообщение о рассогласовании называет слот и обе стороны, а не только счётчики.
+
+    При равном числе классов «(150 против 150 классов)» не говорит, что чинить: разошёлся
+    порядок, а какой именно класс уехал — из текста не видно.
+    """
+    pytest.importorskip("torch")
+    import torch
+
+    from scripts.eval_finetune_ru import _run_model_evaluation
+
+    чекпоинт = {
+        "config": {"backbone": "mobilenetv4_conv_medium.e500_r256_in1k", "embedding_dim": 256},
+        "class_index": {"lada__2107": 0, "kia__rio": 1},
+        "model_state": {},
+        "head_state": {},
+        "img_size": 320,
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225],
+    }
+    чекпоинт_файл = tmp_path / "last.pt"
+    torch.save(чекпоинт, чекпоинт_файл)
+
+    with pytest.raises(ValueError, match=r"слот 1.*kia__rio.*uaz__patriot"):
+        _run_model_evaluation(
+            checkpoint_path=чекпоинт_файл,
+            centroids=np.zeros((2, 4, 256), dtype=np.float32),
+            idx_to_class_id={0: "lada__2107", 1: "uaz__patriot"},
+            index_embedding_dim=256,
+            holdout_path=tmp_path / "holdout.parquet",
+            crops_root=tmp_path / "crops",
+            weights="raw",
+            device="cpu",
+        )
+
+
+def test_размерность_индекса_против_чекпоинта_роняет_замер(tmp_path: Path) -> None:
+    """Индекс, собранный другим энкодером, отказывается до первого форварда.
+
+    Косинус между эмбеддингом 256 и центроидом 512 не определён вовсе: без этой проверки
+    отказ пришёл бы из numpy на matmul, без имён и после полного прохода по эталону.
+    """
+    pytest.importorskip("torch")
+    import torch
+
+    from scripts.eval_finetune_ru import _run_model_evaluation
+
+    чекпоинт = {
+        "config": {"backbone": "mobilenetv4_conv_medium.e500_r256_in1k", "embedding_dim": 256},
+        "class_index": {"lada__2107": 0},
+        "model_state": {},
+        "head_state": {},
+        "img_size": 320,
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225],
+    }
+    чекпоинт_файл = tmp_path / "last.pt"
+    torch.save(чекпоинт, чекпоинт_файл)
+
+    with pytest.raises(ValueError, match=r"embedding_dim чекпоинта \(256\) не совпадает.*\(512\)"):
+        _run_model_evaluation(
+            checkpoint_path=чекпоинт_файл,
+            centroids=np.zeros((1, 4, 512), dtype=np.float32),
+            idx_to_class_id={0: "lada__2107"},
+            index_embedding_dim=512,
+            holdout_path=tmp_path / "holdout.parquet",
+            crops_root=tmp_path / "crops",
+            weights="raw",
+            device="cpu",
+        )
+
+
+def test_отсутствующий_эталон_роняет_main(tmp_path: Path) -> None:
+    """Эталон проверяется на входе, наравне с чекпоинтом, индексом и базисом.
+
+    Без этой проверки отсутствие файла всплывало бы только внутри `read_samples`, после
+    загрузки torch и весов, а провенанс отчёта носил бы `holdout_sha256 = "unknown"`.
+    """
+    индекс = tmp_path / "index"
+    индекс.mkdir()
+    (индекс / "catalog_index.bin").write_bytes(b"dummy")
+    (индекс / "catalog_meta.json").write_text("{}", encoding="utf-8")
+    чекпоинт = tmp_path / "last.pt"
+    чекпоинт.write_bytes(b"dummy")
+    базис = tmp_path / "fewshot_metrics.json"
+    базис.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match=r"эталон не найден"):
+        main(
+            [
+                "--checkpoint",
+                str(чекпоинт),
+                "--index",
+                str(индекс),
+                "--baseline",
+                str(базис),
+                "--holdout",
+                str(tmp_path / "нет-такого.parquet"),
+            ]
         )
