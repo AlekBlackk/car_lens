@@ -12,6 +12,7 @@ from scripts.eval_fewshot import (
     idx_to_class_id_of,
     missing_holdout_classes,
     read_split_report,
+    сохранить_отчёт_сборки,
 )
 
 МЕТА = {
@@ -74,3 +75,24 @@ def test_чтение_отчёта_сплита_извлекает_дроблё�
 def test_чтение_отчёта_сплита_когда_нет_файла_возвращает_пустой_кортеж(tmp_path: Path) -> None:
     путь = tmp_path / "несуществующий_report.json"
     assert read_split_report(путь) == ()
+
+
+def test_отчёт_сборки_ложится_рядом_с_отчётом_замера(tmp_path: Path) -> None:
+    """Имя сайдкара выводится из имени отчёта: файлы обязаны находиться друг по другу."""
+    отчёт = tmp_path / "fewshot-m2.md"
+    текст = '{\n  "index_sha256": "9c1f",\n  "embeddings_total": 7\n}'
+
+    путь = сохранить_отчёт_сборки(отчёт, текст)
+
+    assert путь == tmp_path / "fewshot-m2-index-report.json"
+    assert путь.read_text(encoding="utf-8") == текст
+
+
+def test_отчёт_сборки_переписывается_повторным_замером(tmp_path: Path) -> None:
+    """Перезамер обновляет сайдкар, а не дописывает: рядом с числами лежит их индекс."""
+    отчёт = tmp_path / "fewshot-m2.md"
+    сохранить_отчёт_сборки(отчёт, '{"index_sha256": "старый"}')
+
+    путь = сохранить_отчёт_сборки(отчёт, '{"index_sha256": "новый"}')
+
+    assert путь.read_text(encoding="utf-8") == '{"index_sha256": "новый"}'

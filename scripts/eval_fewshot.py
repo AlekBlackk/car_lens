@@ -3,7 +3,8 @@
 Скрипт читает `catalog_index.bin`, сверяет его с `catalog_meta.json` (проверка
 `verify_meta`, §13.2), прогоняет энкодер по кадрам `holdout_ru`, считает ранжирование по
 центроидам, вычисляет метрики, проверяет гейт G_FS1–G_FS3 и пишет отчёт в
-`bench/fewshot-m2.md`.
+`bench/fewshot-m2.md`, а рядом с ним — копию `report.json` сборки индекса, которым замер
+получен.
 
 Имена классов берутся из `catalog_meta.json`, а не загружаются из каталога YAML заново:
 замер обязан оценивать классы ровно в тех слотах и под теми именами, под которыми они
@@ -76,6 +77,23 @@ def read_split_report(report_path: Path) -> tuple[str, ...]:
     return tuple(данные.get("refined_classes", ()))
 
 
+def сохранить_отчёт_сборки(report_path: Path, build_report: str) -> Path:
+    """Положить `report.json` сборки индекса рядом с отчётом замера, вернуть путь копии.
+
+    Числа замера без индекса, которым они получены, неразбираемы: перезамер C1 свёлся к
+    пересборке вслепую именно потому, что индекс не сохранили, и пять чисел из семи не
+    воспроизвелись (`bench/fewshot-m2.md`, «Воспроизводимость перезамера»). Каталог данных
+    живёт на одной машине и переписывается следующей сборкой, отчёт — под git, поэтому
+    провенанс кладётся рядом с числами, а не остаётся ссылкой на путь в WSL.
+
+    Текст пишется как прочитан, а не пересобирается из разобранного json: копия обязана
+    говорить то же, что отчёт сборки, вплоть до порядка ключей.
+    """
+    путь = report_path.with_name(f"{report_path.stem}-index-report.json")
+    путь.write_text(build_report, encoding="utf-8")
+    return путь
+
+
 def evaluate(
     embeddings: np.ndarray,
     targets: Sequence[int],
@@ -118,7 +136,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     мета = json.loads(байты_меты)
     имена = idx_to_class_id_of(мета)
 
-    сборка = json.loads((каталог_индекса / "report.json").read_text(encoding="utf-8"))
+    сборка_текст = (каталог_индекса / "report.json").read_text(encoding="utf-8")
+    сборка = json.loads(сборка_текст)
 
     кадр = read_split(splits_dir() / f"{аргументы.split}.parquet")
     группы = crops_by_class(кадр, harvest_dir() / "crops")
@@ -166,6 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         encoding="utf-8",
     )
+    путь_сборки = сохранить_отчёт_сборки(аргументы.report, сборка_текст)
     (каталог_индекса / "fewshot_metrics.json").write_text(
         json.dumps(
             {
@@ -184,6 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         encoding="utf-8",
     )
     print(f"top-1 {метрики.top1:.4f}, top-3 {метрики.top3:.4f}")
+    print(f"отчёт сборки индекса: {путь_сборки}")
     for провал in гейт.failures:
         print(f"  ✗ {провал}")
     return 0 if гейт.passed else 1
