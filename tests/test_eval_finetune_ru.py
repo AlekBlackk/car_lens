@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -185,10 +186,24 @@ def test_отчёт_записан_по_пути_из_флага(monkeypatch: py
 
     чекпоинт_файл = tmp_path / "last.pt"
     чекпоинт_файл.write_bytes(b"dummy_pt")
+    хеш_чекпоинта = hashlib.sha256(чекпоинт_файл.read_bytes()).hexdigest()
+    (каталог_индекса / "catalog_meta.json").write_text(
+        json.dumps(
+            {
+                "model_weights_sha256": хеш_чекпоинта,
+                "classes": [
+                    {"class_id": класс, "members": [класс]} for класс in G_FS2_CORE_CLASSES
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     # Эталон свой, а не умолчание: иначе тест молча опирался бы на настоящий
     # holdout_ru.parquet в каталоге данных и падал бы там, где данных нет.
     эталон_файл = tmp_path / "holdout_ru.parquet"
     эталон_файл.write_bytes(b"dummy_parquet")
+    пул_файл = tmp_path / "training_pool.parquet"
+    пул_файл.write_bytes(b"training_pool")
 
     фиктивные_метрики_индекс = FewShotMetrics(
         top1=0.48,
@@ -230,6 +245,7 @@ def test_отчёт_записан_по_пути_из_флага(monkeypatch: py
             "abc1234",
         ),
     )
+    monkeypatch.setattr("pipeline.schema.read_split", lambda путь: [object(), object(), object()])
 
     код_возврата = main(
         [
@@ -239,6 +255,8 @@ def test_отчёт_записан_по_пути_из_флага(monkeypatch: py
             str(каталог_индекса),
             "--baseline",
             str(базис_json),
+            "--pool",
+            str(пул_файл),
             "--holdout",
             str(эталон_файл),
             "--out",
@@ -256,15 +274,18 @@ def test_отчёт_записан_по_пути_из_флага(monkeypatch: py
     assert "## Поклассовые дельты: десять вверх и десять вниз" in текст
     assert "## Ожидание против факта" in текст
     assert "## Четыре искажения, названные до прогона" in текст
+    assert hashlib.sha256(пул_файл.read_bytes()).hexdigest() in текст
+    assert "кадров 3" in текст
     assert "top-1" in текст
     assert "top-3" in текст
 
 
 def test_разбор_флагов_даёт_значения_по_умолчанию() -> None:
-    """Три пути по умолчанию совпадают с splits_dir(), harvest_dir() и каталогом few-shot."""
+    """Пути по умолчанию совпадают со splits_dir(), harvest_dir() и каталогом few-shot."""
     парсер = build_parser()
     аргументы = парсер.parse_args(["--checkpoint", "last.pt", "--index", "some_index"])
 
+    assert аргументы.pool == splits_dir() / "pool.parquet"
     assert аргументы.holdout == splits_dir() / "holdout_ru.parquet"
     assert аргументы.crops_root == harvest_dir() / "crops"
     assert аргументы.baseline == data_root() / "index/fewshot_openclip_b32/fewshot_metrics.json"
@@ -275,17 +296,42 @@ def test_разбор_флагов_даёт_значения_по_умолчан
     assert аргументы.train_minutes == 0.0
 
 
-def test_config_sha256_дамп_при_отсутствии_файлов(tmp_path: Path) -> None:
-    """При отсутствии config.yaml рядом sha256 считается детерминированно из словаря."""
+def test_config_sha256_из_канонического_конфига_чекпоинта(tmp_path: Path) -> None:
+    """Mutable config.yaml рядом не подменяет конфиг, фактически загруженный из checkpoint."""
     import hashlib
 
     from scripts.eval_finetune_ru import _config_sha256
 
-    конфиг = {"backbone": "mobilenetv4_conv_medium.e500_r256_in1k", "epochs": 60}
+    конфиг = {"epochs": 60, "backbone": "mobilenetv4_conv_medium.e500_r256_in1k"}
     чекпоинт = tmp_path / "last.pt"
+    (tmp_path / "config.yaml").write_text("epochs: 999\n", encoding="utf-8")
+
     хеш = _config_sha256(чекпоинт, конфиг)
-    ожидаемый = hashlib.sha256(json.dumps(конфиг, sort_keys=True).encode("utf-8")).hexdigest()
-    assert хеш == ожидаемый
+
+    канон = b'{"backbone":"mobilenetv4_conv_medium.e500_r256_in1k","epochs":60}'
+    assert хеш == hashlib.sha256(канон).hexdigest()
+
+
+def test_git_sha_предпочитает_чекпоинт_текущему_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Провенанс модели — commit обучения из checkpoint, а не текущий commit замера."""
+    import subprocess
+
+    from scripts.eval_finetune_ru import _git_sha
+
+    monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: b"current_checkout\n")
+    assert _git_sha("training_checkpoint") == "training_checkpoint"
+
+
+def test_git_sha_берёт_checkout_без_sha_чекпоинта(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Старый checkpoint без git_sha использует текущий checkout как запасной источник."""
+    import subprocess
+
+    from scripts.eval_finetune_ru import _git_sha
+
+    monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: b"current_checkout\n")
+    assert _git_sha(None) == "current_checkout"
 
 
 def test_git_sha_возвращает_запасной_при_ошибке_git(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -659,6 +705,151 @@ def test_размерность_индекса_против_чекпоинта_�
         )
 
 
+def test_две_трассы_требуют_одинаковые_цели(tmp_path: Path) -> None:
+    """Второй проход по loader не может молча измерять другой порядок или набор кадров."""
+    pytest.importorskip("torch")
+    import torch
+
+    from scripts.eval_finetune_ru import _run_model_evaluation
+
+    class ФиктивныйМодуль:
+        mean = (0.5, 0.5, 0.5)
+        std = (0.5, 0.5, 0.5)
+
+        def load_state_dict(self, state: object) -> None:
+            pass
+
+        def to(self, device: object) -> None:
+            pass
+
+    checkpoint = tmp_path / "last.pt"
+    torch.save(
+        {
+            "config": {"backbone": "stub", "embedding_dim": 2},
+            "class_index": {"lada__2107": 0},
+            "model_state": {},
+            "head_state": {},
+            "img_size": 2,
+            "mean": [0.5, 0.5, 0.5],
+            "std": [0.5, 0.5, 0.5],
+        },
+        checkpoint,
+    )
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "training.model.create_model",
+        lambda *args, **kwargs: (ФиктивныйМодуль(), ФиктивныйМодуль()),
+    )
+    monkeypatch.setattr("training.samples.read_samples", lambda *args, **kwargs: [object()])
+    monkeypatch.setattr("training.dataset.build_transforms", lambda *args, **kwargs: object())
+    monkeypatch.setattr("training.dataset.make_loader", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        "training.build_index.collect_embeddings",
+        lambda *args, **kwargs: (np.array([[1.0, 0.0]], dtype=np.float32), [0]),
+    )
+    метрики = FewShotMetrics(1.0, 1.0, {"lada__2107": 1.0}, {"lada__2107": 1})
+    monkeypatch.setattr(
+        "scripts.eval_finetune_ru.evaluate_index_track",
+        lambda *args, **kwargs: ([[0]], метрики),
+    )
+    monkeypatch.setattr(
+        "scripts.eval_finetune_ru.evaluate_head_track",
+        lambda *args, **kwargs: ([[0]], [1], метрики),
+    )
+
+    try:
+        with pytest.raises(ValueError, match="цели главной и справочной трасс не совпадают"):
+            _run_model_evaluation(
+                checkpoint_path=checkpoint,
+                centroids=np.zeros((1, 4, 2), dtype=np.float32),
+                idx_to_class_id={0: "lada__2107"},
+                index_embedding_dim=2,
+                holdout_path=tmp_path / "holdout.parquet",
+                crops_root=tmp_path / "crops",
+                weights="raw",
+                device="cpu",
+            )
+    finally:
+        monkeypatch.undo()
+
+
+def test_несовпадение_хеша_чекпоинта_и_меты_индекса_роняет_main(tmp_path: Path) -> None:
+    """Индекс обязан быть построен ровно тем checkpoint, который сейчас измеряется."""
+    индекс = tmp_path / "index"
+    индекс.mkdir()
+    (индекс / "catalog_index.bin").write_bytes(b"dummy")
+    (индекс / "catalog_meta.json").write_text(
+        json.dumps({"model_weights_sha256": "0" * 64, "classes": []}),
+        encoding="utf-8",
+    )
+    чекпоинт = tmp_path / "last.pt"
+    чекпоинт.write_bytes(b"other checkpoint")
+    пул = tmp_path / "pool.parquet"
+    пул.write_bytes(b"pool")
+    эталон = tmp_path / "holdout.parquet"
+    эталон.write_bytes(b"holdout")
+    базис = tmp_path / "baseline.json"
+    базис.write_text("{}", encoding="utf-8")
+
+    from pipeline.index_format import DTYPE_FLOAT32, IndexHeader
+
+    заголовок = IndexHeader(1, 1, 1, DTYPE_FLOAT32, True, b"\x00" * 32)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "scripts.eval_finetune_ru.read_index",
+        lambda путь: (заголовок, np.zeros((1, 1, 1), dtype=np.float32)),
+    )
+    monkeypatch.setattr("scripts.eval_finetune_ru.verify_meta", lambda *args: None)
+    try:
+        with pytest.raises(ValueError, match=r"model_weights_sha256 меты.*sha256 чекпоинта"):
+            main(
+                [
+                    "--checkpoint",
+                    str(чекпоинт),
+                    "--index",
+                    str(индекс),
+                    "--pool",
+                    str(пул),
+                    "--holdout",
+                    str(эталон),
+                    "--baseline",
+                    str(базис),
+                ]
+            )
+    finally:
+        monkeypatch.undo()
+
+
+def test_отсутствующий_пул_роняет_main(tmp_path: Path) -> None:
+    """Провенанс не подменяет отсутствующий обучающий пул значениями unknown и 0."""
+    индекс = tmp_path / "index"
+    индекс.mkdir()
+    (индекс / "catalog_index.bin").write_bytes(b"dummy")
+    (индекс / "catalog_meta.json").write_text("{}", encoding="utf-8")
+    чекпоинт = tmp_path / "last.pt"
+    чекпоинт.write_bytes(b"dummy")
+    эталон = tmp_path / "holdout.parquet"
+    эталон.write_bytes(b"holdout")
+    базис = tmp_path / "baseline.json"
+    базис.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match=r"обучающий пул не найден"):
+        main(
+            [
+                "--checkpoint",
+                str(чекпоинт),
+                "--index",
+                str(индекс),
+                "--pool",
+                str(tmp_path / "missing-pool.parquet"),
+                "--holdout",
+                str(эталон),
+                "--baseline",
+                str(базис),
+            ]
+        )
+
+
 def test_отсутствующий_эталон_роняет_main(tmp_path: Path) -> None:
     """Эталон проверяется на входе, наравне с чекпоинтом, индексом и базисом.
 
@@ -673,6 +864,8 @@ def test_отсутствующий_эталон_роняет_main(tmp_path: Pat
     чекпоинт.write_bytes(b"dummy")
     базис = tmp_path / "fewshot_metrics.json"
     базис.write_text("{}", encoding="utf-8")
+    пул = tmp_path / "pool.parquet"
+    пул.write_bytes(b"pool")
 
     with pytest.raises(FileNotFoundError, match=r"эталон не найден"):
         main(
@@ -683,6 +876,8 @@ def test_отсутствующий_эталон_роняет_main(tmp_path: Pat
                 str(индекс),
                 "--baseline",
                 str(базис),
+                "--pool",
+                str(пул),
                 "--holdout",
                 str(tmp_path / "нет-такого.parquet"),
             ]

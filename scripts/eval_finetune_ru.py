@@ -64,16 +64,17 @@ def sha256_of_file(path: Path) -> str:
 
 
 def _config_sha256(checkpoint_path: Path, config: Mapping[str, Any]) -> str:
-    """sha256 конфига: из файла config.yaml рядом с чекпоинтом либо дампа словаря."""
-    рядом = checkpoint_path.parent / "config.yaml"
-    if рядом.is_file():
-        return sha256_of_file(рядом)
-    дамп = json.dumps(dict(config), sort_keys=True, default=str).encode("utf-8")
+    """sha256 канонического конфига, фактически сохранённого в чекпоинте."""
+    дамп = json.dumps(dict(config), sort_keys=True, separators=(",", ":"), default=str).encode(
+        "utf-8"
+    )
     return hashlib.sha256(дамп).hexdigest()
 
 
-def _git_sha(fallback: str | None = None) -> str:
-    """Хеш текущего git-коммита либо запасной из чекпоинта."""
+def _git_sha(checkpoint_sha: str | None = None) -> str:
+    """Хеш обучения из чекпоинта; для старого формата — текущий git-коммит."""
+    if checkpoint_sha:
+        return checkpoint_sha
     try:
         вых = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL
@@ -83,7 +84,7 @@ def _git_sha(fallback: str | None = None) -> str:
             return sha
     except Exception:
         pass
-    return fallback or "unknown"
+    return "unknown"
 
 
 def idx_to_class_id_of(meta: Mapping[str, Any]) -> dict[int, str]:
@@ -250,9 +251,11 @@ def _run_model_evaluation(
     _, метрики_индекс = evaluate_index_track(эмбеддинги, метки, centroids, idx_to_class_id)
 
     # Справочная трасса: логиты головы ArcFace
-    _, _, метрики_голова = evaluate_head_track(
+    _, цели_головы, метрики_голова = evaluate_head_track(
         модель, голова, загрузчик, device=устройство, idx_to_class_id=idx_to_class_id
     )
+    if цели_головы != метки:
+        raise ValueError("цели главной и справочной трасс не совпадают")
 
     return метрики_индекс, метрики_голова, конфиг, len(метки), чекпоинт_git_sha
 
@@ -279,6 +282,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=splits_dir() / "holdout_ru.parquet",
         help="parquet-файл эталона holdout_ru",
+    )
+    парсер.add_argument(
+        "--pool",
+        type=Path,
+        default=splits_dir() / "pool.parquet",
+        help="parquet-файл обучающего пула, по которому построен индекс",
     )
     парсер.add_argument(
         "--crops-root",
@@ -343,13 +352,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise FileNotFoundError(f"файл меты индекса не найден: {путь_меты}")
     if not аргументы.baseline.is_file():
         raise FileNotFoundError(f"файл базиса не найден: {аргументы.baseline}")
+    if not аргументы.pool.is_file():
+        raise FileNotFoundError(f"обучающий пул не найден: {аргументы.pool}")
     if not аргументы.holdout.is_file():
         raise FileNotFoundError(f"эталон не найден: {аргументы.holdout}")
 
+    хеш_весов = sha256_of_file(аргументы.checkpoint)
     заголовок, центроиды = read_index(путь_бинарного_индекса)
     байты_меты = путь_меты.read_bytes()
     verify_meta(заголовок, байты_меты)
     мета = json.loads(байты_меты)
+    хеш_весов_меты = str(мета.get("model_weights_sha256", ""))
+    if хеш_весов_меты != хеш_весов:
+        raise ValueError(
+            f"model_weights_sha256 меты {хеш_весов_меты or 'отсутствует'} "
+            f"против sha256 чекпоинта {хеш_весов}"
+        )
     имена = idx_to_class_id_of(мета)
 
     метрики_индекс, метрики_голова, конфиг, кадров_эталона, чекпоинт_sha = _run_model_evaluation(
@@ -366,20 +384,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     гейт = check_gate(метрики_индекс, catalog_classes=заголовок.num_classes)
     базис = read_fewshot_metrics(аргументы.baseline)
 
-    путь_пула = splits_dir() / "pool.parquet"
-    if путь_пула.is_file():
-        хеш_пула = sha256_of_file(путь_пула)
-        from pipeline.schema import read_split
+    путь_пула = аргументы.pool
+    хеш_пула = sha256_of_file(путь_пула)
+    from pipeline.schema import read_split
 
-        кадров_пула = len(read_split(путь_пула))
-    else:
-        хеш_пула = "unknown"
-        кадров_пула = 0
+    кадров_пула = len(read_split(путь_пула))
 
-    # Три файла проверены на входе, поэтому хеши считаются без оговорки: "unknown" в
+    # Все входные файлы проверены выше, поэтому хеши считаются без оговорки: "unknown" в
     # провенансе означал бы, что замер прошёл по файлу, которого нет.
     хеш_эталона = sha256_of_file(аргументы.holdout)
-    хеш_весов = sha256_of_file(аргументы.checkpoint)
     хеш_индекса = sha256_of_file(путь_бинарного_индекса)
 
     провенанс = RunProvenance(
