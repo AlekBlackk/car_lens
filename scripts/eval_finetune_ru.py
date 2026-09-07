@@ -151,11 +151,25 @@ def _run_model_evaluation(
 
     чекпоинт: dict[str, Any] = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     ключ_модели = "model_state" if weights == "raw" else "ema_state"
-    for обязательный in ("config", "class_index", "head_state", ключ_модели):
+    # `img_size`, `mean` и `std` требуются наравне с весами, а не подставляются умолчанием.
+    # Чужая нормализация или чужой размер входа меняют эмбеддинг, то есть само замеряемое
+    # число, и не роняют при этом ничего: в отчёт уехало бы правдоподобное неверное значение.
+    # `training/train.py:599-614` кладёт все три в каждый чекпоинт, поэтому их отсутствие —
+    # признак битого файла, а не старого формата, и молчать о нём нельзя.
+    обязательные = ("config", "class_index", "head_state", ключ_модели, "img_size", "mean", "std")
+    for обязательный in обязательные:
         if обязательный not in чекпоинт:
             raise ValueError(f"{checkpoint_path}: ключ {обязательный!r} отсутствует в чекпоинте")
 
     конфиг = dict(чекпоинт["config"])
+    # Архитектура и размерность — из конфига прогона по той же причине. Зашитая константа
+    # собрала бы другую сеть под теми же весами: при несовпадении форм отказ пришёл бы
+    # стеной ключей `load_state_dict`, из которой причину не видно, а при совпадении замер
+    # молча пошёл бы по чужой архитектуре.
+    for поле in ("backbone", "embedding_dim"):
+        if поле not in конфиг:
+            raise ValueError(f"{checkpoint_path}: поле {поле!r} отсутствует в config чекпоинта")
+
     индекс = dict(чекпоинт["class_index"])
     чекпоинт_по_индексу = {номер: класс for класс, номер in индекс.items()}
     if чекпоинт_по_индексу != dict(idx_to_class_id):
@@ -166,9 +180,9 @@ def _run_model_evaluation(
     чекпоинт_git_sha: str | None = чекпоинт.get("git_sha")
 
     модель, голова = create_model(
-        str(конфиг.get("backbone", "mobilenetv4_conv_medium.e500_r256_in1k")),
+        str(конфиг["backbone"]),
         num_classes=len(индекс),
-        embedding_dim=int(конфиг.get("embedding_dim", 256)),
+        embedding_dim=int(конфиг["embedding_dim"]),
         pretrained=False,
     )
     модель.load_state_dict(чекпоинт[ключ_модели])
@@ -184,24 +198,18 @@ def _run_model_evaluation(
         num_classes=len(индекс),
         skip_multi_car=True,
     )
-    сырое_среднее = чекпоинт.get("mean", модель.mean)
-    сырое_отклонение = чекпоинт.get("std", модель.std)
     среднее = (
-        float(сырое_среднее[0]),
-        float(сырое_среднее[1]),
-        float(сырое_среднее[2]),
+        float(чекпоинт["mean"][0]),
+        float(чекпоинт["mean"][1]),
+        float(чекпоинт["mean"][2]),
     )
     отклонение = (
-        float(сырое_отклонение[0]),
-        float(сырое_отклонение[1]),
-        float(сырое_отклонение[2]),
+        float(чекпоинт["std"][0]),
+        float(чекпоинт["std"][1]),
+        float(чекпоинт["std"][2]),
     )
-    сырой_размер = чекпоинт.get("img_size")
-    if сырой_размер is None:
-        сырой_размер = конфиг.get("img_size", 320)
-    img_size = int(сырой_размер)
     трансформы = build_transforms(
-        img_size,
+        int(чекпоинт["img_size"]),
         train=False,
         mean=среднее,
         std=отклонение,

@@ -386,6 +386,9 @@ def test_рассогласование_классов_чекпоинта_и_и�
         "class_index": {"lada__2107": 0, "kia__rio": 1},
         "model_state": {},
         "head_state": {},
+        "img_size": 320,
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225],
     }
     чекпоинт_файл = tmp_path / "last.pt"
     torch.save(чекпоинт, чекпоинт_файл)
@@ -487,4 +490,87 @@ def test_отрицательное_время_обучения_роняет_mai
                 "--train-minutes",
                 "-10.5",
             ]
+        )
+
+
+@pytest.mark.parametrize("пропущенный_ключ", ["img_size", "mean", "std"])
+def test_отсутствие_параметра_предобработки_роняет_замер(
+    tmp_path: Path, пропущенный_ключ: str
+) -> None:
+    """Параметры предобработки требуются, а не подставляются умолчанием (Р-21).
+
+    Чужие `mean`, `std` или `img_size` меняют эмбеддинг, а значит и замеряемое число,
+    молча: отчёт получился бы правдоподобным и неверным. `train.py` пишет все три в
+    каждый чекпоинт, поэтому их отсутствие — признак битого файла, а не старого формата.
+    """
+    pytest.importorskip("torch")
+    import torch
+
+    from scripts.eval_finetune_ru import _run_model_evaluation
+
+    чекпоинт = {
+        "config": {"backbone": "mobilenetv4_conv_medium.e500_r256_in1k", "embedding_dim": 256},
+        "class_index": {"lada__2107": 0},
+        "model_state": {},
+        "head_state": {},
+        "img_size": 320,
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225],
+    }
+    del чекпоинт[пропущенный_ключ]
+
+    чекпоинт_файл = tmp_path / f"no_{пропущенный_ключ}.pt"
+    torch.save(чекпоинт, чекпоинт_файл)
+
+    with pytest.raises(ValueError, match=rf"ключ '{пропущенный_ключ}' отсутствует в чекпоинте"):
+        _run_model_evaluation(
+            checkpoint_path=чекпоинт_файл,
+            centroids=np.zeros((1, 4, 256), dtype=np.float32),
+            idx_to_class_id={0: "lada__2107"},
+            holdout_path=tmp_path / "holdout.parquet",
+            crops_root=tmp_path / "crops",
+            weights="raw",
+            device="cpu",
+        )
+
+
+@pytest.mark.parametrize("пропущенное_поле", ["backbone", "embedding_dim"])
+def test_отсутствие_поля_конфига_роняет_замер(tmp_path: Path, пропущенное_поле: str) -> None:
+    """Архитектура и размерность берутся из конфига чекпоинта, а не из зашитой константы.
+
+    Зашитое умолчание собрало бы другую сеть под теми же весами: `load_state_dict` упал бы
+    стеной несовпавших ключей, из которой причину не видно, а совпади размерности — замер
+    пошёл бы по чужой архитектуре.
+    """
+    pytest.importorskip("torch")
+    import torch
+
+    from scripts.eval_finetune_ru import _run_model_evaluation
+
+    конфиг = {"backbone": "mobilenetv4_conv_medium.e500_r256_in1k", "embedding_dim": 256}
+    del конфиг[пропущенное_поле]
+    чекпоинт = {
+        "config": конфиг,
+        "class_index": {"lada__2107": 0},
+        "model_state": {},
+        "head_state": {},
+        "img_size": 320,
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225],
+    }
+
+    чекпоинт_файл = tmp_path / f"no_{пропущенное_поле}.pt"
+    torch.save(чекпоинт, чекпоинт_файл)
+
+    with pytest.raises(
+        ValueError, match=rf"поле '{пропущенное_поле}' отсутствует в config чекпоинта"
+    ):
+        _run_model_evaluation(
+            checkpoint_path=чекпоинт_файл,
+            centroids=np.zeros((1, 4, 256), dtype=np.float32),
+            idx_to_class_id={0: "lada__2107"},
+            holdout_path=tmp_path / "holdout.parquet",
+            crops_root=tmp_path / "crops",
+            weights="raw",
+            device="cpu",
         )
