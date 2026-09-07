@@ -280,12 +280,22 @@ def test_отчёт_записан_по_пути_из_флага(monkeypatch: py
     assert "top-3" in текст
 
 
-def test_разбор_флагов_даёт_значения_по_умолчанию() -> None:
-    """Пути по умолчанию совпадают со splits_dir(), harvest_dir() и каталогом few-shot."""
+def test_разбор_флагов_требует_обучающий_пул() -> None:
+    """Пул задаётся явно: текущий pool.parquet мог не участвовать в обучении модели."""
     парсер = build_parser()
-    аргументы = парсер.parse_args(["--checkpoint", "last.pt", "--index", "some_index"])
 
-    assert аргументы.pool == splits_dir() / "pool.parquet"
+    with pytest.raises(SystemExit):
+        парсер.parse_args(["--checkpoint", "last.pt", "--index", "some_index"])
+
+
+def test_разбор_флагов_даёт_значения_по_умолчанию() -> None:
+    """Остальные пути по умолчанию совпадают с harvest_dir() и каталогом few-shot."""
+    парсер = build_parser()
+    аргументы = парсер.parse_args(
+        ["--checkpoint", "last.pt", "--index", "some_index", "--pool", "training.parquet"]
+    )
+
+    assert аргументы.pool == Path("training.parquet")
     assert аргументы.holdout == splits_dir() / "holdout_ru.parquet"
     assert аргументы.crops_root == harvest_dir() / "crops"
     assert аргументы.baseline == data_root() / "index/fewshot_openclip_b32/fewshot_metrics.json"
@@ -489,21 +499,48 @@ def test_несуществующие_файлы_роняют_main(tmp_path: Pat
 
     существующий_базис = tmp_path / "baseline.json"
     существующий_базис.write_bytes(b"{}")
+    существующий_пул = tmp_path / "pool.parquet"
+    существующий_пул.write_bytes(b"pool")
+    обязательные = ["--pool", str(существующий_пул)]
 
     # 1. Нет чекпоинта
     with pytest.raises(FileNotFoundError, match=r"чекпоинт не найден"):
-        main(["--checkpoint", str(tmp_path / "missing.pt"), "--index", str(каталог_индекса)])
+        main(
+            [
+                "--checkpoint",
+                str(tmp_path / "missing.pt"),
+                "--index",
+                str(каталог_индекса),
+                *обязательные,
+            ]
+        )
 
     # 2. Нет бинарного индекса
     (каталог_индекса / "catalog_index.bin").unlink()
     with pytest.raises(FileNotFoundError, match=r"файл индекса не найден"):
-        main(["--checkpoint", str(существующий_чекпоинт), "--index", str(каталог_индекса)])
+        main(
+            [
+                "--checkpoint",
+                str(существующий_чекпоинт),
+                "--index",
+                str(каталог_индекса),
+                *обязательные,
+            ]
+        )
     (каталог_индекса / "catalog_index.bin").write_bytes(b"dummy")
 
     # 3. Нет catalog_meta.json
     (каталог_индекса / "catalog_meta.json").unlink()
     with pytest.raises(FileNotFoundError, match=r"файл меты индекса не найден"):
-        main(["--checkpoint", str(существующий_чекпоинт), "--index", str(каталог_индекса)])
+        main(
+            [
+                "--checkpoint",
+                str(существующий_чекпоинт),
+                "--index",
+                str(каталог_индекса),
+                *обязательные,
+            ]
+        )
     (каталог_индекса / "catalog_meta.json").write_bytes(b"{}")
 
     # 4. Нет базиса
@@ -516,6 +553,8 @@ def test_несуществующие_файлы_роняют_main(tmp_path: Pat
                 str(каталог_индекса),
                 "--baseline",
                 str(tmp_path / "missing_baseline.json"),
+                "--pool",
+                str(существующий_пул),
             ]
         )
 
@@ -532,6 +571,8 @@ def test_отрицательное_время_обучения_роняет_mai
 
     базис = tmp_path / "baseline.json"
     базис.write_bytes(b"{}")
+    пул = tmp_path / "pool.parquet"
+    пул.write_bytes(b"pool")
 
     with pytest.raises(ValueError, match=r"train_minutes не может быть отрицательным"):
         main(
@@ -542,6 +583,8 @@ def test_отрицательное_время_обучения_роняет_mai
                 str(индекс),
                 "--baseline",
                 str(базис),
+                "--pool",
+                str(пул),
                 "--train-minutes",
                 "-10.5",
             ]

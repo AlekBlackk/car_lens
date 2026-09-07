@@ -286,7 +286,7 @@ def build_parser() -> argparse.ArgumentParser:
     парсер.add_argument(
         "--pool",
         type=Path,
-        default=splits_dir() / "pool.parquet",
+        required=True,
         help="parquet-файл обучающего пула, по которому построен индекс",
     )
     парсер.add_argument(
