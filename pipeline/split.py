@@ -13,8 +13,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from itertools import combinations
 from typing import SupportsInt, cast
 
 import pandas as pd
@@ -27,9 +28,11 @@ __all__ = [
     "DEFAULT_MIN_LISTINGS_PER_CLASS",
     "DEFAULT_PHASH_HAMMING",
     "SPLIT_NAMES",
+    "CrossClassPhashPair",
     "InvariantError",
     "SplitRatios",
     "check_invariants",
+    "cross_class_close_phash",
     "hamming",
     "split_by_listing",
 ]
@@ -42,6 +45,58 @@ SPLIT_NAMES: tuple[str, ...] = ("train", "val", "test")
 
 class InvariantError(ValueError):
     """Нарушен один из инвариантов §13.1."""
+
+
+@dataclass(frozen=True, slots=True)
+class CrossClassPhashPair:
+    """Близкие pHash у кадров разных классов: подозрение на ошибку метки, не утечка.
+
+    Классы упорядочены (`class_a < class_b`), чтобы печать и тесты не зависели
+    от порядка обхода сплитов.
+    """
+
+    distance: int
+    phash_a: int
+    phash_b: int
+    class_a: int
+    class_b: int
+
+
+def cross_class_close_phash(
+    splits: Mapping[str, pd.DataFrame], предел: int = DEFAULT_PHASH_HAMMING
+) -> list[CrossClassPhashPair]:
+    """Близкие pHash с разными классами — кандидаты на ошибку метки, для человека.
+
+    Инвариант 5 §13.1 такие пары нарушением не считает, но терять их нельзя: одна
+    машина под двумя метками выглядит именно так. Раскладка по сплитам здесь ни при
+    чём — ошибка метки от неё не зависит, поэтому пары ищутся по объединению сплитов.
+    Расстояние 0 идёт первым: совпадение хеша при разных метках — сильнейший признак.
+
+    Сторона пары не разъезжается: `phash_a` принадлежит `class_a`. Упорядочить класс
+    отдельно от хеша значило бы отправить человека к кадру другого класса.
+    """
+    классы_значения: dict[int, set[int]] = defaultdict(set)
+    for _, класс, значение in _строки_класс_хеш(splits):
+        классы_значения[значение].add(класс)
+
+    значения = sorted(классы_значения)
+    # Датакласс неизменяемый, поэтому множество само снимает повторы: одна и та же
+    # пара классов приходит дважды, когда оба хеша живут в нескольких классах.
+    пары: set[CrossClassPhashPair] = {
+        CrossClassPhashPair(0, a, a, ка, кб)
+        for a in значения
+        for ка, кб in combinations(sorted(классы_значения[a]), 2)
+    }
+    for i, j in close_pairs(значения, предел):
+        a, b = значения[i], значения[j]
+        расстояние = hamming(a, b)
+        for ка in классы_значения[a]:
+            for кб in классы_значения[b]:
+                if ка == кб:
+                    continue
+                (к_a, ф_a), (к_b, ф_b) = sorted(((ка, a), (кб, b)))
+                пары.add(CrossClassPhashPair(расстояние, ф_a, ф_b, к_a, к_b))
+    return sorted(пары, key=lambda п: (п.distance, п.class_a, п.class_b, п.phash_a, п.phash_b))
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,8 +258,32 @@ def _инвариант_4_согласованность_классов(splits: 
                 )
 
 
+def _строки_класс_хеш(splits: Mapping[str, pd.DataFrame]) -> Iterator[tuple[str, int, int]]:
+    """Тройки (сплит, класс, phash) по всем сплитам в порядке имён.
+
+    `class_idx` приводится к `-1`, как в инвариантах 3 и 4: класс отсутствует
+    двумя способами — пустым значением и `-1` §13.1, и строки без класса
+    обязаны сравниваться между собой, а не выпадать из проверки.
+    """
+    for имя, d in sorted(splits.items()):
+        классы = d["class_idx"].fillna(-1).astype(int)
+        for класс, значение in zip(классы, d["phash"], strict=True):
+            yield имя, int(класс), int(значение)
+
+
 def _инвариант_5_нет_близких_phash(splits: Mapping[str, pd.DataFrame], предел: int) -> None:
-    """Ни один pHash не встречается в двух сплитах с расстоянием ≤ предела.
+    """Ни один pHash одного класса не встречается в двух сплитах с расстоянием ≤ предела.
+
+    Сравнение ведётся внутри класса. Утечка, которую ловит инвариант, — одна
+    и та же машина в двух сплитах, а между двумя разными моделями такого
+    случая нет по построению: близкие хеши у разных классов означают либо
+    однотипную композицию кадра (один автор снимает разные машины с одной
+    точки), либо ошибку метки. Класс-безразличное сравнение отдавало таким
+    парам право решать раскладку сплитов — разбор и числа в §13.1. Межклассовые
+    пары не теряются: их возвращает `cross_class_close_phash`.
+
+    Область сравнения совпадает с областью отбора: `select_holdout` §3.5
+    считает компоненты связности pHash тоже внутри класса.
 
     Сравниваются только пары, попавшие в общую корзину `close_pairs`, —
     полный перебор на шестнадцати тысячах фотографий стоит минуты.
@@ -222,22 +301,27 @@ def _инвариант_5_нет_близких_phash(splits: Mapping[str, pd.Da
     кадры в train утечкой не являются, утечка — это одно и то же фото в
     двух разных сплитах.
     """
-    сплиты_значения: dict[int, set[str]] = defaultdict(set)
-    for имя, d in sorted(splits.items()):
-        for v in d["phash"]:
-            сплиты_значения[int(v)].add(имя)
+    по_классу: dict[int, dict[int, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for имя, класс, значение in _строки_класс_хеш(splits):
+        по_классу[класс][значение].add(имя)
 
-    значения = sorted(сплиты_значения)
-    for a in значения:
-        где = сплиты_значения[a]
-        if len(где) > 1:
-            первый, второй = sorted(где)[:2]
-            raise InvariantError(f"одинаковый phash {a} в сплитах {первый} и {второй}")
+    for класс in sorted(по_классу):
+        сплиты_значения = по_классу[класс]
+        значения = sorted(сплиты_значения)
+        for a in значения:
+            где = сплиты_значения[a]
+            if len(где) > 1:
+                первый, второй = sorted(где)[:2]
+                raise InvariantError(
+                    f"одинаковый phash {a} класса {класс} в сплитах {первый} и {второй}"
+                )
 
-    for i, j in close_pairs(значения, предел):
-        a, b = значения[i], значения[j]
-        # После проверки выше у каждого значения ровно один сплит.
-        (имя_a,) = сплиты_значения[a]
-        (имя_b,) = сплиты_значения[b]
-        if имя_a != имя_b:
-            raise InvariantError(f"близкие phash {a} и {b} в разных сплитах ({имя_a} и {имя_b})")
+        for i, j in close_pairs(значения, предел):
+            a, b = значения[i], значения[j]
+            # После проверки выше у каждого значения класса ровно один сплит.
+            (имя_a,) = сплиты_значения[a]
+            (имя_b,) = сплиты_значения[b]
+            if имя_a != имя_b:
+                raise InvariantError(
+                    f"близкие phash {a} и {b} класса {класс} в разных сплитах ({имя_a} и {имя_b})"
+                )

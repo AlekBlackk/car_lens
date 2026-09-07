@@ -20,7 +20,7 @@ from pipeline.harvest.manifest import DEFAULT_MANIFEST_PATH, HarvestRow, load_ma
 from pipeline.holdout import HOLDOUT_MIN, HOLDOUT_TARGET, HoldoutSelection, select_holdout
 from pipeline.paths import splits_dir
 from pipeline.schema import empty_frame, write_split
-from pipeline.split import check_invariants
+from pipeline.split import CrossClassPhashPair, check_invariants, cross_class_close_phash
 
 # Инвариант 3 §13.1 требует 300 объявлений на класс. Р-11 сознательно меняет режим на
 # few-shot: 20 кадров на центроиды — это другой способ обучения, а не «пока не набрали».
@@ -77,6 +77,7 @@ def сформировать_отчёт_сплита(
     holdout_frames: int,
     pool_frames: int,
     selection: HoldoutSelection,
+    cross_class_pairs: Sequence[Mapping[str, object]] = (),
 ) -> dict[str, Any]:
     """Данные для сайдкара провенанса сплита."""
     return {
@@ -84,7 +85,50 @@ def сформировать_отчёт_сплита(
         "pool_frames": pool_frames,
         "refined_classes": list(selection.refined_classes),
         "short_classes": list(selection.short_classes),
+        "cross_class_close_phash": list(cross_class_pairs),
     }
+
+
+def пары_в_отчёт(
+    пары: Sequence[CrossClassPhashPair], имя_класса: Mapping[int, str]
+) -> list[dict[str, object]]:
+    """Межклассовые пары для сайдкара провенанса: имена классов, расстояние, оба phash.
+
+    В прокрутке терминала предупреждение живёт до первой очистки экрана, а сайдкар
+    отвечает на вопрос «что нашла сборка», заданный через неделю.
+    """
+    return [
+        {
+            "class_a": имя_класса.get(п.class_a, str(п.class_a)),
+            "class_b": имя_класса.get(п.class_b, str(п.class_b)),
+            "distance": п.distance,
+            "phash_a": п.phash_a,
+            "phash_b": п.phash_b,
+        }
+        for п in пары
+    ]
+
+
+def строки_предупреждения(
+    пары: Sequence[CrossClassPhashPair], имя_класса: Mapping[int, str]
+) -> list[str]:
+    """Предупреждение о межклассовой близости pHash — кандидатах на ошибку метки.
+
+    Инвариант 5 §13.1 такие пары не блокирует, но человек о них знать обязан.
+    Печатается `class_id`, а не `class_idx`: действовать человек будет по имени.
+    Ноль печатается тоже — иначе молчание не отличить от невыполненной проверки.
+    """
+    заголовок = f"межклассовых близких пар phash: {len(пары)}"
+    if not пары:
+        return [заголовок]
+    строки = [f"ВНИМАНИЕ: {заголовок} — утечкой это не считается, но метки стоит проверить"]
+    строки.extend(
+        f"  ~ {имя_класса.get(п.class_a, str(п.class_a))}"
+        f" и {имя_класса.get(п.class_b, str(п.class_b))}:"
+        f" расстояние {п.distance}, phash {п.phash_a} и {п.phash_b}"
+        for п in пары
+    )
+    return строки
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -106,14 +150,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     эталон = строки_в_кадр([с for с in строки if с.file in выбор.files], каталог, единицы)
     пул = строки_в_кадр([с for с in строки if с.file not in выбор.files], каталог, единицы)
 
-    check_invariants(
-        {"holdout_ru": эталон, "pool": пул},
-        min_listings_per_class=MIN_LISTINGS_ДЛЯ_FEW_SHOT,
-    )
+    сплиты = {"holdout_ru": эталон, "pool": пул}
+    check_invariants(сплиты, min_listings_per_class=MIN_LISTINGS_ДЛЯ_FEW_SHOT)
     write_split(эталон, splits_dir() / "holdout_ru.parquet")
     write_split(пул, splits_dir() / "pool.parquet")
 
-    отчёт_данные = сформировать_отчёт_сплита(len(эталон), len(пул), выбор)
+    имя_класса = {индекс: class_id for class_id, индекс in class_index(каталог).items()}
+    пары = cross_class_close_phash(сплиты)
+    отчёт_данные = сформировать_отчёт_сплита(
+        len(эталон), len(пул), выбор, cross_class_pairs=пары_в_отчёт(пары, имя_класса)
+    )
     (splits_dir() / "holdout_ru_report.json").write_text(
         json.dumps(отчёт_данные, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -125,6 +171,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"классов без эталона (меньше {аргументы.minimum}): {len(выбор.short_classes)}")
     for class_id in выбор.short_classes:
         print(f"  - {class_id}")
+    for строка_вывода in строки_предупреждения(пары, имя_класса):
+        print(строка_вывода)
     return 0
 
 
