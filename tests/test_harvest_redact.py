@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from pipeline.crop import Detection
 from pipeline.harvest.redact import (
@@ -6,8 +7,11 @@ from pipeline.harvest.redact import (
     MIN_FACE_SIDE_PX,
     MIN_PLATE_ASPECT,
     MIN_PLATE_W_PX,
+    PlateDetectionTrace,
     PlateStage,
+    RawPlateObservation,
     blur_kernel,
+    detect_plates,
     fill_overlap,
     plate_aspect,
     redact_frame,
@@ -269,3 +273,96 @@ def test_первый_проход_заливает_высокий_бокс() ->
     assert стадия.found == 1
     assert стадия.filled != ()
     assert int(кадр[40:130, 100:140].max()) == 0, "высокий бокс обязан быть залит"
+
+
+def test_trace_наблюдает_детекторы_зоны_и_дубли_до_nms_без_изменения_merged() -> None:
+    """Смена порядка циклов или удержание только NMS-выхода разрушит аудит срабатываний."""
+    кадр = np.zeros((200, 400, 3), dtype=np.uint8)
+    машина = Detection(100.0, 60.0, 100.0, 80.0, 0.8, 2)
+    полный = Detection(90.0, 70.0, 60.0, 20.0, 0.9, 0)
+    локальный_дубль = Detection(5.0, 22.0, 60.0, 20.0, 0.8, 0)
+    второй = Detection(250.0, 20.0, 40.0, 15.0, 0.7, 0)
+    зона_машины = (85, 48, 215, 152)
+
+    plain = detect_plates(
+        кадр,
+        [машина],
+        (
+            ("plate", СписокДетектор([[полный], [локальный_дубль]])),
+            ("plate_hires", СписокДетектор([[второй], []])),
+        ),
+        trace=False,
+    )
+    traced = detect_plates(
+        кадр,
+        [машина],
+        (
+            ("plate", СписокДетектор([[полный], [локальный_дубль]])),
+            ("plate_hires", СписокДетектор([[второй], []])),
+        ),
+        trace=True,
+    )
+
+    assert plain.merged == traced.merged == (полный, второй)
+    assert plain.raw == ()
+    assert traced.raw == (
+        RawPlateObservation("plate", (0, 0, 400, 200), (0, 0, 400, 200), полный),
+        RawPlateObservation(
+            "plate",
+            зона_машины,
+            зона_машины,
+            Detection(90.0, 70.0, 60.0, 20.0, 0.8, 0),
+        ),
+        RawPlateObservation("plate_hires", (0, 0, 400, 200), (0, 0, 400, 200), второй),
+    )
+
+
+def test_redact_plates_возвращает_трассы_обоих_проходов_и_сохраняет_решение() -> None:
+    """Трасса второго прохода обязана быть отдельной и не менять решение по остаткам."""
+    номер = Detection(100.0, 80.0, 60.0, 20.0, 0.9, 0)
+    остаток = Detection(250.0, 100.0, 60.0, 20.0, 0.8, 0)
+    plain_image = np.full((200, 400, 3), 200, dtype=np.uint8)
+    traced_image = plain_image.copy()
+
+    plain = redact_plates(plain_image, [], [СписокДетектор([[номер], [остаток]])])
+    traced = redact_plates(
+        traced_image,
+        [],
+        [СписокДетектор([[номер], [остаток]])],
+        trace=True,
+    )
+
+    пустая = PlateDetectionTrace()
+    assert plain == PlateStage(1, ((91, 77, 169, 103),), (остаток,), пустая, пустая)
+    assert traced.found == plain.found
+    assert traced.filled == plain.filled
+    assert traced.residuals == plain.residuals
+    assert traced.first_pass.merged == (номер,)
+    assert traced.second_pass.merged == (остаток,)
+    assert traced.first_pass.raw == (
+        RawPlateObservation("plate", (0, 0, 400, 200), (0, 0, 400, 200), номер),
+    )
+    assert traced.second_pass.raw == (
+        RawPlateObservation("plate", (0, 0, 400, 200), (0, 0, 400, 200), остаток),
+    )
+    assert np.array_equal(plain_image, traced_image)
+
+
+def test_trace_не_меняет_исключение_и_останавливает_тот_же_порядок() -> None:
+    """Инструментация не вправе проглотить сбой или вызвать следующий детектор."""
+    кадр = np.zeros((100, 160, 3), dtype=np.uint8)
+
+    class Падающий:
+        def detect(self, image: np.ndarray) -> list[Detection]:
+            raise RuntimeError("детектор упал")
+
+    не_вызван = СписокДетектор([[]])
+    with pytest.raises(RuntimeError, match="детектор упал"):
+        detect_plates(
+            кадр,
+            [],
+            (("plate", Падающий()), ("plate_hires", не_вызван)),
+            trace=True,
+        )
+
+    assert не_вызван.вызовы == 0

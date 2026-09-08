@@ -12,11 +12,20 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
 
 from pipeline.crop import Detection, Detector
+
+
+@dataclass(frozen=True, slots=True)
+class TileObservation:
+    """Сырая детекция тайла в координатах изображения, поданного обёртке."""
+
+    tile: tuple[int, int, int, int]
+    box: Detection
 
 
 def tile_origins(size: int, tile: int, overlap: float) -> list[int]:
@@ -58,13 +67,24 @@ class TiledDetector:
         self._iou = iou_merge
 
     def detect(self, image: np.ndarray) -> list[Detection]:
+        """Вернуть слитые боксы, сохраняя прежний интерфейс детектора."""
+        слитые, _ = self.detect_with_tiles(image)
+        return слитые
+
+    def detect_with_tiles(
+        self, image: np.ndarray
+    ) -> tuple[list[Detection], tuple[TileObservation, ...]]:
+        """Вернуть merged-боксы и неизменяемые наблюдения до NMS."""
         высота, ширина = image.shape[:2]
         собрано: list[Detection] = []
+        наблюдения: list[TileObservation] = []
         for y0 in tile_origins(высота, self._tile, self._overlap):
             for x0 in tile_origins(ширина, self._tile, self._overlap):
                 y1 = min(высота, y0 + self._tile)
                 x1 = min(ширина, x0 + self._tile)
                 тайл = image[y0:y1, x0:x1]
                 for б in self._inner.detect(тайл):
-                    собрано.append(Detection(б.x + x0, б.y + y0, б.w, б.h, б.conf, б.cls))
-        return nms_merge(собрано, self._iou)
+                    бокс = Detection(б.x + x0, б.y + y0, б.w, б.h, б.conf, б.cls)
+                    собрано.append(бокс)
+                    наблюдения.append(TileObservation((x0, y0, x1, y1), бокс))
+        return nms_merge(собрано, self._iou), tuple(наблюдения)

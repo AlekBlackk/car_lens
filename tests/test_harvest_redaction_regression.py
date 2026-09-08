@@ -4,7 +4,8 @@
 import numpy as np
 
 from pipeline.crop import Detection, crop_image, select_primary
-from pipeline.harvest.redact import redact_frame
+from pipeline.harvest.redact import RawPlateObservation, redact_frame, redact_plates
+from pipeline.harvest.tiling import TileObservation
 
 
 class Список:
@@ -80,3 +81,34 @@ def test_остаток_той_же_формы_в_стороне_отбивае�
     )
 
     assert not итог.ok
+
+
+def test_trace_сохраняет_тайл_и_зону_для_обоих_проходов() -> None:
+    """Тайловая трасса не должна терять локальную геометрию во втором проходе."""
+    кадр = np.full((100, 160, 3), 130, dtype=np.uint8)
+    номер = Detection(5.0, 6.0, 30.0, 10.0, 0.9, 0)
+    остаток = Detection(7.0, 8.0, 30.0, 10.0, 0.7, 0)
+
+    class Тайловый:
+        def __init__(self) -> None:
+            self.вызов = 0
+
+        def detect(self, image: np.ndarray) -> list[Detection]:
+            return self.detect_with_tiles(image)[0]
+
+        def detect_with_tiles(
+            self, image: np.ndarray
+        ) -> tuple[list[Detection], tuple[TileObservation, ...]]:
+            self.вызов += 1
+            бокс = номер if self.вызов == 1 else остаток
+            тайл = (2, 3, image.shape[1], image.shape[0])
+            return [бокс], (TileObservation(тайл, бокс),)
+
+    стадия = redact_plates(кадр, [], [("plate", Тайловый())], trace=True)
+
+    assert стадия.first_pass.raw == (
+        RawPlateObservation("plate", (0, 0, 160, 100), (2, 3, 160, 100), номер),
+    )
+    assert стадия.second_pass.raw == (
+        RawPlateObservation("plate", (0, 0, 160, 100), (2, 3, 160, 100), остаток),
+    )

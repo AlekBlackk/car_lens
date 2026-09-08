@@ -18,12 +18,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol, TypeAlias, cast
 
 import cv2
 import numpy as np
 
 from pipeline.crop import Detection, Detector
-from pipeline.harvest.tiling import nms_merge
+from pipeline.harvest.tiling import TileObservation, nms_merge
 
 MIN_PLATE_W_PX = 16
 MIN_FACE_SIDE_PX = 20
@@ -38,6 +39,36 @@ MIN_KERNEL = 15
 # всё, что нашёл.
 MIN_PLATE_ASPECT = 0.66
 FILL_OVERLAP_LIMIT = 0.7
+
+NamedDetector: TypeAlias = tuple[str, Detector]
+PlateDetectorInput: TypeAlias = Detector | NamedDetector
+_DEFAULT_DETECTOR_NAMES = ("plate", "plate_hires")
+
+
+class _TiledDetector(Protocol):
+    """Необязательная трассируемая поверхность нарезанного детектора."""
+
+    def detect_with_tiles(
+        self, image: np.ndarray
+    ) -> tuple[list[Detection], tuple[TileObservation, ...]]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RawPlateObservation:
+    """Одно срабатывание до общего NMS в координатах полного кадра."""
+
+    detector: str
+    zone: tuple[int, int, int, int]
+    tile: tuple[int, int, int, int]
+    box: Detection
+
+
+@dataclass(frozen=True, slots=True)
+class PlateDetectionTrace:
+    """Фактический результат детекции и необязательные наблюдения до NMS."""
+
+    raw: tuple[RawPlateObservation, ...] = ()
+    merged: tuple[Detection, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +93,8 @@ class PlateStage:
     found: int
     filled: tuple[tuple[int, int, int, int], ...]
     residuals: tuple[Detection, ...]
+    first_pass: PlateDetectionTrace = PlateDetectionTrace()
+    second_pass: PlateDetectionTrace = PlateDetectionTrace()
 
 
 def blur_kernel(bbox_w: int) -> int:
@@ -87,23 +120,96 @@ def _крупные(боксы: Sequence[Detection], min_w: int, min_h: int) -> 
     return [б for б in боксы if б.w >= min_w and б.h >= min_h]
 
 
-def _детект_номера(
-    image: np.ndarray, vehicle_boxes: Sequence[Detection], detectors: Sequence[Detector]
-) -> list[Detection]:
-    """Ансамбль детекторов номеров: по всему кадру и по каждому боксу ТС с запасом."""
+def _именованные_детекторы(
+    detectors: Sequence[PlateDetectorInput],
+) -> tuple[NamedDetector, ...]:
+    """Прикрепить стабильные имена на границе вызова, не меняя фабрику Task 1."""
+    именованные: list[NamedDetector] = []
+    for номер, значение in enumerate(detectors):
+        if isinstance(значение, tuple):
+            именованные.append(значение)
+            continue
+        имя = (
+            _DEFAULT_DETECTOR_NAMES[номер]
+            if номер < len(_DEFAULT_DETECTOR_NAMES)
+            else f"plate_{номер + 1}"
+        )
+        именованные.append((имя, значение))
+    return tuple(именованные)
+
+
+def detect_plates(
+    image: np.ndarray,
+    vehicle_boxes: Sequence[Detection],
+    named_detectors: Sequence[PlateDetectorInput],
+    *,
+    trace: bool = False,
+) -> PlateDetectionTrace:
+    """Найти номера по кадру и зонам ТС, дополнительно сохранив сырые наблюдения."""
     высота, ширина = image.shape[:2]
     зоны: list[tuple[int, int, int, int]] = [(0, 0, ширина, высота)]
     зоны += [vehicle_search_box(б, ширина, высота) for б in vehicle_boxes]
 
     найдено: list[Detection] = []
-    for детектор in detectors:
-        for x0, y0, x1, y1 in зоны:
+    наблюдения: list[RawPlateObservation] | None = [] if trace else None
+    for имя, детектор in _именованные_детекторы(named_detectors):
+        for зона in зоны:
+            x0, y0, x1, y1 = зона
             вырез = image[y0:y1, x0:x1]
             if вырез.size == 0:
                 continue
-            for б in детектор.detect(вырез):
-                найдено.append(Detection(б.x + x0, б.y + y0, б.w, б.h, б.conf, б.cls))
-    return nms_merge(_крупные(найдено, MIN_PLATE_W_PX, 1))
+            if trace and hasattr(детектор, "detect_with_tiles"):
+                локальные, тайлы = cast(_TiledDetector, детектор).detect_with_tiles(вырез)
+                if наблюдения is not None:
+                    for наблюдение in тайлы:
+                        tx0, ty0, tx1, ty1 = наблюдение.tile
+                        наблюдения.append(
+                            RawPlateObservation(
+                                имя,
+                                зона,
+                                (tx0 + x0, ty0 + y0, tx1 + x0, ty1 + y0),
+                                Detection(
+                                    наблюдение.box.x + x0,
+                                    наблюдение.box.y + y0,
+                                    наблюдение.box.w,
+                                    наблюдение.box.h,
+                                    наблюдение.box.conf,
+                                    наблюдение.box.cls,
+                                ),
+                            )
+                        )
+            else:
+                локальные = детектор.detect(вырез)
+                if наблюдения is not None:
+                    for бокс in локальные:
+                        наблюдения.append(
+                            RawPlateObservation(
+                                имя,
+                                зона,
+                                зона,
+                                Detection(
+                                    бокс.x + x0,
+                                    бокс.y + y0,
+                                    бокс.w,
+                                    бокс.h,
+                                    бокс.conf,
+                                    бокс.cls,
+                                ),
+                            )
+                        )
+            for бокс in локальные:
+                найдено.append(
+                    Detection(
+                        бокс.x + x0,
+                        бокс.y + y0,
+                        бокс.w,
+                        бокс.h,
+                        бокс.conf,
+                        бокс.cls,
+                    )
+                )
+    слитые = nms_merge(_крупные(найдено, MIN_PLATE_W_PX, 1))
+    return PlateDetectionTrace(tuple(наблюдения or ()), tuple(слитые))
 
 
 def _залить_номер(image: np.ndarray, box: Detection) -> tuple[int, int, int, int] | None:
@@ -145,7 +251,9 @@ def _замыть_лицо(image: np.ndarray, box: Detection, заливкой: 
 def redact_plates(
     image: np.ndarray,
     vehicle_boxes: Sequence[Detection],
-    detectors: Sequence[Detector],
+    detectors: Sequence[PlateDetectorInput],
+    *,
+    trace: bool = False,
 ) -> PlateStage:
     """Залить номера на месте и вернуть срезы заливки с остатками второго прохода.
 
@@ -157,14 +265,22 @@ def redact_plates(
     Остатки возвращаются без фильтрации: решает `significant_residuals`, а замеру нужны
     все, вместе с теми, которые правило погасит.
     """
-    номера = _детект_номера(image, vehicle_boxes, detectors)
+    первый = detect_plates(image, vehicle_boxes, detectors, trace=trace)
     залито: list[tuple[int, int, int, int]] = []
-    for бокс in номера:
+    for бокс in первый.merged:
         срез = _залить_номер(image, бокс)
         if срез is not None:
             залито.append(срез)
-    остатки = _детект_номера(image, vehicle_boxes, detectors)
-    return PlateStage(len(номера), tuple(залито), tuple(остатки))
+    второй = detect_plates(image, vehicle_boxes, detectors, trace=trace)
+    first_pass = первый if trace else PlateDetectionTrace()
+    second_pass = второй if trace else PlateDetectionTrace()
+    return PlateStage(
+        len(первый.merged),
+        tuple(залито),
+        второй.merged,
+        first_pass,
+        second_pass,
+    )
 
 
 def fill_overlap(box: Detection, filled: Sequence[tuple[int, int, int, int]]) -> float:
@@ -237,8 +353,10 @@ def significant_residuals(stage: PlateStage) -> list[Detection]:
 def redact_frame(
     image: np.ndarray,
     vehicle_boxes: Sequence[Detection],
-    plate_detectors: Sequence[Detector],
+    plate_detectors: Sequence[PlateDetectorInput],
     face_detector: Detector,
+    *,
+    trace: bool = False,
 ) -> RedactionResult:
     """Очистить весь кадр: номера — заливкой, лица — лестницей, с повторной проверкой.
 
@@ -247,7 +365,7 @@ def redact_frame(
     """
     рабочая = image.copy()
 
-    номера = redact_plates(рабочая, vehicle_boxes, plate_detectors)
+    номера = redact_plates(рабочая, vehicle_boxes, plate_detectors, trace=trace)
     if significant_residuals(номера):
         return RedactionResult(рабочая, номера.found, 0, False)
 

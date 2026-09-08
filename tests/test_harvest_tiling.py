@@ -1,7 +1,9 @@
+import json
+
 import numpy as np
 
 from pipeline.crop import Detection
-from pipeline.harvest.tiling import TiledDetector, nms_merge, tile_origins
+from pipeline.harvest.tiling import TiledDetector, TileObservation, nms_merge, tile_origins
 
 
 class ЗаписнойДетектор:
@@ -66,5 +68,30 @@ def test_дубли_из_перекрытия_снимаются_nms() -> None:
                 )
             ]
 
-    боксы = TiledDetector(БелыйКвадрат(), tile=1000, overlap=0.3).detect(кадр)
-    assert len(боксы) == 1
+    детектор = TiledDetector(БелыйКвадрат(), tile=1000, overlap=0.3)
+    обычные = детектор.detect(кадр)
+    трассированные = детектор.detect_with_tiles(кадр)[0]
+    assert len(обычные) == 1
+
+    def байты(боксы: list[Detection]) -> bytes:
+        return json.dumps([list(бокс) for бокс in боксы], separators=(",", ":")).encode()
+
+    assert байты(обычные) == байты(трассированные)
+
+
+def test_трасса_тайлов_сохраняет_сырые_дубли_и_координаты_кадра() -> None:
+    """Пропуск наблюдения или NMS до трассы скроет реальное срабатывание детектора."""
+    кадр = np.zeros((40, 70, 3), dtype=np.uint8)
+
+    class ОдинБокс:
+        def detect(self, image: np.ndarray) -> list[Detection]:
+            return [Detection(5.0, 6.0, 20.0, 10.0, 0.9, 0)]
+
+    детектор = TiledDetector(ОдинБокс(), tile=40, overlap=0.25)
+    слитые, наблюдения = детектор.detect_with_tiles(кадр)
+
+    assert наблюдения == (
+        TileObservation((0, 0, 40, 40), Detection(5.0, 6.0, 20.0, 10.0, 0.9, 0)),
+        TileObservation((30, 0, 70, 40), Detection(35.0, 6.0, 20.0, 10.0, 0.9, 0)),
+    )
+    assert слитые == [наблюдение.box for наблюдение in наблюдения]
