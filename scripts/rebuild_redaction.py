@@ -96,7 +96,7 @@ def rebuild_row(
     if вердикт.status not in ("new", "supersede"):
         return вердикт.status, None
 
-    путь = deps.root / "crops" / row.class_id / f"{row.sha256}.jpg"
+    путь = deps.root / "crops" / row.class_id / row.file
     путь.parent.mkdir(parents=True, exist_ok=True)
     try:
         encoded = encode_jpeg(кроп)

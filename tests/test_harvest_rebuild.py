@@ -1,4 +1,5 @@
 # tests/test_harvest_rebuild.py
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -91,6 +92,24 @@ def _старый_кроп(root: Path, row: HarvestRow, image: np.ndarray) -> Pa
     путь.parent.mkdir(parents=True, exist_ok=True)
     write_jpeg_atomic(путь, encode_jpeg(image))
     return путь
+
+
+def test_rebuild_использует_file_строки_для_старого_и_нового_кропа(tmp_path: Path) -> None:
+    sha = "a" * 64
+    строка = _строка(sha)
+    legacy = replace(строка, file="legacy-import.jpg")
+    _оригинал(tmp_path, sha)
+    legacy_path = _старый_кроп(tmp_path, legacy, _неизменённый_кроп())
+    sha_path = tmp_path / "crops" / legacy.class_id / f"{sha}.jpg"
+
+    причина, новая = rebuild_row(legacy, _deps(tmp_path, Фикс([])), DedupIndex())
+
+    assert причина == "accepted"
+    assert новая is not None
+    assert новая.file == "legacy-import.jpg"
+    assert новая.audit == "ok"
+    assert legacy_path.exists()
+    assert not sha_path.exists()
 
 
 def test_rebuild_переносит_audit_только_при_равных_пикселях(tmp_path: Path) -> None:
