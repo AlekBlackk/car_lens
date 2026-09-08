@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import cv2
 import numpy as np
+import pytest
 
 from pipeline.crop import Detection
 from pipeline.harvest.cache import cache_path
@@ -92,6 +93,29 @@ def _старый_кроп(root: Path, row: HarvestRow, image: np.ndarray) -> Pa
     путь.parent.mkdir(parents=True, exist_ok=True)
     write_jpeg_atomic(путь, encode_jpeg(image))
     return путь
+
+
+@pytest.mark.parametrize(
+    "unsafe_file",
+    [
+        "../../sentinel.jpg",
+        "/tmp/sentinel.jpg",
+        "..\\..\\sentinel.jpg",
+        "C:\\tmp\\sentinel.jpg",
+    ],
+)
+def test_rebuild_отвергает_небезопасный_file_до_записи(tmp_path: Path, unsafe_file: str) -> None:
+    sha = "a" * 64
+    строка = replace(_строка(sha), file=unsafe_file)
+    _оригинал(tmp_path, sha)
+    sentinel = tmp_path / "sentinel.jpg"
+    sentinel.write_bytes(b"do not overwrite")
+
+    with pytest.raises(ValueError, match="имя кропа"):
+        rebuild_row(строка, _deps(tmp_path, Фикс([])), DedupIndex())
+
+    assert sentinel.read_bytes() == b"do not overwrite"
+    assert not (tmp_path / "crops").exists()
 
 
 def test_rebuild_использует_file_строки_для_старого_и_нового_кропа(tmp_path: Path) -> None:
@@ -346,6 +370,35 @@ def test_build_parser() -> None:
     )
     assert args_out.out == Path("custom.csv")
     assert args_out.reset_audit
+
+
+def test_main_отвергает_дубли_crop_destination_до_первой_мутации(tmp_path: Path) -> None:
+    манифест = tmp_path / "manifest.csv"
+    первая = replace(_строка("a" * 64), file="shared.jpg")
+    вторая = replace(_строка("b" * 64), file="shared.jpg")
+    append_row(манифест, первая)
+    append_row(манифест, вторая)
+    data_root = tmp_path / "data"
+    _оригинал(data_root, первая.sha256)
+    _оригинал(data_root, вторая.sha256)
+    crop = data_root / "crops" / первая.class_id / первая.file
+    crop.parent.mkdir(parents=True, exist_ok=True)
+    crop.write_bytes(b"old crop")
+
+    with pytest.raises(ValueError, match="повтор пути кропа"):
+        main(
+            [
+                "--manifest",
+                str(манифест),
+                "--models",
+                str(tmp_path / "models"),
+                "--data-root",
+                str(data_root),
+            ]
+        )
+
+    assert crop.read_bytes() == b"old crop"
+    assert load_manifest(манифест) == [первая, вторая]
 
 
 def test_main_префлайт_сбой(tmp_path: Path) -> None:

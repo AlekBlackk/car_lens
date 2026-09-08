@@ -34,6 +34,34 @@ from pipeline.harvest.run import is_crop_over_redacted
 from pipeline.paths import harvest_dir
 
 
+class RebuildError(ValueError):
+    """Манифест нельзя безопасно пересобрать без неоднозначной записи кропов."""
+
+
+def crop_destination(root: Path, row: HarvestRow) -> Path:
+    """Безопасный путь кропа, сохраняющий authoritative имя из манифеста."""
+    имя = Path(row.file)
+    if (
+        имя.is_absolute()
+        or имя.name != row.file
+        or "/" in row.file
+        or "\\" in row.file
+        or row.file in {"", ".", ".."}
+    ):
+        raise RebuildError(f"небезопасное имя кропа: {row.file!r}")
+    return root / "crops" / row.class_id / row.file
+
+
+def validate_crop_destinations(rows: Sequence[HarvestRow], root: Path) -> None:
+    """До пересборки отвергнуть небезопасные и повторяющиеся пути кропов."""
+    пути: set[Path] = set()
+    for row in rows:
+        путь = crop_destination(root, row)
+        if путь in пути:
+            raise RebuildError(f"повтор пути кропа: {row.class_id}/{row.file}")
+        пути.add(путь)
+
+
 @dataclass(frozen=True, slots=True)
 class RebuildDeps:
     """Всё внешнее для переderivации. Ничего не создаётся внутри."""
@@ -96,7 +124,7 @@ def rebuild_row(
     if вердикт.status not in ("new", "supersede"):
         return вердикт.status, None
 
-    путь = deps.root / "crops" / row.class_id / row.file
+    путь = crop_destination(deps.root, row)
     путь.parent.mkdir(parents=True, exist_ok=True)
     try:
         encoded = encode_jpeg(кроп)
@@ -170,6 +198,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     аргументы = build_parser().parse_args(argv)
     строки = load_manifest(аргументы.manifest)
+    validate_crop_destinations(строки, аргументы.data_root)
 
     пропало = preflight(строки, аргументы.data_root)
     if пропало:
