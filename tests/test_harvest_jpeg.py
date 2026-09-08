@@ -35,6 +35,15 @@ def test_audit_переносится_только_для_равных_набл�
     assert not observed_pixels_equal(tmp_path / "missing.jpg", encoded)
 
 
+def test_пустой_старый_jpeg_сбрасывает_audit(tmp_path: Path) -> None:
+    path = tmp_path / "old.jpg"
+    path.write_bytes(b"")
+
+    encoded = encode_jpeg(np.full((40, 60, 3), 127, np.uint8))
+
+    assert not observed_pixels_equal(path, encoded)
+
+
 def test_битый_старый_jpeg_сбрасывает_audit(tmp_path: Path) -> None:
     path = tmp_path / "old.jpg"
     path.write_bytes(b"not a jpeg")

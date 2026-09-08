@@ -45,7 +45,9 @@ def observed_pixels_equal(old_path: Path, new: EncodedJpeg) -> bool:
     """Сравнить декодированные старые пиксели с проверенным новым JPEG."""
     try:
         данные = old_path.read_bytes()
-    except OSError:
+        if not данные:
+            return False
+        старое = cv2.imdecode(np.frombuffer(данные, dtype=np.uint8), cv2.IMREAD_COLOR)
+    except (OSError, cv2.error):
         return False
-    старое = cv2.imdecode(np.frombuffer(данные, dtype=np.uint8), cv2.IMREAD_COLOR)
     return старое is not None and np.array_equal(старое, new.decoded)

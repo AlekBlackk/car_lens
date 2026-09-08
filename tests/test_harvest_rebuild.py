@@ -133,6 +133,23 @@ def test_rebuild_без_старого_кропа_сбрасывает_audit_н�
     assert строка.audit == ""
 
 
+def test_rebuild_с_пустым_старым_кропом_сбрасывает_audit_но_принимает_строку(
+    tmp_path: Path,
+) -> None:
+    sha = "a" * 64
+    строка = _строка(sha)
+    _оригинал(tmp_path, sha)
+    путь = tmp_path / "crops" / строка.class_id / строка.file
+    путь.parent.mkdir(parents=True, exist_ok=True)
+    путь.write_bytes(b"")
+
+    причина, новая = rebuild_row(строка, _deps(tmp_path, Фикс([])), DedupIndex())
+
+    assert причина == "accepted"
+    assert новая is not None
+    assert новая.audit == ""
+
+
 def test_rebuild_с_битым_старым_кропом_сбрасывает_audit_но_принимает_строку(
     tmp_path: Path,
 ) -> None:
