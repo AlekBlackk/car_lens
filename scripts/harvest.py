@@ -37,7 +37,6 @@ from pipeline.harvest.audit import (
 )
 from pipeline.harvest.backends import (
     ClipImageEncoder,
-    OnnxBoxDetector,
     UrllibTransport,
     YuNetFaceDetector,
     build_text_matrix,
@@ -67,10 +66,14 @@ from pipeline.harvest.queries import (
     load_latin_names,
     load_queries,
 )
+from pipeline.harvest.redaction_profile import (
+    CURRENT_REDACTION_PROFILE,
+    RedactionProfile,
+    build_plate_detectors,
+)
 from pipeline.harvest.run import CategoryExpander, ClassOutcome, HarvestDeps, harvest_class
 from pipeline.harvest.sources import HarvestSource
 from pipeline.harvest.state import load_state, save_state
-from pipeline.harvest.tiling import TiledDetector
 from pipeline.paths import harvest_dir
 
 REPORT_PATH = Path(__file__).resolve().parent.parent / "bench" / "harvest-m0.md"
@@ -160,6 +163,7 @@ def build_deps(
     clip_weights: str,
     allow_sa: bool,
     checked: str,
+    profile: RedactionProfile = CURRENT_REDACTION_PROFILE,
 ) -> HarvestDeps:
     """Собрать зависимости прогона: модели, детекторы и пути. Единственное такое место.
 
@@ -170,6 +174,10 @@ def build_deps(
     `import open_clip` остаётся внутри тела: пакет живёт в группе `train`, в `dev` его нет, и
     импорт на уровне модуля уронил бы обычный `pytest`. `expand_categories` приходит
     параметром — у боевого прогона это замыкание на транспорт, у переприёма заглушка.
+
+    `profile` — параметры детекторов номеров целиком (§3.1 дизайна рекалибровки). Умолчание
+    оставлено ради переприёма, который обязан считать боевым контуром и знать о нём не больше,
+    чем сейчас; калибровочные прогоны будут подавать свой профиль явно.
     """
     import open_clip  # type: ignore[import-untyped]
 
@@ -188,15 +196,7 @@ def build_deps(
         модель,
         токенизатор,
     )
-    plate_detectors = (
-        TiledDetector(OnnxBoxDetector(root / "models" / f"plate.{пины['plate'].format}")),
-        TiledDetector(
-            YoloDetector(
-                weights=str(root / "models" / f"plate_hires.{пины['plate_hires'].format}"),
-                conf=0.25,
-            )
-        ),
-    )
+    plate_detectors = build_plate_detectors(profile, models_dir=root / "models", pins=пины)
     return HarvestDeps(
         source=source,
         vehicle_detector=YoloDetector(),
@@ -320,6 +320,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             clip_weights=аргументы.clip_weights,
             allow_sa=аргументы.allow_sa,
             checked=date.today().isoformat(),
+            profile=CURRENT_REDACTION_PROFILE,
         )
 
         состояние = load_state(корень / "state.json")

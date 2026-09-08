@@ -191,13 +191,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Прогнать карту по кэшу, записать CSV и контактные листы по корзинам."""
     from pipeline.detectors.yolo import YoloDetector
-    from pipeline.harvest.backends import OnnxBoxDetector
     from pipeline.harvest.detectors import (
         DEFAULT_DETECTORS_MANIFEST,
         load_detectors_manifest,
         verify_weights,
     )
-    from pipeline.harvest.tiling import TiledDetector
+    from pipeline.harvest.redaction_profile import (
+        CURRENT_REDACTION_PROFILE,
+        build_plate_detectors,
+    )
 
     аргументы = build_parser().parse_args(argv)
     корень = аргументы.data_root if аргументы.data_root is not None else harvest_dir()
@@ -207,15 +209,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     пины = load_detectors_manifest(DEFAULT_DETECTORS_MANIFEST)
     verify_weights(пины, модели)
-    plate_detectors = (
-        TiledDetector(OnnxBoxDetector(модели / f"plate.{пины['plate'].format}")),
-        TiledDetector(
-            YoloDetector(
-                weights=str(модели / f"plate_hires.{пины['plate_hires'].format}"),
-                conf=0.25,
-            )
-        ),
-    )
+    plate_detectors = build_plate_detectors(CURRENT_REDACTION_PROFILE, models_dir=модели, pins=пины)
     vehicle_detector = YoloDetector()
 
     строки = list(csv.DictReader((корень / "reject_index.csv").read_text("utf-8").splitlines()))

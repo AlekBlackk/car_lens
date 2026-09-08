@@ -9,6 +9,7 @@ from pipeline.crop import Detection
 from pipeline.harvest.cache import cache_path
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.manifest import HarvestRow, append_row, load_manifest
+from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE
 from scripts.rebuild_redaction import RebuildDeps, build_parser, main, preflight, rebuild_row
 
 
@@ -277,3 +278,41 @@ def test_main_успешный_прогон(tmp_path: Path) -> None:
         assert код == 0
         новые_строки = load_manifest(манифест)
         assert len(новые_строки) == 1
+
+
+def test_main_берёт_детекторы_номера_из_единой_фабрики(tmp_path: Path) -> None:
+    """Переderivация обязана идти тем же профилем, что боевой харвест (§3.1 дизайна).
+
+    Своя копия конструирования детекторов здесь была второй из трёх: расхождение с боевой
+    означало бы кропы, полученные не тем контуром, при том же имени манифеста.
+    """
+    манифест = tmp_path / "manifest.csv"
+    sha = "a" * 64
+    append_row(манифест, _строка(sha))
+    _оригинал(tmp_path / "data", sha)
+    модели = tmp_path / "models"
+    модели.mkdir(parents=True, exist_ok=True)
+    пины = {"plate": type("Pin", (), {"format": "onnx"})()}
+
+    with (
+        patch("pipeline.harvest.detectors.verify_weights"),
+        patch("pipeline.harvest.detectors.load_detectors_manifest", return_value=пины),
+        patch("pipeline.harvest.redaction_profile.build_plate_detectors") as фабрика,
+        patch("pipeline.detectors.yolo.YoloDetector"),
+        patch("pipeline.harvest.backends.YuNetFaceDetector"),
+        patch("scripts.rebuild_redaction.rebuild_row", return_value=("accepted", _строка(sha))),
+    ):
+        код = main(
+            [
+                "--manifest",
+                str(манифест),
+                "--models",
+                str(модели),
+                "--data-root",
+                str(tmp_path / "data"),
+            ]
+        )
+
+    assert код == 0
+    assert фабрика.call_args.args == (CURRENT_REDACTION_PROFILE,)
+    assert фабрика.call_args.kwargs == {"models_dir": модели, "pins": пины}

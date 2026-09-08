@@ -151,13 +151,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Префлайт кэша, затем полная переderivация в новый манифест."""
     from pipeline.detectors.yolo import YoloDetector
-    from pipeline.harvest.backends import OnnxBoxDetector, YuNetFaceDetector
+    from pipeline.harvest.backends import YuNetFaceDetector
     from pipeline.harvest.detectors import (
         DEFAULT_DETECTORS_MANIFEST,
         load_detectors_manifest,
         verify_weights,
     )
-    from pipeline.harvest.tiling import TiledDetector
+    from pipeline.harvest.redaction_profile import (
+        CURRENT_REDACTION_PROFILE,
+        build_plate_detectors,
+    )
 
     аргументы = build_parser().parse_args(argv)
     строки = load_manifest(аргументы.manifest)
@@ -170,14 +173,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     пины = load_detectors_manifest(DEFAULT_DETECTORS_MANIFEST)
     verify_weights(пины, аргументы.models)
-    plate_detectors = (
-        TiledDetector(OnnxBoxDetector(аргументы.models / f"plate.{пины['plate'].format}")),
-        TiledDetector(
-            YoloDetector(
-                weights=str(аргументы.models / f"plate_hires.{пины['plate_hires'].format}"),
-                conf=0.25,
-            )
-        ),
+    plate_detectors = build_plate_detectors(
+        CURRENT_REDACTION_PROFILE, models_dir=аргументы.models, pins=пины
     )
     deps = RebuildDeps(
         vehicle_detector=YoloDetector(),

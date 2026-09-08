@@ -1,16 +1,19 @@
 import csv
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
 import pytest
 
 from pipeline.crop import Detection
+from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE
 from scripts.measure_redaction import (
     ЯЧЕЙКА_H,
     ЯЧЕЙКА_W,
     Остаток,
+    main,
     записать_замер,
     записать_лист,
     измерить_кадр,
@@ -171,3 +174,37 @@ def test_лист_пишется_через_imencode_когда_imwrite_отка
     записать_лист(путь, np.zeros((ЯЧЕЙКА_H, ЯЧЕЙКА_W, 3), dtype=np.uint8))
 
     assert путь.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_main_берёт_детекторы_номера_из_единой_фабрики(tmp_path: Path) -> None:
+    """Замер обязан мерить тем же контуром, каким кадры отбивались (§3.1 дизайна).
+
+    Карта берётся пустой: доказывается маршрут детекторов, а не цикл по кадрам, — а сам
+    цикл в этом файле уже разобран на `измерить_кадр` без весов.
+    """
+    корень = tmp_path / "data"
+    корень.mkdir(parents=True)
+    (корень / "reject_index.csv").write_text("source_item_id,class_id,sha256\n", encoding="utf-8")
+    модели = tmp_path / "models"
+    пины = {"plate": type("Pin", (), {"format": "onnx"})()}
+
+    with (
+        patch("pipeline.harvest.detectors.verify_weights"),
+        patch("pipeline.harvest.detectors.load_detectors_manifest", return_value=пины),
+        patch("pipeline.harvest.redaction_profile.build_plate_detectors") as фабрика,
+        patch("pipeline.detectors.yolo.YoloDetector"),
+    ):
+        код = main(
+            [
+                "--data-root",
+                str(корень),
+                "--models",
+                str(модели),
+                "--out",
+                str(tmp_path / "measure"),
+            ]
+        )
+
+    assert код == 0
+    assert фабрика.call_args.args == (CURRENT_REDACTION_PROFILE,)
+    assert фабрика.call_args.kwargs == {"models_dir": модели, "pins": пины}

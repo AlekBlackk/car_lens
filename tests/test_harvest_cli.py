@@ -16,18 +16,33 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
+import numpy as np
 import pytest
 
+from pipeline.crop import Detector
 from pipeline.harvest.audit import load_applied
 from pipeline.harvest.commons import HttpResponse
+from pipeline.harvest.detectors import DetectorPin
 from pipeline.harvest.flickr import requested_licenses
 from pipeline.harvest.manifest import HarvestRow, load_manifest, write_manifest
 from pipeline.harvest.queries import DEFAULT_QUERIES_PATH, ClassQueries, load_queries
-from pipeline.harvest.sources import SourceQuery
-from scripts.harvest import ОтсутствуетКлюч, build_parser, build_source, main, source_queries
+from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE, RedactionProfile
+from pipeline.harvest.run import CategoryExpander
+from pipeline.harvest.sources import HarvestSource, SourceQuery
+from scripts.harvest import (
+    ОтсутствуетКлюч,
+    build_deps,
+    build_parser,
+    build_source,
+    main,
+    source_queries,
+)
 
 
 def _строка(file: str, class_id: str = "kia__rio", audit: str = "") -> HarvestRow:
@@ -274,3 +289,70 @@ def test_flickr_без_ключа_даёт_код_2(
     monkeypatch.delenv("FLICKR_API_KEY", raising=False)
 
     assert main(["--contact", "m@e.com", "--source", "flickr"]) == 2
+
+
+def _пины() -> dict[str, DetectorPin]:
+    def пин(имя: str, формат: str) -> DetectorPin:
+        return DetectorPin(
+            name=имя,
+            format=формат,
+            url=f"https://example.invalid/{имя}.{формат}",
+            revision="v1",
+            license="mit",
+            checked="2026-09-07",
+            sha256="1" * 64,
+            derived_from="",
+        )
+
+    return {"plate": пин("plate", "onnx"), "plate_hires": пин("plate_hires", "pt")}
+
+
+def test_build_deps_берёт_детекторы_номера_из_единой_фабрики(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Боевой прогон обязан собирать номера тем же профилем, что пересборка и замер.
+
+    Собственный блок конструирования здесь и был третьей копией (§3.1 дизайна
+    рекалибровки): пока он жив, правка порога в фабрике боевой харвест не догоняет.
+
+    `open_clip` живёт в группе `train`, поэтому подменяется заглушкой в `sys.modules`, а
+    текстовая матрица — функцией: доказывается маршрут детекторов, а не работа CLIP.
+    """
+    заглушка = types.SimpleNamespace(
+        create_model_and_transforms=lambda *_, **__: (object(), None, object()),
+        get_tokenizer=lambda *_: object(),
+    )
+    monkeypatch.setitem(sys.modules, "open_clip", cast(types.ModuleType, заглушка))
+    пины = _пины()
+    monkeypatch.setattr("scripts.harvest.load_detectors_manifest", lambda _: пины)
+    monkeypatch.setattr("scripts.harvest.verify_weights", lambda *_: None)
+    monkeypatch.setattr("scripts.harvest.build_text_matrix", lambda *_: np.zeros((1, 2)))
+    monkeypatch.setattr("scripts.harvest.YoloDetector", lambda *_, **__: object())
+    monkeypatch.setattr("scripts.harvest.YuNetFaceDetector", lambda *_, **__: object())
+    номера = (cast(Detector, object()), cast(Detector, object()))
+    вызовы: list[tuple[RedactionProfile, Path, Mapping[str, DetectorPin]]] = []
+
+    def фабрика(
+        profile: RedactionProfile, *, models_dir: Path, pins: Mapping[str, DetectorPin]
+    ) -> tuple[Detector, Detector]:
+        вызовы.append((profile, models_dir, pins))
+        return номера
+
+    monkeypatch.setattr("scripts.harvest.build_plate_detectors", фабрика)
+
+    зависимости = build_deps(
+        cast(HarvestSource, object()),
+        cast(CategoryExpander, object()),
+        root=tmp_path,
+        class_order=("kia__rio",),
+        latin_names={"kia__rio": "Kia Rio"},
+        alias_table={},
+        manifest_path=tmp_path / "manifest.csv",
+        clip_model="ViT-B-32",
+        clip_weights="laion2b_s34b_b79k",
+        allow_sa=False,
+        checked="2026-09-07",
+    )
+
+    assert вызовы == [(CURRENT_REDACTION_PROFILE, tmp_path / "models", пины)]
+    assert зависимости.plate_detectors == номера
