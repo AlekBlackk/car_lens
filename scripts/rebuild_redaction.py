@@ -16,7 +16,7 @@ import argparse
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from pipeline.clean import phash_of
 from pipeline.crop import VEHICLE_CLASSES, Detector, crop_image, select_primary
@@ -40,12 +40,14 @@ class RebuildError(ValueError):
 
 def crop_destination(root: Path, row: HarvestRow) -> Path:
     """Безопасный путь кропа, сохраняющий authoritative имя из манифеста."""
-    имя = Path(row.file)
+    имя = PureWindowsPath(row.file)
     if (
         имя.is_absolute()
+        or имя.drive
         or имя.name != row.file
         or "/" in row.file
         or "\\" in row.file
+        or ":" in row.file
         or row.file in {"", ".", ".."}
     ):
         raise RebuildError(f"небезопасное имя кропа: {row.file!r}")
@@ -54,9 +56,10 @@ def crop_destination(root: Path, row: HarvestRow) -> Path:
 
 def validate_crop_destinations(rows: Sequence[HarvestRow], root: Path) -> None:
     """До пересборки отвергнуть небезопасные и повторяющиеся пути кропов."""
-    пути: set[Path] = set()
+    пути: set[tuple[str, str]] = set()
     for row in rows:
-        путь = crop_destination(root, row)
+        crop_destination(root, row)
+        путь = (row.class_id.casefold(), row.file.casefold())
         if путь in пути:
             raise RebuildError(f"повтор пути кропа: {row.class_id}/{row.file}")
         пути.add(путь)

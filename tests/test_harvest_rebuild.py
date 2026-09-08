@@ -101,7 +101,14 @@ def _старый_кроп(root: Path, row: HarvestRow, image: np.ndarray) -> Pa
         "../../sentinel.jpg",
         "/tmp/sentinel.jpg",
         "..\\..\\sentinel.jpg",
+        "\\rooted.jpg",
+        "\\\\server\\share\\crop.jpg",
         "C:\\tmp\\sentinel.jpg",
+        "C:crop.jpg",
+        "crop.jpg:stream",
+        "",
+        ".",
+        "..",
     ],
 )
 def test_rebuild_отвергает_небезопасный_file_до_записи(tmp_path: Path, unsafe_file: str) -> None:
@@ -376,6 +383,35 @@ def test_main_отвергает_дубли_crop_destination_до_первой_�
     манифест = tmp_path / "manifest.csv"
     первая = replace(_строка("a" * 64), file="shared.jpg")
     вторая = replace(_строка("b" * 64), file="shared.jpg")
+    append_row(манифест, первая)
+    append_row(манифест, вторая)
+    data_root = tmp_path / "data"
+    _оригинал(data_root, первая.sha256)
+    _оригинал(data_root, вторая.sha256)
+    crop = data_root / "crops" / первая.class_id / первая.file
+    crop.parent.mkdir(parents=True, exist_ok=True)
+    crop.write_bytes(b"old crop")
+
+    with pytest.raises(ValueError, match="повтор пути кропа"):
+        main(
+            [
+                "--manifest",
+                str(манифест),
+                "--models",
+                str(tmp_path / "models"),
+                "--data-root",
+                str(data_root),
+            ]
+        )
+
+    assert crop.read_bytes() == b"old crop"
+    assert load_manifest(манифест) == [первая, вторая]
+
+
+def test_main_отвергает_casefold_alias_до_первой_мутации(tmp_path: Path) -> None:
+    манифест = tmp_path / "manifest.csv"
+    первая = replace(_строка("a" * 64), file="shared.jpg")
+    вторая = replace(_строка("b" * 64), file="SHARED.jpg")
     append_row(манифест, первая)
     append_row(манифест, вторая)
     data_root = tmp_path / "data"
