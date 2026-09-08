@@ -1,5 +1,6 @@
 # tests/test_harvest_run.py
 import csv
+import hashlib
 import io
 from pathlib import Path
 
@@ -11,10 +12,12 @@ from PIL import Image
 from pipeline.crop import Detection
 from pipeline.harvest.aliases import REJECT_COLUMNS
 from pipeline.harvest.audit import load_audit
+from pipeline.harvest.cache import cache_path
 from pipeline.harvest.categories import ExpandResult
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.expand_log import load_expand_rows
-from pipeline.harvest.manifest import load_manifest
+from pipeline.harvest.jpeg import EncodedJpeg
+from pipeline.harvest.manifest import HarvestRow, load_manifest
 from pipeline.harvest.queries import ClassQueries
 from pipeline.harvest.rejects import load_rejects
 from pipeline.harvest.run import (
@@ -271,8 +274,11 @@ def test_провал_записи_после_вытеснения_не_теря
     """
     вердикты = tmp_path / "verdicts.dedup.csv"
     хеш = _хеш_кадра(tmp_path)
-    monkeypatch.setattr(cv2, "imwrite", lambda *_: False)
-    monkeypatch.setattr(cv2, "imencode", lambda *_: (False, None))
+
+    def сломать_запись(path: Path, _encoded: object) -> None:
+        raise OSError(f"не записать {path}")
+
+    monkeypatch.setattr("pipeline.harvest.run.write_jpeg_atomic", сломать_запись)
     deps = _зависимости(tmp_path, dedup_verdicts_path=вердикты)
     дедуп = DedupIndex()
     дедуп.add(хеш, "daewoo__lanos", "a.jpg", "search:lanos")
@@ -450,8 +456,7 @@ def test_свой_поисковый_кандидат_проходит_и_жур
 def test_неудача_кодирования_кропа_не_оставляет_битого_файла(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Иначе на диск лёг бы кроп в нуль байт, а строка манифеста ушла бы как `accepted`."""
-    monkeypatch.setattr(cv2, "imwrite", lambda *_: False)
+    """Иначе строка манифеста ушла бы как `accepted` без проверенного JPEG."""
     monkeypatch.setattr(cv2, "imencode", lambda *_: (False, None))
     причина, строка = process_candidate(
         _кандидат(), _зависимости(tmp_path, ПодставнойИсточник([])), DedupIndex()
@@ -459,6 +464,160 @@ def test_неудача_кодирования_кропа_не_оставляе�
     assert причина == "write_failed"
     assert строка is None
     assert not list((tmp_path / "crops").rglob("*.jpg")), "битого кропа на диске нет"
+
+
+def _подготовить_сквозные_пути(
+    tmp_path: Path, plate_scenario: list[list[Detection]]
+) -> tuple[HarvestDeps, Candidate, Path]:
+    данные = _jpeg(800, 640)
+
+    class ОдинОригинал(ПодставнойИсточник):
+        def fetch(self, candidate: Candidate) -> bytes:
+            self.скачано += 1
+            return данные
+
+    источник = ОдинОригинал([])
+    машина = Detection(40.0, 40.0, 360.0, 300.0, 0.95, 2)
+    deps = _зависимости(
+        tmp_path / "live",
+        источник,
+        vehicle_detector=ФиксированныйДетектор([машина]),
+        plate_detectors=(СписокДетектор(plate_scenario),),
+    )
+    кандидат = _кандидат(width=800, height=640)
+    return deps, кандидат, tmp_path / "rebuild"
+
+
+def _строка_для_rebuild(кандидат: Candidate, sha: str) -> HarvestRow:
+    return HarvestRow(
+        file=f"{sha}.jpg",
+        class_id=кандидат.class_id,
+        source=кандидат.source,
+        source_item_id=кандидат.source_item_id,
+        page_url=кандидат.page_url,
+        file_url=кандидат.file_url,
+        author="Иван Петров",
+        license="CC BY 4.0",
+        license_tier=2,
+        checked="2026-08-28",
+        basis=кандидат.basis,
+        sha256=sha,
+        phash=0,
+        clip_rank=1,
+        clip_margin=0.0,
+        plates=0,
+        faces=0,
+        bbox_x=0.0,
+        bbox_y=0.0,
+        bbox_w=0.0,
+        bbox_h=0.0,
+        bbox_area_frac=0.0,
+        det_conf=0.0,
+        audit="",
+    )
+
+
+@pytest.mark.parametrize(
+    ("plate_scenario", "expected_reason", "expected_plates"),
+    [
+        ([], "accepted", 0),
+        (
+            [
+                [Detection(120.0, 210.0, 80.0, 24.0, 0.9, 0)],
+                [],
+                [Detection(500.0, 60.0, 80.0, 24.0, 0.9, 0)],
+                [],
+            ],
+            "redaction_failed",
+            None,
+        ),
+        (
+            [
+                [Detection(40.0, 40.0, 360.0, 300.0, 0.95, 0)],
+                [],
+                [],
+                [],
+            ],
+            "over_redacted",
+            None,
+        ),
+    ],
+)
+def test_живой_харвест_и_rebuild_дают_одинаковую_деривацию(
+    tmp_path: Path,
+    plate_scenario: list[list[Detection]],
+    expected_reason: str,
+    expected_plates: int | None,
+) -> None:
+    from scripts.rebuild_redaction import RebuildDeps, rebuild_row
+
+    live_deps, кандидат, rebuild_root = _подготовить_сквозные_пути(tmp_path, plate_scenario)
+    live_reason, live_row = process_candidate(кандидат, live_deps, DedupIndex())
+    оригинал = next((live_deps.root / "raw" / кандидат.source).rglob("*.jpg"))
+    данные = оригинал.read_bytes()
+    sha = hashlib.sha256(данные).hexdigest()
+    rebuild_original = cache_path(rebuild_root, кандидат.source, sha, "jpg")
+    rebuild_original.parent.mkdir(parents=True, exist_ok=True)
+    rebuild_original.write_bytes(данные)
+    исходная_строка = _строка_для_rebuild(кандидат, sha)
+    rebuild_deps = RebuildDeps(
+        vehicle_detector=ФиксированныйДетектор([Detection(40, 40, 360, 300, 0.95, 2)]),
+        plate_detectors=(СписокДетектор(plate_scenario),),
+        face_detector=ФиксированныйДетектор([]),
+        root=rebuild_root,
+    )
+
+    rebuild_reason, rebuild_result = rebuild_row(исходная_строка, rebuild_deps, DedupIndex())
+
+    assert (live_reason, rebuild_reason) == (expected_reason, expected_reason)
+    if expected_reason == "accepted":
+        assert live_row is not None and rebuild_result is not None
+        assert (live_row.phash, live_row.plates, live_row.faces) == (
+            rebuild_result.phash,
+            rebuild_result.plates,
+            rebuild_result.faces,
+        )
+        assert live_row.plates == expected_plates
+        assert (
+            live_row.bbox_x,
+            live_row.bbox_y,
+            live_row.bbox_w,
+            live_row.bbox_h,
+            live_row.bbox_area_frac,
+            live_row.det_conf,
+        ) == (
+            rebuild_result.bbox_x,
+            rebuild_result.bbox_y,
+            rebuild_result.bbox_w,
+            rebuild_result.bbox_h,
+            rebuild_result.bbox_area_frac,
+            rebuild_result.det_conf,
+        )
+        live_path = live_deps.root / "crops" / live_row.class_id / live_row.file
+        rebuild_path = rebuild_root / "crops" / rebuild_result.class_id / rebuild_result.file
+        assert live_path.read_bytes() == rebuild_path.read_bytes()
+    else:
+        assert live_row is None and rebuild_result is None
+
+
+def test_харвест_пишет_тот_же_буфер_который_проверил(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    записанные: list[bytes] = []
+
+    def запомнить(path: Path, encoded: EncodedJpeg) -> None:
+        записанные.append(encoded.data)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(encoded.data)
+
+    monkeypatch.setattr("pipeline.harvest.run.write_jpeg_atomic", запомнить)
+
+    причина, строка = process_candidate(_кандидат(), _зависимости(tmp_path), DedupIndex())
+
+    assert причина == "accepted"
+    assert строка is not None
+    путь = tmp_path / "crops" / строка.class_id / строка.file
+    assert путь.read_bytes() == записанные[0]
 
 
 def test_обход_подставляет_подкатегории_перед_терминами(tmp_path: Path) -> None:

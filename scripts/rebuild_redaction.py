@@ -6,8 +6,8 @@
 pHash, значит меняется результат дедупа — покрытие и список дефицитных классов
 пересобираются заново, это не патч колонок.
 
-Аудит после переderivации начинается с чистого листа: старые отметки `audit`
-сбрасываются, потому что относились к другим пикселям.
+Старая отметка `audit` переносится только при точном равенстве декодированных пикселей
+старого и нового JPEG. Отсутствующий или битый старый кроп безопасно сбрасывает отметку.
 """
 
 from __future__ import annotations
@@ -18,12 +18,11 @@ from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 
-import cv2
-
 from pipeline.clean import phash_of
 from pipeline.crop import VEHICLE_CLASSES, Detector, crop_image, select_primary
 from pipeline.harvest.cache import cache_path, decode_image
 from pipeline.harvest.dedup import DedupIndex
+from pipeline.harvest.jpeg import encode_jpeg, observed_pixels_equal, write_jpeg_atomic
 from pipeline.harvest.manifest import (
     DEFAULT_MANIFEST_PATH,
     HarvestRow,
@@ -55,7 +54,7 @@ def preflight(rows: Sequence[HarvestRow], root: Path) -> list[str]:
 
 
 def rebuild_row(
-    row: HarvestRow, deps: RebuildDeps, dedup: DedupIndex, keep_audit: bool = False
+    row: HarvestRow, deps: RebuildDeps, dedup: DedupIndex, reset_audit: bool = False
 ) -> tuple[str, HarvestRow | None]:
     """Прогнать один оригинал через новую редакцию. Причина отказа или новая строка."""
     сырьё = cache_path(deps.root, row.source, row.sha256, "jpg").read_bytes()
@@ -99,7 +98,15 @@ def rebuild_row(
 
     путь = deps.root / "crops" / row.class_id / f"{row.sha256}.jpg"
     путь.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(путь), кроп)
+    try:
+        encoded = encode_jpeg(кроп)
+    except RuntimeError:
+        return "write_failed", None
+    audit = row.audit if not reset_audit and observed_pixels_equal(путь, encoded) else ""
+    try:
+        write_jpeg_atomic(путь, encoded)
+    except OSError:
+        return "write_failed", None
     dedup.add(хеш, row.class_id, путь.name, row.basis)
 
     return "accepted", replace(
@@ -113,7 +120,7 @@ def rebuild_row(
         bbox_h=float(решение.box.h),
         bbox_area_frac=float(решение.area_frac),
         det_conf=float(решение.box.conf),
-        audit=row.audit if keep_audit else "",
+        audit=audit,
         checked=date.today().isoformat(),
     )
 
@@ -140,10 +147,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="~/carlens-data/harvest",
     )
     парсер.add_argument(
-        "--keep-audit",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="сохранять вердикты аудита (Р-11: контур редакции заморожен)",
+        "--reset-audit",
+        action="store_true",
+        help="сбросить все вердикты аудита, включая неизменившиеся пиксели",
     )
     return парсер
 
@@ -190,7 +196,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     принято = 0
     причины: dict[str, int] = {}
     for строка in строки:
-        причина, новая = rebuild_row(строка, deps, dedup, keep_audit=аргументы.keep_audit)
+        причина, новая = rebuild_row(строка, deps, dedup, reset_audit=аргументы.reset_audit)
         if новая is None:
             причины[причина] = причины.get(причина, 0) + 1
             continue

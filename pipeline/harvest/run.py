@@ -34,6 +34,7 @@ from pipeline.harvest.categories import ExpandResult
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.expand_log import ExpandRow, append_expand_row
 from pipeline.harvest.filters import ImageEncoder, clip_verdict
+from pipeline.harvest.jpeg import encode_jpeg, write_jpeg_atomic
 from pipeline.harvest.licenses import canonical_name, is_allowed, tier_of
 from pipeline.harvest.manifest import HarvestRow, append_row, strip_html
 from pipeline.harvest.queries import ClassQueries
@@ -210,19 +211,14 @@ def process_candidate(
     sha = digest(данные)
     путь = crop_path(deps.root, candidate.class_id, sha)
     путь.parent.mkdir(parents=True, exist_ok=True)
-    # `cv2.imwrite` отдаёт False на путях с не-ASCII символами: имя уходит в системную
-    # кодировку, а под Windows это не UTF-8. Фолбэк кодирует в память и пишет байты сам.
-    # Флаг `imencode` проверяется: без проверки на диск лёг бы файл в нуль байт, а строка
-    # манифеста ушла бы как `accepted` — провенанс указывал бы на битый кроп.
-    if not cv2.imwrite(str(путь), кроп):
-        удалось, буфер = cv2.imencode(".jpg", кроп)
-        if not удалось:
-            return "write_failed", None
-        путь.write_bytes(буфер.tobytes())
+    try:
+        encoded = encode_jpeg(кроп)
+        write_jpeg_atomic(путь, encoded)
+    except (OSError, RuntimeError):
+        return "write_failed", None
     if решение_дедуп.status == "supersede":
-        # После записи файла, не до: если бы `imwrite`/`imencode` оба провалились и функция
-        # вернула `write_failed`, старая строка уже была бы приговорена `drop:superseded`,
-        # а новой строки взамен не появилось бы — потеря обеих сторон вместо одной.
+        # После записи файла, не до: если кодирование или запись провалились и функция
+        # вернула `write_failed`, старая строка ещё не приговорена `drop:superseded`.
         _записать_вердикт(deps.dedup_verdicts_path, решение_дедуп.other, "drop:superseded")
     dedup.add(хеш, candidate.class_id, путь.name, candidate.basis)
 

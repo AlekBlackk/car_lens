@@ -8,6 +8,7 @@ import numpy as np
 from pipeline.crop import Detection
 from pipeline.harvest.cache import cache_path
 from pipeline.harvest.dedup import DedupIndex
+from pipeline.harvest.jpeg import encode_jpeg, write_jpeg_atomic
 from pipeline.harvest.manifest import HarvestRow, append_row, load_manifest
 from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE
 from scripts.rebuild_redaction import RebuildDeps, build_parser, main, preflight, rebuild_row
@@ -81,7 +82,88 @@ def test_префлайт_пустой_при_полном_кэше(tmp_path: Pa
     assert пропало == []
 
 
-def test_rebuild_пересчитывает_номера_и_сбрасывает_аудит(tmp_path: Path) -> None:
+def _неизменённый_кроп() -> np.ndarray:
+    return np.full((348, 418, 3), 127, dtype=np.uint8)
+
+
+def _старый_кроп(root: Path, row: HarvestRow, image: np.ndarray) -> Path:
+    путь = root / "crops" / row.class_id / row.file
+    путь.parent.mkdir(parents=True, exist_ok=True)
+    write_jpeg_atomic(путь, encode_jpeg(image))
+    return путь
+
+
+def test_rebuild_переносит_audit_только_при_равных_пикселях(tmp_path: Path) -> None:
+    sha = "a" * 64
+    строка = _строка(sha)
+    _оригинал(tmp_path, sha)
+    старый = _неизменённый_кроп()
+    _старый_кроп(tmp_path, строка, старый)
+
+    причина, новая = rebuild_row(строка, _deps(tmp_path, Фикс([])), DedupIndex())
+
+    assert причина == "accepted"
+    assert новая is not None
+    assert новая.audit == "ok"
+
+
+def test_rebuild_сбрасывает_audit_для_изменённых_пикселей(tmp_path: Path) -> None:
+    sha = "a" * 64
+    строка = _строка(sha)
+    _оригинал(tmp_path, sha)
+    _старый_кроп(tmp_path, строка, np.zeros((260, 320, 3), dtype=np.uint8))
+
+    причина, новая = rebuild_row(строка, _deps(tmp_path, Фикс([])), DedupIndex())
+
+    assert причина == "accepted"
+    assert новая is not None
+    assert новая.audit == ""
+
+
+def test_rebuild_без_старого_кропа_сбрасывает_audit_но_принимает_строку(
+    tmp_path: Path,
+) -> None:
+    sha = "a" * 64
+    _оригинал(tmp_path, sha)
+
+    причина, строка = rebuild_row(_строка(sha), _deps(tmp_path, Фикс([])), DedupIndex())
+
+    assert причина == "accepted"
+    assert строка is not None
+    assert строка.audit == ""
+
+
+def test_rebuild_с_битым_старым_кропом_сбрасывает_audit_но_принимает_строку(
+    tmp_path: Path,
+) -> None:
+    sha = "a" * 64
+    строка = _строка(sha)
+    _оригинал(tmp_path, sha)
+    путь = tmp_path / "crops" / строка.class_id / строка.file
+    путь.parent.mkdir(parents=True, exist_ok=True)
+    путь.write_bytes(b"not a jpeg")
+
+    причина, новая = rebuild_row(строка, _deps(tmp_path, Фикс([])), DedupIndex())
+
+    assert причина == "accepted"
+    assert новая is not None
+    assert новая.audit == ""
+
+
+def test_rebuild_reset_audit_сбрасывает_равный_старый_кроп(tmp_path: Path) -> None:
+    sha = "a" * 64
+    строка = _строка(sha)
+    _оригинал(tmp_path, sha)
+    _старый_кроп(tmp_path, строка, _неизменённый_кроп())
+
+    причина, новая = rebuild_row(строка, _deps(tmp_path, Фикс([])), DedupIndex(), reset_audit=True)
+
+    assert причина == "accepted"
+    assert новая is not None
+    assert новая.audit == ""
+
+
+def test_rebuild_пересчитывает_номера_и_сбрасывает_изменённый_аудит(tmp_path: Path) -> None:
     sha = "a" * 64
     _оригинал(tmp_path, sha)
     plate = Фикс([[Detection(120.0, 210.0, 80.0, 24.0, 0.9, 0)], [], [], []])
@@ -89,7 +171,7 @@ def test_rebuild_пересчитывает_номера_и_сбрасывает
     assert причина == "accepted"
     assert строка is not None
     assert строка.plates == 1
-    assert строка.audit == "", "переderivация сбрасывает старую отметку аудита"
+    assert строка.audit == "", "изменившиеся пиксели сбрасывают старую отметку аудита"
     сохранённый_кроп = tmp_path / "crops" / "lada__granta" / f"{sha}.jpg"
     assert сохранённый_кроп.exists()
 
@@ -221,9 +303,13 @@ def test_build_parser() -> None:
     assert args.models == Path("models_dir")
     assert args.data_root == Path("data_dir")
     assert args.out is None
+    assert not args.reset_audit
 
-    args_out = parser.parse_args(["--models", "m", "--data-root", "d", "--out", "custom.csv"])
+    args_out = parser.parse_args(
+        ["--models", "m", "--data-root", "d", "--out", "custom.csv", "--reset-audit"]
+    )
     assert args_out.out == Path("custom.csv")
+    assert args_out.reset_audit
 
 
 def test_main_префлайт_сбой(tmp_path: Path) -> None:
