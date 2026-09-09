@@ -552,6 +552,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="сбросить все вердикты аудита, включая неизменившиеся пиксели",
     )
+    парсер.add_argument(
+        "--trace",
+        action="store_true",
+        help="записать observations.csv с raw/merged наблюдениями детекторов",
+    )
     return парсер
 
 
@@ -758,7 +763,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     dedup = DedupIndex()
     исходы: list[RowOutcome] = []
     for строка in строки:
-        result = rebuild_row(строка, deps, dedup, reset_audit=аргументы.reset_audit, trace=True)
+        result = rebuild_row(
+            строка,
+            deps,
+            dedup,
+            reset_audit=аргументы.reset_audit,
+            trace=аргументы.trace,
+        )
         исходы.append(
             RowOutcome(
                 строка,
@@ -777,13 +788,23 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     write_manifest(workspace.manifest, accepted)
     _write_rejects(workspace.rejects, rejects)
-    _write_observations(workspace.observations, observations)
+    if аргументы.trace:
+        _write_observations(workspace.observations, observations)
     write_frame_profile_results(workspace.pixel_diff, profile_results)
     metrics = summarize_profile_results(profile_results)
     _write_json(workspace.quality_metrics, _metrics_document(metrics))
     _write_json(workspace.profile, паспорт)
     # Отчёт называет числа прогона и ничего не утверждает про успех калибровки: решение
     # «профиль годится» принимается не здесь и не по этим полям.
+    output_hashes = {
+        workspace.manifest.relative_to(workspace.root).as_posix(): _sha256(workspace.manifest),
+        "pixel-diff.csv": _sha256(workspace.pixel_diff),
+        "profile.json": _sha256(workspace.profile),
+        "quality-metrics.json": _sha256(workspace.quality_metrics),
+        "rejects.csv": _sha256(workspace.rejects),
+    }
+    if аргументы.trace:
+        output_hashes["observations.csv"] = _sha256(workspace.observations)
     report = {
         "counts": {
             "input": len(строки),
@@ -792,14 +813,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
         "reject_reasons": dict(sorted(reasons.items())),
         "audit": asdict(_audit_counts(исходы, input_root=input_root)),
-        "output_hashes": {
-            workspace.manifest.relative_to(workspace.root).as_posix(): _sha256(workspace.manifest),
-            "observations.csv": _sha256(workspace.observations),
-            "pixel-diff.csv": _sha256(workspace.pixel_diff),
-            "profile.json": _sha256(workspace.profile),
-            "quality-metrics.json": _sha256(workspace.quality_metrics),
-            "rejects.csv": _sha256(workspace.rejects),
-        },
+        "output_hashes": dict(sorted(output_hashes.items())),
     }
     _write_json(workspace.report, report)
 

@@ -462,6 +462,7 @@ def test_build_parser_requires_out_root_and_removes_old_out() -> None:
     assert args.data_root == Path("data_dir")
     assert args.out_root == Path("workspace")
     assert args.reset_audit
+    assert not args.trace
     assert args.out is None
     assert not hasattr(args, "keep_audit")
 
@@ -611,6 +612,7 @@ def _run_main(
     *,
     input_count: int | None = None,
     out: str | None = None,
+    trace: bool = False,
 ) -> int:
     with (
         patch("pipeline.harvest.detectors.verify_weights"),
@@ -663,6 +665,8 @@ def _run_main(
         ]
         if out is not None:
             аргументы += ["--out", out]
+        if trace:
+            аргументы.append("--trace")
         return main(аргументы)
 
 
@@ -791,9 +795,6 @@ def test_main_writes_closed_workspace_artifacts_without_success_claim(
     }
     assert report["output_hashes"] == {
         "manifest.csv": hashlib.sha256((output_root / "manifest.csv").read_bytes()).hexdigest(),
-        "observations.csv": hashlib.sha256(
-            (output_root / "observations.csv").read_bytes()
-        ).hexdigest(),
         "pixel-diff.csv": hashlib.sha256((output_root / "pixel-diff.csv").read_bytes()).hexdigest(),
         "profile.json": hashlib.sha256(profile_bytes).hexdigest(),
         "quality-metrics.json": hashlib.sha256(
@@ -802,6 +803,7 @@ def test_main_writes_closed_workspace_artifacts_without_success_claim(
         "rejects.csv": hashlib.sha256((output_root / "rejects.csv").read_bytes()).hexdigest(),
     }
     assert "success" not in report and "passed" not in report
+    assert not (output_root / "observations.csv").exists()
     assert report["counts"]["accepted"] + report["counts"]["rejected"] == 2
 
 
@@ -1058,7 +1060,7 @@ def test_main_writes_profile_observations_pixel_diff_and_metrics(
 
     monkeypatch.setattr("scripts.rebuild_redaction.redact_frame", traced_redact_frame)
 
-    code = _run_main(manifest, input_root, output_root, models, [], input_count=2)
+    code = _run_main(manifest, input_root, output_root, models, [], input_count=2, trace=True)
 
     assert code == 0
     profile_document = json.loads((output_root / "profile.json").read_text(encoding="utf-8"))
