@@ -104,3 +104,18 @@ def test_profile_result_csv_roundtrip_имеет_строгую_схему(tmp_p
     )
     with pytest.raises(ValueError, match="колон"):
         load_frame_profile_results(path)
+
+
+def test_profile_result_csv_rejects_blank_required_audit_preserved(tmp_path: Path) -> None:
+    path = tmp_path / "pixel-diff.csv"
+    write_frame_profile_results(
+        path,
+        [_result(photo_id="a" * 64, old=0.1, new=0.2, equal=False)],
+    )
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(",False\n", ",\n"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="логическ"):
+        load_frame_profile_results(path)

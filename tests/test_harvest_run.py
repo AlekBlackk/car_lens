@@ -566,6 +566,7 @@ def test_живой_харвест_и_rebuild_дают_одинаковую_де
         face_detector=ФиксированныйДетектор([]),
         input_root=rebuild_root,
         output_root=rebuild_root,
+        profile_id="test-profile-id",
     )
 
     rebuild_reason, rebuild_result = rebuild_row(исходная_строка, rebuild_deps, DedupIndex())

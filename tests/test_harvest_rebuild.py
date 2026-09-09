@@ -7,7 +7,7 @@ from contextlib import nullcontext
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import cv2
 import numpy as np
@@ -21,11 +21,14 @@ from pipeline.harvest.jpeg import encode_jpeg, write_jpeg_atomic
 from pipeline.harvest.manifest import HarvestRow, append_row, load_manifest
 from pipeline.harvest.redact import PlateDetectionTrace, RawPlateObservation, RedactionResult
 from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE
+from pipeline.harvest.tiling import TileObservation
 from pipeline.redaction_calibration.model import FrameProfileResult
 from scripts.rebuild_redaction import (
     AuditCounts,
+    ObservationRecord,
     RebuildDeps,
     RebuildResult,
+    _observation_records,
     build_parser,
     main,
     preflight,
@@ -81,13 +84,20 @@ def _строка(
     )
 
 
-def _deps(input_root: Path, plate: Фикс, output_root: Path | None = None) -> RebuildDeps:
+def _deps(
+    input_root: Path,
+    plate: Фикс,
+    output_root: Path | None = None,
+    *,
+    profile: str = "test-profile-id",
+) -> RebuildDeps:
     return RebuildDeps(
         vehicle_detector=Фикс([[Detection(40.0, 40.0, 360.0, 300.0, 0.95, 2)]]),
         plate_detectors=(plate,),
         face_detector=Фикс([[]]),
         input_root=input_root,
         output_root=output_root or input_root,
+        profile_id=profile,
     )
 
 
@@ -375,6 +385,7 @@ def test_rebuild_отклоняет_no_vehicle_и_multi_car(tmp_path: Path) -> N
         face_detector=Фикс([]),
         input_root=tmp_path,
         output_root=tmp_path,
+        profile_id="test-profile-id",
     )
     причина, строка = rebuild_row(_строка(sha), deps_no_veh, DedupIndex())
     assert причина == "no_vehicle"
@@ -393,6 +404,7 @@ def test_rebuild_отклоняет_no_vehicle_и_multi_car(tmp_path: Path) -> N
         face_detector=Фикс([]),
         input_root=tmp_path,
         output_root=tmp_path,
+        profile_id="test-profile-id",
     )
     причина_m, строка_m = rebuild_row(_строка(sha), deps_multi, DedupIndex())
     assert причина_m == "multi_car"
@@ -497,8 +509,21 @@ def test_resolve_manifest_target_отвергает_симлинк_наружу(
         resolve_manifest_target(workspace, Path("link/escape.csv"))
 
 
-@pytest.mark.parametrize("reserved", ["crops", "rejects.csv", "report.json", "profile.json"])
-def test_resolve_manifest_target_отвергает_служебные_имена(tmp_path: Path, reserved: str) -> None:
+@pytest.mark.parametrize(
+    "reserved",
+    [
+        "crops",
+        "REJECTS.CSV",
+        "Report.Json",
+        "PROFILE.JSON",
+        "Observations.CSV",
+        "PIXEL-DIFF.CSV",
+        "Quality-Metrics.Json",
+    ],
+)
+def test_resolve_manifest_target_отвергает_служебные_имена_без_учёта_регистра(
+    tmp_path: Path, reserved: str
+) -> None:
     workspace = (tmp_path / "workspace").resolve()
 
     with pytest.raises(ValueError, match="служебное имя"):
@@ -1036,13 +1061,14 @@ def test_main_writes_profile_observations_pixel_diff_and_metrics(
     code = _run_main(manifest, input_root, output_root, models, [], input_count=2)
 
     assert code == 0
+    profile_document = json.loads((output_root / "profile.json").read_text(encoding="utf-8"))
     with (output_root / "observations.csv").open(encoding="utf-8", newline="") as file:
         observations = list(csv.DictReader(file))
     assert observations == [
         {
             "photo_id": accepted.sha256,
             "detector": "plate",
-            "profile": "first",
+            "profile": profile_document["profile_id"],
             "zone_x0": "0",
             "zone_y0": "0",
             "zone_x1": "800",
@@ -1058,9 +1084,31 @@ def test_main_writes_profile_observations_pixel_diff_and_metrics(
             "confidence": "0.9",
             "class_id": "0",
             "raw": "True",
+            "merged": "False",
+            "pass": "first",
+        },
+        {
+            "photo_id": accepted.sha256,
+            "detector": "merged",
+            "profile": profile_document["profile_id"],
+            "zone_x0": "0",
+            "zone_y0": "0",
+            "zone_x1": "0",
+            "zone_y1": "0",
+            "tile_x0": "0",
+            "tile_y0": "0",
+            "tile_x1": "0",
+            "tile_y1": "0",
+            "x": "120.0",
+            "y": "210.0",
+            "w": "80.0",
+            "h": "24.0",
+            "confidence": "0.9",
+            "class_id": "0",
+            "raw": "False",
             "merged": "True",
             "pass": "first",
-        }
+        },
     ]
     with (output_root / "pixel-diff.csv").open(encoding="utf-8", newline="") as file:
         pixel_rows = list(csv.DictReader(file))
@@ -1123,33 +1171,153 @@ def test_rebuild_records_over_redacted_candidate_without_writing_crop(tmp_path: 
     assert outcome.profile_result.delta_black == pytest.approx(
         outcome.profile_result.new_black_frac
     )
-    assert outcome.profile_result.pixels_equal is False
+    assert outcome.profile_result.pixels_equal is None
     assert not (output_root / "crops" / row.class_id / row.file).exists()
 
 
-def test_trace_on_off_preserves_manifest_and_crop_hashes(tmp_path: Path) -> None:
-    def run_workspace(name: str, trace: bool) -> Path:
+def test_rebuild_over_redacted_checks_before_encoder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sha = "a" * 64
+    row = _строка(sha)
+    input_root = tmp_path / "input"
+    output_root = tmp_path / "output"
+    input_root.mkdir()
+    output_root.mkdir()
+    (output_root / "crops").mkdir()
+    _оригинал(input_root, sha)
+    plate = Фикс([[Detection(40.0, 40.0, 360.0, 300.0, 0.95, 0)], [], [], []])
+    encoder = Mock(side_effect=AssertionError("encoder must not run for rejected crop"))
+    monkeypatch.setattr("scripts.rebuild_redaction.encode_jpeg", encoder)
+
+    outcome = rebuild_row(row, _deps(input_root, plate, output_root), DedupIndex())
+
+    assert outcome.reason == "over_redacted"
+    assert outcome.profile_result.new_black_frac is not None
+    assert outcome.profile_result.new_black_frac > 0.5
+    assert outcome.profile_result.pixels_equal is None
+    encoder.assert_not_called()
+
+
+def test_rebuild_empty_crop_is_over_redacted_before_encoder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sha = "a" * 64
+    row = _строка(sha)
+    input_root = tmp_path / "input"
+    output_root = tmp_path / "output"
+    input_root.mkdir()
+    output_root.mkdir()
+    (output_root / "crops").mkdir()
+    _оригинал(input_root, sha)
+    monkeypatch.setattr(
+        "scripts.rebuild_redaction.crop_image",
+        lambda *_: np.empty((0, 0, 3), dtype=np.uint8),
+    )
+    encoder = Mock(side_effect=AssertionError("encoder must not run for rejected crop"))
+    monkeypatch.setattr("scripts.rebuild_redaction.encode_jpeg", encoder)
+
+    outcome = rebuild_row(row, _deps(input_root, Фикс([]), output_root), DedupIndex())
+
+    assert outcome.reason == "over_redacted"
+    assert outcome.profile_result.new_black_frac is None
+    encoder.assert_not_called()
+
+
+def test_observations_keep_duplicate_raw_multiplicity_and_separate_merged_record() -> None:
+    duplicate = Detection(10.0, 20.0, 30.0, 10.0, 0.9, 0)
+    trace = PlateDetectionTrace(
+        raw=(
+            RawPlateObservation("plate", (0, 0, 100, 100), (0, 0, 60, 60), duplicate),
+            RawPlateObservation("plate", (0, 0, 100, 100), (40, 0, 100, 60), duplicate),
+        ),
+        merged=(duplicate,),
+    )
+
+    records = _observation_records("a" * 64, trace, "first", "profile-123")
+
+    assert [(record.raw, record.merged) for record in records] == [
+        (True, False),
+        (True, False),
+        (False, True),
+    ]
+    assert [record.tile_x0 for record in records] == [0, 40, 0]
+    assert {record.profile for record in records} == {"profile-123"}
+
+
+class ТрассируемыйТайловый:
+    def __init__(self, scenarios: list[list[TileObservation]]) -> None:
+        self.scenarios = list(scenarios)
+
+    def detect(self, image: np.ndarray) -> list[Detection]:
+        return [observation.box for observation in self.scenarios.pop(0)]
+
+    def detect_with_tiles(
+        self, image: np.ndarray
+    ) -> tuple[list[Detection], tuple[TileObservation, ...]]:
+        observations = tuple(self.scenarios.pop(0))
+        return [observation.box for observation in observations], observations
+
+
+def test_trace_on_off_preserves_decisions_manifest_crops_and_records_both_passes(
+    tmp_path: Path,
+) -> None:
+    plate = Detection(120.0, 210.0, 80.0, 24.0, 0.95, 0)
+    suppressed = Detection(122.0, 211.0, 78.0, 23.0, 0.70, 0)
+    residual = Detection(420.0, 60.0, 70.0, 20.0, 0.90, 0)
+
+    def run_workspace(
+        name: str, trace: bool
+    ) -> tuple[Path, tuple[str, str], tuple[ObservationRecord, ...]]:
         input_root = tmp_path / f"input-{name}"
         output_root = tmp_path / f"output-{name}"
         input_root.mkdir()
         output_root.mkdir()
         (output_root / "crops").mkdir()
-        sha = "a" * 64
-        row = _строка(sha)
-        _оригинал(input_root, sha)
-        outcome = rebuild_row(
-            row,
-            _deps(input_root, Фикс([]), output_root),
-            DedupIndex(),
-            trace=trace,
+        accepted = _строка("a" * 64)
+        rejected = _строка("a" * 64)
+        _оригинал(input_root, accepted.sha256)
+        _оригинал(input_root, rejected.sha256)
+        detector = ТрассируемыйТайловый(
+            [
+                [
+                    TileObservation((0, 0, 640, 400), plate),
+                    TileObservation((160, 0, 800, 400), suppressed),
+                ],
+                [],
+                [TileObservation((0, 0, 640, 400), residual)],
+                [],
+                [],
+                [],
+                [],
+                [],
+            ]
         )
-        assert outcome.rebuilt is not None
-        append_row(output_root / "manifest.csv", outcome.rebuilt)
-        return output_root
+        deps = RebuildDeps(
+            vehicle_detector=Фикс(
+                [
+                    [Detection(40.0, 40.0, 360.0, 300.0, 0.95, 2)],
+                    [Detection(40.0, 40.0, 360.0, 300.0, 0.95, 2)],
+                ]
+            ),
+            plate_detectors=(detector,),
+            face_detector=Фикс([[]]),
+            input_root=input_root,
+            output_root=output_root,
+            profile_id="profile-123",
+        )
+        dedup = DedupIndex(max_distance=64)
+        first = rebuild_row(accepted, deps, dedup, trace=trace)
+        second = rebuild_row(rejected, deps, dedup, trace=trace)
+        assert second.rebuilt is not None
+        append_row(output_root / "manifest.csv", second.rebuilt)
+        return output_root, (first.reason, second.reason), first.observations + second.observations
 
-    plain = run_workspace("plain", False)
-    traced = run_workspace("traced", True)
+    plain, plain_reasons, plain_observations = run_workspace("plain", False)
+    traced, traced_reasons, traced_observations = run_workspace("traced", True)
 
+    assert plain_reasons == traced_reasons == ("redaction_failed", "accepted")
+    assert plain_observations == ()
     assert (plain / "manifest.csv").read_bytes() == (traced / "manifest.csv").read_bytes()
     plain_crop = next((plain / "crops").rglob("*.jpg"))
     traced_crop = next((traced / "crops").rglob("*.jpg"))
@@ -1157,6 +1325,14 @@ def test_trace_on_off_preserves_manifest_and_crop_hashes(tmp_path: Path) -> None
         hashlib.sha256(plain_crop.read_bytes()).digest()
         == hashlib.sha256(traced_crop.read_bytes()).digest()
     )
+    assert {(record.raw, record.merged, record.pass_name) for record in traced_observations} == {
+        (True, False, "first"),
+        (False, True, "first"),
+        (True, False, "second"),
+        (False, True, "second"),
+    }
+    assert {record.profile for record in traced_observations} == {"profile-123"}
+    assert {record.tile_x0 for record in traced_observations if record.raw} == {0, 160}
 
 
 def test_main_берёт_детекторы_номера_из_единой_фабрики(tmp_path: Path) -> None:

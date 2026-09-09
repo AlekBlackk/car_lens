@@ -69,6 +69,7 @@ RESERVED_WORKSPACE_NAMES = frozenset(
         "report.json",
     }
 )
+RESERVED_WORKSPACE_NAMES_CASEFOLD = frozenset(name.casefold() for name in RESERVED_WORKSPACE_NAMES)
 
 
 class RebuildError(ValueError):
@@ -143,6 +144,7 @@ class RebuildDeps:
     face_detector: Detector
     input_root: Path
     output_root: Path
+    profile_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,7 +247,7 @@ def resolve_manifest_target(output_root: Path, out: Path | None) -> Path:
     цель = (out if out.is_absolute() else output_root / out).resolve(strict=False)
     if цель == output_root or not цель.is_relative_to(output_root):
         raise RebuildError(f"--out ведёт за пределы workspace {output_root}: {out}")
-    if цель.relative_to(output_root).parts[0] in RESERVED_WORKSPACE_NAMES:
+    if цель.relative_to(output_root).parts[0].casefold() in RESERVED_WORKSPACE_NAMES_CASEFOLD:
         raise RebuildError(f"--out занимает служебное имя workspace: {out}")
     return цель
 
@@ -295,9 +297,14 @@ def _profile_result(
     rebuilt: HarvestRow | None,
     old: np.ndarray | None,
     encoded: EncodedJpeg | None,
+    *,
+    new_image: np.ndarray | None = None,
 ) -> FrameProfileResult:
     old_black = black_fraction(old) if old is not None else None
-    new_black = black_fraction(encoded.decoded) if encoded is not None else None
+    measured_new = encoded.decoded if encoded is not None else new_image
+    new_black = (
+        black_fraction(measured_new) if measured_new is not None and measured_new.size > 0 else None
+    )
     delta = (
         max(0.0, new_black - old_black) if old_black is not None and new_black is not None else None
     )
@@ -323,39 +330,35 @@ def _observation_records(
     photo_id: str,
     trace: PlateDetectionTrace,
     pass_name: str,
+    profile_id: str,
 ) -> tuple[ObservationRecord, ...]:
-    records: list[ObservationRecord] = []
-    merged = set(trace.merged)
-    for observation in trace.raw:
-        records.append(
-            _observation_record(
-                photo_id,
-                observation,
-                pass_name,
-                raw=True,
-                merged=observation.box in merged,
-            )
+    records = [
+        _observation_record(
+            photo_id,
+            observation,
+            pass_name,
+            profile_id,
+            raw=True,
+            merged=False,
         )
-    raw_boxes = {observation.box for observation in trace.raw}
-    for detector_index, box in enumerate(trace.merged):
-        if box in raw_boxes:
-            continue
-        fallback = RawPlateObservation(
-            detector="merged",
-            zone=(0, 0, 0, 0),
-            tile=(0, 0, 0, 0),
-            box=box,
+        for observation in trace.raw
+    ]
+    records.extend(
+        _observation_record(
+            photo_id,
+            RawPlateObservation(
+                detector="merged",
+                zone=(0, 0, 0, 0),
+                tile=(0, 0, 0, 0),
+                box=box,
+            ),
+            pass_name,
+            profile_id,
+            raw=False,
+            merged=True,
         )
-        records.append(
-            _observation_record(
-                photo_id,
-                fallback,
-                pass_name,
-                raw=False,
-                merged=True,
-                profile=f"merged-{detector_index}",
-            )
-        )
+        for box in trace.merged
+    )
     return tuple(records)
 
 
@@ -363,10 +366,10 @@ def _observation_record(
     photo_id: str,
     observation: RawPlateObservation,
     pass_name: str,
+    profile_id: str,
     *,
     raw: bool,
     merged: bool,
-    profile: str | None = None,
 ) -> ObservationRecord:
     zone = observation.zone
     tile = observation.tile
@@ -374,7 +377,7 @@ def _observation_record(
     return ObservationRecord(
         photo_id=photo_id,
         detector=observation.detector,
-        profile=profile or pass_name,
+        profile=profile_id,
         zone_x0=zone[0],
         zone_y0=zone[1],
         zone_x1=zone[2],
@@ -401,12 +404,13 @@ def _rejected_result(
     old: np.ndarray | None,
     *,
     encoded: EncodedJpeg | None = None,
+    new_image: np.ndarray | None = None,
     observations: tuple[ObservationRecord, ...] = (),
 ) -> RebuildResult:
     return RebuildResult(
         reason,
         None,
-        _profile_result(row, reason, None, old, encoded),
+        _profile_result(row, reason, None, old, encoded, new_image=new_image),
         observations,
     )
 
@@ -438,24 +442,24 @@ def rebuild_row(
 
     машины = [d for d in все_боксы if d.cls in VEHICLE_CLASSES and d.conf > 0.5]
     итог = redact_frame(кадр, машины, deps.plate_detectors, deps.face_detector, trace=trace)
-    observations = _observation_records(row.sha256, итог.first_pass, "first")
-    observations += _observation_records(row.sha256, итог.second_pass, "second")
+    observations = _observation_records(row.sha256, итог.first_pass, "first", deps.profile_id)
+    observations += _observation_records(row.sha256, итог.second_pass, "second", deps.profile_id)
     if not итог.ok:
         return _rejected_result(row, "redaction_failed", old, observations=observations)
 
     кроп = crop_image(итог.image, решение.box)
-    try:
-        encoded = encode_jpeg(кроп)
-    except RuntimeError:
-        return _rejected_result(row, "write_failed", old, observations=observations)
     if is_crop_over_redacted(кроп):
         return _rejected_result(
             row,
             "over_redacted",
             old,
-            encoded=encoded,
+            new_image=кроп,
             observations=observations,
         )
+    try:
+        encoded = encode_jpeg(кроп)
+    except RuntimeError:
+        return _rejected_result(row, "write_failed", old, observations=observations)
 
     хеш = phash_of(кроп)
 
@@ -748,6 +752,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         face_detector=face_detector,
         input_root=input_root,
         output_root=workspace.root,
+        profile_id=паспорт["profile_id"],
     )
 
     dedup = DedupIndex()

@@ -85,6 +85,12 @@ def _optional_bool(value: str) -> bool | None:
     return value == "True"
 
 
+def _required_bool(value: str) -> bool:
+    if value not in {"True", "False"}:
+        raise ValueError(f"недопустимое обязательное логическое значение: {value!r}")
+    return value == "True"
+
+
 def load_frame_profile_results(path: Path) -> list[FrameProfileResult]:
     """Прочитать CSV, отвергая отсутствующие или неизвестные колонки контракта."""
     with path.open(encoding="utf-8", newline="") as file:
@@ -109,7 +115,7 @@ def load_frame_profile_results(path: Path) -> list[FrameProfileResult]:
                     new_black_frac=_optional_float(row["new_black_frac"]),
                     delta_black=_optional_float(row["delta_black"]),
                     pixels_equal=_optional_bool(row["pixels_equal"]),
-                    audit_preserved=_optional_bool(row["audit_preserved"]) is True,
+                    audit_preserved=_required_bool(row["audit_preserved"]),
                 )
             )
     return loaded
