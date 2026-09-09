@@ -564,7 +564,8 @@ def test_живой_харвест_и_rebuild_дают_одинаковую_де
         vehicle_detector=ФиксированныйДетектор([Detection(40, 40, 360, 300, 0.95, 2)]),
         plate_detectors=(СписокДетектор(plate_scenario),),
         face_detector=ФиксированныйДетектор([]),
-        root=rebuild_root,
+        input_root=rebuild_root,
+        output_root=rebuild_root,
     )
 
     rebuild_reason, rebuild_result = rebuild_row(исходная_строка, rebuild_deps, DedupIndex())

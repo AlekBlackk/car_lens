@@ -1,5 +1,9 @@
 # tests/test_harvest_rebuild.py
-from dataclasses import replace
+import csv
+import hashlib
+import json
+from contextlib import nullcontext
+from dataclasses import asdict, replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,10 +14,20 @@ import pytest
 from pipeline.crop import Detection
 from pipeline.harvest.cache import cache_path
 from pipeline.harvest.dedup import DedupIndex
+from pipeline.harvest.detectors import DetectorPin
 from pipeline.harvest.jpeg import encode_jpeg, write_jpeg_atomic
 from pipeline.harvest.manifest import HarvestRow, append_row, load_manifest
 from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE
-from scripts.rebuild_redaction import RebuildDeps, build_parser, main, preflight, rebuild_row
+from scripts.rebuild_redaction import (
+    AuditCounts,
+    RebuildDeps,
+    build_parser,
+    main,
+    preflight,
+    prepare_workspace,
+    rebuild_row,
+    resolve_manifest_target,
+)
 
 
 class Фикс:
@@ -62,12 +76,13 @@ def _строка(
     )
 
 
-def _deps(root: Path, plate: Фикс) -> RebuildDeps:
+def _deps(input_root: Path, plate: Фикс, output_root: Path | None = None) -> RebuildDeps:
     return RebuildDeps(
         vehicle_detector=Фикс([[Detection(40.0, 40.0, 360.0, 300.0, 0.95, 2)]]),
         plate_detectors=(plate,),
         face_detector=Фикс([[]]),
-        root=root,
+        input_root=input_root,
+        output_root=output_root or input_root,
     )
 
 
@@ -119,6 +134,28 @@ def test_rebuild_отвергает_небезопасный_file_до_запи�
     sentinel.write_bytes(b"do not overwrite")
 
     with pytest.raises(ValueError, match="имя кропа"):
+        rebuild_row(строка, _deps(tmp_path, Фикс([])), DedupIndex())
+
+    assert sentinel.read_bytes() == b"do not overwrite"
+    assert not (tmp_path / "crops").exists()
+
+
+@pytest.mark.parametrize(
+    "unsafe_class",
+    ["../../escape", "..", "/abs", "C:\\tmp", "a/b", "a\\b", ""],
+)
+def test_rebuild_отвергает_небезопасный_class_id_до_записи(
+    tmp_path: Path, unsafe_class: str
+) -> None:
+    # `load_manifest` не ограничивает колонку класса ничем, а `validate` — только
+    # непустотой: без этой проверки `..` в классе писал бы кроп мимо workspace.
+    sha = "a" * 64
+    строка = replace(_строка(sha), class_id=unsafe_class)
+    _оригинал(tmp_path, sha)
+    sentinel = tmp_path / "sentinel.jpg"
+    sentinel.write_bytes(b"do not overwrite")
+
+    with pytest.raises(ValueError, match="имя класса"):
         rebuild_row(строка, _deps(tmp_path, Фикс([])), DedupIndex())
 
     assert sentinel.read_bytes() == b"do not overwrite"
@@ -331,7 +368,8 @@ def test_rebuild_отклоняет_no_vehicle_и_multi_car(tmp_path: Path) -> N
         vehicle_detector=Фикс([[]]),
         plate_detectors=(Фикс([]),),
         face_detector=Фикс([]),
-        root=tmp_path,
+        input_root=tmp_path,
+        output_root=tmp_path,
     )
     причина, строка = rebuild_row(_строка(sha), deps_no_veh, DedupIndex())
     assert причина == "no_vehicle"
@@ -348,7 +386,8 @@ def test_rebuild_отклоняет_no_vehicle_и_multi_car(tmp_path: Path) -> N
         ),
         plate_detectors=(Фикс([]),),
         face_detector=Фикс([]),
-        root=tmp_path,
+        input_root=tmp_path,
+        output_root=tmp_path,
     )
     причина_m, строка_m = rebuild_row(_строка(sha), deps_multi, DedupIndex())
     assert причина_m == "multi_car"
@@ -364,19 +403,414 @@ def test_rebuild_отклоняет_over_redacted(tmp_path: Path) -> None:
     assert строка is None
 
 
-def test_build_parser() -> None:
+def _pin(name: str, format: str, sha: str) -> DetectorPin:
+    return DetectorPin(
+        name=name,
+        format=format,
+        url=f"https://example.test/{name}.{format}",
+        revision=f"{name}-revision",
+        license="mit",
+        checked="2026-09-07",
+        sha256=sha,
+        derived_from="",
+    )
+
+
+def _pins() -> dict[str, DetectorPin]:
+    return {
+        "face": _pin("face", "onnx", "1" * 64),
+        "plate": _pin("plate", "onnx", "2" * 64),
+        "plate_hires": _pin("plate_hires", "pt", "3" * 64),
+    }
+
+
+def test_build_parser_requires_out_root_and_removes_old_out() -> None:
     parser = build_parser()
-    args = parser.parse_args(["--models", "models_dir", "--data-root", "data_dir"])
+    with pytest.raises(SystemExit) as ошибка:
+        parser.parse_args(["--models", "models_dir", "--data-root", "data_dir"])
+    assert ошибка.value.code == 2
+
+    args = parser.parse_args(
+        [
+            "--models",
+            "models_dir",
+            "--data-root",
+            "data_dir",
+            "--out-root",
+            "workspace",
+            "--reset-audit",
+        ]
+    )
     assert args.models == Path("models_dir")
     assert args.data_root == Path("data_dir")
+    assert args.out_root == Path("workspace")
+    assert args.reset_audit
     assert args.out is None
-    assert not args.reset_audit
+    assert not hasattr(args, "keep_audit")
 
-    args_out = parser.parse_args(
-        ["--models", "m", "--data-root", "d", "--out", "custom.csv", "--reset-audit"]
+
+def test_resolve_manifest_target_по_умолчанию_и_внутри_workspace(tmp_path: Path) -> None:
+    workspace = (tmp_path / "workspace").resolve()
+
+    assert resolve_manifest_target(workspace, None) == workspace / "manifest.csv"
+    assert resolve_manifest_target(workspace, Path("custom.csv")) == workspace / "custom.csv"
+    # Относительный путь считается от workspace, а не от текущего каталога.
+    assert resolve_manifest_target(workspace, Path("sub/custom.csv")) == (
+        workspace / "sub" / "custom.csv"
     )
-    assert args_out.out == Path("custom.csv")
-    assert args_out.reset_audit
+
+
+@pytest.mark.parametrize(
+    "escape",
+    ["../escape.csv", "sub/../../escape.csv", "..", "."],
+)
+def test_resolve_manifest_target_отвергает_выход_за_workspace(tmp_path: Path, escape: str) -> None:
+    workspace = (tmp_path / "workspace").resolve()
+
+    with pytest.raises(ValueError, match="за пределы workspace"):
+        resolve_manifest_target(workspace, Path(escape))
+
+
+def test_resolve_manifest_target_отвергает_абсолютный_путь_наружу(tmp_path: Path) -> None:
+    workspace = (tmp_path / "workspace").resolve()
+
+    with pytest.raises(ValueError, match="за пределы workspace"):
+        resolve_manifest_target(workspace, (tmp_path / "elsewhere.csv").resolve())
+
+
+def test_resolve_manifest_target_отвергает_симлинк_наружу(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    workspace = (tmp_path / "workspace").resolve()
+    workspace.mkdir()
+    try:
+        (workspace / "link").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("создание симлинка недоступно в этом окружении")
+
+    with pytest.raises(ValueError, match="за пределы workspace"):
+        resolve_manifest_target(workspace, Path("link/escape.csv"))
+
+
+@pytest.mark.parametrize("reserved", ["crops", "rejects.csv", "report.json", "profile.json"])
+def test_resolve_manifest_target_отвергает_служебные_имена(tmp_path: Path, reserved: str) -> None:
+    workspace = (tmp_path / "workspace").resolve()
+
+    with pytest.raises(ValueError, match="служебное имя"):
+        resolve_manifest_target(workspace, Path(reserved))
+
+
+@pytest.mark.parametrize("relation", ["equal", "output_inside_input", "input_inside_output"])
+def test_prepare_workspace_rejects_equal_and_nested_roots(tmp_path: Path, relation: str) -> None:
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    if relation == "equal":
+        output_root = input_root
+    elif relation == "output_inside_input":
+        output_root = input_root / "workspace"
+    else:
+        output_root = tmp_path / "parent"
+        output_root.mkdir()
+        input_root = output_root / "input"
+        input_root.mkdir()
+
+    with pytest.raises(ValueError, match="корн"):
+        prepare_workspace(output_root, input_root)
+
+    if relation == "output_inside_input":
+        assert not output_root.exists()
+
+
+def test_prepare_workspace_rejects_existing_output_even_when_empty(tmp_path: Path) -> None:
+    input_root = tmp_path / "input"
+    output_root = tmp_path / "workspace"
+    input_root.mkdir()
+    output_root.mkdir()
+
+    with pytest.raises(ValueError, match="уже существует"):
+        prepare_workspace(output_root, input_root)
+
+    assert list(output_root.iterdir()) == []
+
+
+def test_prepare_workspace_reserves_all_paths_and_creates_only_crops(tmp_path: Path) -> None:
+    input_root = tmp_path / "input"
+    output_root = tmp_path / "workspace"
+    input_root.mkdir()
+
+    paths = prepare_workspace(output_root, input_root)
+
+    assert paths.root == output_root.resolve()
+    assert paths.manifest == paths.root / "manifest.csv"
+    assert paths.crops == paths.root / "crops"
+    assert paths.rejects == paths.root / "rejects.csv"
+    assert paths.observations == paths.root / "observations.csv"
+    assert paths.report == paths.root / "report.json"
+    assert paths.profile == paths.root / "profile.json"
+    assert sorted(path.name for path in paths.root.iterdir()) == ["crops"]
+
+
+def test_rebuild_reads_input_crop_and_writes_output_crop(tmp_path: Path) -> None:
+    input_root = tmp_path / "input"
+    output_root = tmp_path / "output"
+    input_root.mkdir()
+    output_root.mkdir()
+    (output_root / "crops").mkdir()
+    sha = "a" * 64
+    row = _строка(sha)
+    _оригинал(input_root, sha)
+    old_path = _старый_кроп(input_root, row, _неизменённый_кроп())
+
+    reason, rebuilt = rebuild_row(
+        row,
+        _deps(input_root, Фикс([]), output_root),
+        DedupIndex(),
+    )
+
+    assert reason == "accepted"
+    assert rebuilt is not None and rebuilt.audit == "ok"
+    assert old_path.read_bytes() == (output_root / "crops" / row.class_id / row.file).read_bytes()
+
+
+def _run_main(
+    manifest: Path,
+    input_root: Path,
+    output_root: Path,
+    models: Path,
+    rows: list[tuple[str, HarvestRow | None]],
+    *,
+    input_count: int | None = None,
+    out: str | None = None,
+) -> int:
+    with (
+        patch("pipeline.harvest.detectors.verify_weights"),
+        patch("pipeline.harvest.detectors.load_detectors_manifest", return_value=_pins()),
+        patch("pipeline.harvest.redaction_profile.detector_stage_sha256", return_value="4" * 64),
+        patch("pipeline.harvest.redaction_profile.build_plate_detectors") as plate_factory,
+        patch("pipeline.detectors.yolo.YoloDetector") as vehicle_factory,
+        patch("pipeline.harvest.backends.YuNetFaceDetector") as face_factory,
+        patch("scripts.rebuild_redaction.current_git_sha", return_value="5" * 40),
+        patch("scripts.rebuild_redaction.current_timestamp", return_value="2026-09-07T12:00:00Z"),
+        patch("scripts.rebuild_redaction.rebuild_row", side_effect=rows) if rows else nullcontext(),
+    ):
+        count = input_count if input_count is not None else len(rows)
+        vehicle_factory.return_value = Фикс(
+            [[Detection(40.0, 40.0, 360.0, 300.0, 0.95, 2)]] * count
+        )
+        plate_factory.return_value = (Фикс([]),)
+        face_factory.return_value = Фикс([[]] * count)
+        аргументы = [
+            "--manifest",
+            str(manifest),
+            "--models",
+            str(models),
+            "--data-root",
+            str(input_root),
+            "--out-root",
+            str(output_root),
+        ]
+        if out is not None:
+            аргументы += ["--out", out]
+        return main(аргументы)
+
+
+def test_main_preflights_originals_before_creating_output(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.csv"
+    append_row(manifest, _строка("a" * 64))
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    output_root = tmp_path / "workspace"
+
+    code = main(
+        [
+            "--manifest",
+            str(manifest),
+            "--models",
+            str(tmp_path / "models"),
+            "--data-root",
+            str(input_root),
+            "--out-root",
+            str(output_root),
+        ]
+    )
+
+    assert code == 2
+    assert not output_root.exists()
+
+
+def test_main_writes_closed_workspace_artifacts_without_success_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "manifest.csv"
+    accepted = _строка("a" * 64)
+    rejected = _строка("b" * 64)
+    append_row(manifest, accepted)
+    append_row(manifest, rejected)
+    input_root = tmp_path / "input"
+    _оригинал(input_root, accepted.sha256)
+    _оригинал(input_root, rejected.sha256)
+    output_root = tmp_path / "workspace"
+    models = tmp_path / "models"
+    models.mkdir()
+    real_rebuild_row = rebuild_row
+
+    def fake_rebuild_row(
+        row: HarvestRow,
+        deps: RebuildDeps,
+        dedup: DedupIndex,
+        reset_audit: bool = False,
+    ) -> tuple[str, HarvestRow | None]:
+        if row.sha256 == rejected.sha256:
+            return "redaction_failed", None
+        return real_rebuild_row(row, deps, dedup, reset_audit)
+
+    monkeypatch.setattr("scripts.rebuild_redaction.rebuild_row", fake_rebuild_row)
+    code = _run_main(
+        manifest,
+        input_root,
+        output_root,
+        models,
+        [],
+        input_count=2,
+    )
+
+    assert code == 0
+    rows = load_manifest(output_root / "manifest.csv")
+    assert len(rows) == 1
+    assert rows[0].sha256 == accepted.sha256
+    assert rows[0].audit == ""
+    with (output_root / "rejects.csv").open(encoding="utf-8", newline="") as file:
+        rejects = list(csv.DictReader(file))
+    assert rejects == [
+        {
+            "file": rejected.file,
+            "class_id": rejected.class_id,
+            "source": rejected.source,
+            "source_item_id": rejected.source_item_id,
+            "sha256": rejected.sha256,
+            "reason": "redaction_failed",
+        }
+    ]
+
+    profile_bytes = (output_root / "profile.json").read_bytes()
+    report_bytes = (output_root / "report.json").read_bytes()
+    assert profile_bytes.endswith(b"\n") and report_bytes.endswith(b"\n")
+    profile = json.loads(profile_bytes)
+    report = json.loads(report_bytes)
+    assert profile == {
+        "detector_pins": {name: asdict(pin) for name, pin in sorted(_pins().items())},
+        "git_sha": "5" * 40,
+        "input_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        "input_root": str(input_root.resolve()),
+        "numpy_version": np.__version__,
+        "opencv_version": cv2.__version__,
+        "profile": asdict(CURRENT_REDACTION_PROFILE),
+        "profile_id": profile["profile_id"],
+        "stage_sha256": "4" * 64,
+        "timestamp": "2026-09-07T12:00:00Z",
+    }
+    assert len(profile["profile_id"]) == 64
+    assert report["counts"] == {"accepted": 1, "input": 2, "rejected": 1}
+    assert report["reject_reasons"] == {"redaction_failed": 1}
+    # Обе строки входа несут отметку `ok`. Принятая теряет её потому, что старого кропа
+    # нет, отклонённая — вместе с самой строкой. Корзины обязаны закрывать `in_input`.
+    assert report["audit"] == {
+        "corrupt": 0,
+        "dropped_with_row": 1,
+        "in_input": 2,
+        "missing": 1,
+        "preserved": 0,
+        "reset": 0,
+    }
+    assert report["output_hashes"] == {
+        "manifest.csv": hashlib.sha256((output_root / "manifest.csv").read_bytes()).hexdigest(),
+        "profile.json": hashlib.sha256(profile_bytes).hexdigest(),
+        "rejects.csv": hashlib.sha256((output_root / "rejects.csv").read_bytes()).hexdigest(),
+    }
+    assert "success" not in report and "passed" not in report
+    assert report["counts"]["accepted"] + report["counts"]["rejected"] == 2
+
+
+def test_audit_counts_требует_закрытой_арифметики() -> None:
+    AuditCounts(in_input=3, preserved=1, reset=1, missing=1, corrupt=0, dropped_with_row=0)
+
+    with pytest.raises(ValueError, match="не сходятся"):
+        AuditCounts(in_input=3, preserved=1, reset=0, missing=0, corrupt=0, dropped_with_row=0)
+
+
+def test_отчёт_читает_перенос_отметки_с_построенной_строки(tmp_path: Path) -> None:
+    # Корзина `preserved` обязана совпадать с тем, что записано в манифест workspace: она
+    # читается с построенной строки, а не пересчитывается предикатом равенства пикселей.
+    manifest = tmp_path / "manifest.csv"
+    строка = _строка("a" * 64)
+    append_row(manifest, строка)
+    input_root = tmp_path / "input"
+    _оригинал(input_root, строка.sha256)
+    _старый_кроп(input_root, строка, _неизменённый_кроп())
+    output_root = tmp_path / "workspace"
+    models = tmp_path / "models"
+    models.mkdir()
+
+    код = _run_main(manifest, input_root, output_root, models, [], input_count=1)
+
+    assert код == 0
+    отчёт = json.loads((output_root / "report.json").read_text(encoding="utf-8"))
+    assert отчёт["audit"] == {
+        "corrupt": 0,
+        "dropped_with_row": 0,
+        "in_input": 1,
+        "missing": 0,
+        "preserved": 1,
+        "reset": 0,
+    }
+    assert load_manifest(output_root / "manifest.csv")[0].audit == "ok"
+
+
+def test_main_кладёт_манифест_по_out_внутри_workspace(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.csv"
+    строка = _строка("a" * 64)
+    append_row(manifest, строка)
+    input_root = tmp_path / "input"
+    _оригинал(input_root, строка.sha256)
+    output_root = tmp_path / "workspace"
+    models = tmp_path / "models"
+    models.mkdir()
+
+    код = _run_main(
+        manifest, input_root, output_root, models, [], input_count=1, out="sub/custom.csv"
+    )
+
+    assert код == 0
+    assert not (output_root / "manifest.csv").exists()
+    assert len(load_manifest(output_root / "sub" / "custom.csv")) == 1
+    отчёт = json.loads((output_root / "report.json").read_text(encoding="utf-8"))
+    assert "sub/custom.csv" in отчёт["output_hashes"]
+
+
+def test_main_отвергает_out_наружу_до_создания_workspace(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.csv"
+    append_row(manifest, _строка("a" * 64))
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    output_root = tmp_path / "workspace"
+
+    with pytest.raises(ValueError, match="за пределы workspace"):
+        main(
+            [
+                "--manifest",
+                str(manifest),
+                "--models",
+                str(tmp_path / "models"),
+                "--data-root",
+                str(input_root),
+                "--out-root",
+                str(output_root),
+                "--out",
+                "../escape.csv",
+            ]
+        )
+
+    assert not output_root.exists()
 
 
 def test_main_отвергает_дубли_crop_destination_до_первой_мутации(tmp_path: Path) -> None:
@@ -401,6 +835,8 @@ def test_main_отвергает_дубли_crop_destination_до_первой_�
                 str(tmp_path / "models"),
                 "--data-root",
                 str(data_root),
+                "--out-root",
+                str(tmp_path / "workspace"),
             ]
         )
 
@@ -430,6 +866,8 @@ def test_main_отвергает_casefold_alias_до_первой_мутации
                 str(tmp_path / "models"),
                 "--data-root",
                 str(data_root),
+                "--out-root",
+                str(tmp_path / "workspace"),
             ]
         )
 
@@ -440,6 +878,7 @@ def test_main_отвергает_casefold_alias_до_первой_мутации
 def test_main_префлайт_сбой(tmp_path: Path) -> None:
     манифест = tmp_path / "manifest.csv"
     append_row(манифест, _строка("a" * 64))
+    (tmp_path / "data").mkdir()
     код = main(
         [
             "--manifest",
@@ -448,9 +887,12 @@ def test_main_префлайт_сбой(tmp_path: Path) -> None:
             str(tmp_path / "models"),
             "--data-root",
             str(tmp_path / "data"),
+            "--out-root",
+            str(tmp_path / "workspace"),
         ]
     )
     assert код == 2
+    assert not (tmp_path / "workspace").exists()
 
 
 def test_main_успешный_прогон(tmp_path: Path) -> None:
@@ -464,16 +906,13 @@ def test_main_успешный_прогон(tmp_path: Path) -> None:
 
     with (
         patch("pipeline.harvest.detectors.verify_weights"),
-        patch(
-            "pipeline.harvest.detectors.load_detectors_manifest",
-            return_value={
-                "plate": type("Pin", (), {"format": "onnx"})(),
-                "plate_hires": type("Pin", (), {"format": "pt"})(),
-            },
-        ),
+        patch("pipeline.harvest.detectors.load_detectors_manifest", return_value=_pins()),
+        patch("pipeline.harvest.redaction_profile.detector_stage_sha256", return_value="4" * 64),
         patch("pipeline.harvest.backends.OnnxBoxDetector"),
         patch("pipeline.detectors.yolo.YoloDetector"),
         patch("pipeline.harvest.backends.YuNetFaceDetector"),
+        patch("scripts.rebuild_redaction.current_git_sha", return_value="5" * 40),
+        patch("scripts.rebuild_redaction.current_timestamp", return_value="2026-09-07T12:00:00Z"),
         patch("scripts.rebuild_redaction.rebuild_row", return_value=("accepted", _строка(sha))),
     ):
         код = main(
@@ -484,11 +923,14 @@ def test_main_успешный_прогон(tmp_path: Path) -> None:
                 str(models_dir),
                 "--data-root",
                 str(tmp_path / "data"),
+                "--out-root",
+                str(tmp_path / "workspace"),
             ]
         )
         assert код == 0
-        новые_строки = load_manifest(манифест)
+        новые_строки = load_manifest(tmp_path / "workspace" / "manifest.csv")
         assert len(новые_строки) == 1
+        assert load_manifest(манифест) == [_строка(sha)]
 
 
 def test_main_берёт_детекторы_номера_из_единой_фабрики(tmp_path: Path) -> None:
@@ -503,14 +945,17 @@ def test_main_берёт_детекторы_номера_из_единой_фа�
     _оригинал(tmp_path / "data", sha)
     модели = tmp_path / "models"
     модели.mkdir(parents=True, exist_ok=True)
-    пины = {"plate": type("Pin", (), {"format": "onnx"})()}
+    пины = _pins()
 
     with (
         patch("pipeline.harvest.detectors.verify_weights"),
         patch("pipeline.harvest.detectors.load_detectors_manifest", return_value=пины),
+        patch("pipeline.harvest.redaction_profile.detector_stage_sha256", return_value="4" * 64),
         patch("pipeline.harvest.redaction_profile.build_plate_detectors") as фабрика,
         patch("pipeline.detectors.yolo.YoloDetector"),
         patch("pipeline.harvest.backends.YuNetFaceDetector"),
+        patch("scripts.rebuild_redaction.current_git_sha", return_value="5" * 40),
+        patch("scripts.rebuild_redaction.current_timestamp", return_value="2026-09-07T12:00:00Z"),
         patch("scripts.rebuild_redaction.rebuild_row", return_value=("accepted", _строка(sha))),
     ):
         код = main(
@@ -521,6 +966,8 @@ def test_main_берёт_детекторы_номера_из_единой_фа�
                 str(модели),
                 "--data-root",
                 str(tmp_path / "data"),
+                "--out-root",
+                str(tmp_path / "workspace"),
             ]
         )
 
