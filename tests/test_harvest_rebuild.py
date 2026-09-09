@@ -2,9 +2,11 @@
 import csv
 import hashlib
 import json
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import cv2
@@ -17,10 +19,13 @@ from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.detectors import DetectorPin
 from pipeline.harvest.jpeg import encode_jpeg, write_jpeg_atomic
 from pipeline.harvest.manifest import HarvestRow, append_row, load_manifest
+from pipeline.harvest.redact import PlateDetectionTrace, RawPlateObservation, RedactionResult
 from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE
+from pipeline.redaction_calibration.model import FrameProfileResult
 from scripts.rebuild_redaction import (
     AuditCounts,
     RebuildDeps,
+    RebuildResult,
     build_parser,
     main,
     preflight,
@@ -591,7 +596,29 @@ def _run_main(
         patch("pipeline.harvest.backends.YuNetFaceDetector") as face_factory,
         patch("scripts.rebuild_redaction.current_git_sha", return_value="5" * 40),
         patch("scripts.rebuild_redaction.current_timestamp", return_value="2026-09-07T12:00:00Z"),
-        patch("scripts.rebuild_redaction.rebuild_row", side_effect=rows) if rows else nullcontext(),
+        patch(
+            "scripts.rebuild_redaction.rebuild_row",
+            side_effect=[
+                RebuildResult(
+                    reason,
+                    rebuilt,
+                    FrameProfileResult(
+                        photo_id=rebuilt.sha256 if rebuilt is not None else "rejected",
+                        class_id=rebuilt.class_id if rebuilt is not None else "rejected",
+                        outcome="accepted" if rebuilt is not None else "rejected",
+                        reject_reason=None if rebuilt is not None else reason,
+                        old_black_frac=0.0,
+                        new_black_frac=0.0,
+                        delta_black=0.0,
+                        pixels_equal=True,
+                        audit_preserved=bool(rebuilt is not None and rebuilt.audit),
+                    ),
+                )
+                for reason, rebuilt in rows
+            ],
+        )
+        if rows
+        else nullcontext(),
     ):
         count = input_count if input_count is not None else len(rows)
         vehicle_factory.return_value = Фикс(
@@ -659,10 +686,25 @@ def test_main_writes_closed_workspace_artifacts_without_success_claim(
         deps: RebuildDeps,
         dedup: DedupIndex,
         reset_audit: bool = False,
-    ) -> tuple[str, HarvestRow | None]:
+        trace: bool = False,
+    ) -> RebuildResult:
         if row.sha256 == rejected.sha256:
-            return "redaction_failed", None
-        return real_rebuild_row(row, deps, dedup, reset_audit)
+            return RebuildResult(
+                "redaction_failed",
+                None,
+                FrameProfileResult(
+                    photo_id=row.sha256,
+                    class_id=row.class_id,
+                    outcome="rejected",
+                    reject_reason="redaction_failed",
+                    old_black_frac=None,
+                    new_black_frac=None,
+                    delta_black=None,
+                    pixels_equal=None,
+                    audit_preserved=False,
+                ),
+            )
+        return real_rebuild_row(row, deps, dedup, reset_audit, trace=trace)
 
     monkeypatch.setattr("scripts.rebuild_redaction.rebuild_row", fake_rebuild_row)
     code = _run_main(
@@ -724,7 +766,14 @@ def test_main_writes_closed_workspace_artifacts_without_success_claim(
     }
     assert report["output_hashes"] == {
         "manifest.csv": hashlib.sha256((output_root / "manifest.csv").read_bytes()).hexdigest(),
+        "observations.csv": hashlib.sha256(
+            (output_root / "observations.csv").read_bytes()
+        ).hexdigest(),
+        "pixel-diff.csv": hashlib.sha256((output_root / "pixel-diff.csv").read_bytes()).hexdigest(),
         "profile.json": hashlib.sha256(profile_bytes).hexdigest(),
+        "quality-metrics.json": hashlib.sha256(
+            (output_root / "quality-metrics.json").read_bytes()
+        ).hexdigest(),
         "rejects.csv": hashlib.sha256((output_root / "rejects.csv").read_bytes()).hexdigest(),
     }
     assert "success" not in report and "passed" not in report
@@ -913,7 +962,24 @@ def test_main_успешный_прогон(tmp_path: Path) -> None:
         patch("pipeline.harvest.backends.YuNetFaceDetector"),
         patch("scripts.rebuild_redaction.current_git_sha", return_value="5" * 40),
         patch("scripts.rebuild_redaction.current_timestamp", return_value="2026-09-07T12:00:00Z"),
-        patch("scripts.rebuild_redaction.rebuild_row", return_value=("accepted", _строка(sha))),
+        patch(
+            "scripts.rebuild_redaction.rebuild_row",
+            return_value=RebuildResult(
+                "accepted",
+                _строка(sha),
+                FrameProfileResult(
+                    photo_id=sha,
+                    class_id="lada__granta",
+                    outcome="accepted",
+                    reject_reason=None,
+                    old_black_frac=0.0,
+                    new_black_frac=0.0,
+                    delta_black=0.0,
+                    pixels_equal=True,
+                    audit_preserved=True,
+                ),
+            ),
+        ),
     ):
         код = main(
             [
@@ -931,6 +997,166 @@ def test_main_успешный_прогон(tmp_path: Path) -> None:
         новые_строки = load_manifest(tmp_path / "workspace" / "manifest.csv")
         assert len(новые_строки) == 1
         assert load_manifest(манифест) == [_строка(sha)]
+
+
+def test_main_writes_profile_observations_pixel_diff_and_metrics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "manifest.csv"
+    accepted = _строка("a" * 64)
+    rejected = _строка("b" * 64)
+    append_row(manifest, accepted)
+    append_row(manifest, rejected)
+    input_root = tmp_path / "input"
+    _оригинал(input_root, accepted.sha256)
+    _оригинал(input_root, rejected.sha256)
+    _старый_кроп(input_root, accepted, np.zeros((348, 418, 3), dtype=np.uint8))
+    _старый_кроп(input_root, rejected, np.full((348, 418, 3), 127, dtype=np.uint8))
+    output_root = tmp_path / "workspace"
+    models = tmp_path / "models"
+    models.mkdir()
+
+    merged = Detection(120.0, 210.0, 80.0, 24.0, 0.9, 0)
+    raw = RawPlateObservation("plate", (0, 0, 800, 400), (0, 0, 640, 400), merged)
+    trace = PlateDetectionTrace(raw=(raw,), merged=(merged,))
+    original_redact_frame = cast(
+        Callable[..., RedactionResult],
+        __import__("scripts.rebuild_redaction", fromlist=["redact_frame"]).redact_frame,
+    )
+    calls = 0
+
+    def traced_redact_frame(*args: object, **kwargs: object) -> RedactionResult:
+        nonlocal calls
+        result = original_redact_frame(*args, **kwargs)
+        calls += 1
+        return replace(result, first_pass=trace) if calls == 1 else result
+
+    monkeypatch.setattr("scripts.rebuild_redaction.redact_frame", traced_redact_frame)
+
+    code = _run_main(manifest, input_root, output_root, models, [], input_count=2)
+
+    assert code == 0
+    with (output_root / "observations.csv").open(encoding="utf-8", newline="") as file:
+        observations = list(csv.DictReader(file))
+    assert observations == [
+        {
+            "photo_id": accepted.sha256,
+            "detector": "plate",
+            "profile": "first",
+            "zone_x0": "0",
+            "zone_y0": "0",
+            "zone_x1": "800",
+            "zone_y1": "400",
+            "tile_x0": "0",
+            "tile_y0": "0",
+            "tile_x1": "640",
+            "tile_y1": "400",
+            "x": "120.0",
+            "y": "210.0",
+            "w": "80.0",
+            "h": "24.0",
+            "confidence": "0.9",
+            "class_id": "0",
+            "raw": "True",
+            "merged": "True",
+            "pass": "first",
+        }
+    ]
+    with (output_root / "pixel-diff.csv").open(encoding="utf-8", newline="") as file:
+        pixel_rows = list(csv.DictReader(file))
+    assert len(pixel_rows) == 2
+    assert pixel_rows[0]["photo_id"] == accepted.sha256
+    assert pixel_rows[0]["outcome"] == "accepted"
+    assert pixel_rows[0]["old_black_frac"] == "1.0"
+    assert pixel_rows[0]["new_black_frac"] == "0.0"
+    assert pixel_rows[0]["delta_black"] == "0.0"
+    assert pixel_rows[0]["pixels_equal"] == "False"
+    assert pixel_rows[1]["photo_id"] == rejected.sha256
+    metrics = json.loads((output_root / "quality-metrics.json").read_text(encoding="utf-8"))
+    assert metrics == {
+        "above_quarter": 0,
+        "changed_crops": 1,
+        "max_delta_black": 0.0,
+        "median_delta_black": 0.0,
+        "new_over_redacted": 0,
+        "p95_delta_black": 0.0,
+        "rejects": [["duplicate", 1]],
+    }
+    report = json.loads((output_root / "report.json").read_text(encoding="utf-8"))
+    assert report["counts"] == {"accepted": 1, "input": 2, "rejected": 1}
+    assert set(report["output_hashes"]) == {
+        "manifest.csv",
+        "observations.csv",
+        "pixel-diff.csv",
+        "profile.json",
+        "quality-metrics.json",
+        "rejects.csv",
+    }
+
+
+def test_rebuild_records_over_redacted_candidate_without_writing_crop(tmp_path: Path) -> None:
+    sha = "a" * 64
+    row = _строка(sha)
+    input_root = tmp_path / "input"
+    output_root = tmp_path / "output"
+    input_root.mkdir()
+    output_root.mkdir()
+    (output_root / "crops").mkdir()
+    _оригинал(input_root, sha)
+    _старый_кроп(input_root, row, np.full((348, 418, 3), 127, dtype=np.uint8))
+    plate = Фикс([[Detection(40.0, 40.0, 360.0, 300.0, 0.95, 0)], [], [], []])
+
+    outcome = rebuild_row(
+        row,
+        _deps(input_root, plate, output_root),
+        DedupIndex(),
+        trace=True,
+    )
+
+    assert outcome.reason == "over_redacted"
+    assert outcome.rebuilt is None
+    assert outcome.profile_result.outcome == "rejected"
+    assert outcome.profile_result.reject_reason == "over_redacted"
+    assert outcome.profile_result.old_black_frac == 0.0
+    assert outcome.profile_result.new_black_frac is not None
+    assert outcome.profile_result.new_black_frac > 0.5
+    assert outcome.profile_result.delta_black == pytest.approx(
+        outcome.profile_result.new_black_frac
+    )
+    assert outcome.profile_result.pixels_equal is False
+    assert not (output_root / "crops" / row.class_id / row.file).exists()
+
+
+def test_trace_on_off_preserves_manifest_and_crop_hashes(tmp_path: Path) -> None:
+    def run_workspace(name: str, trace: bool) -> Path:
+        input_root = tmp_path / f"input-{name}"
+        output_root = tmp_path / f"output-{name}"
+        input_root.mkdir()
+        output_root.mkdir()
+        (output_root / "crops").mkdir()
+        sha = "a" * 64
+        row = _строка(sha)
+        _оригинал(input_root, sha)
+        outcome = rebuild_row(
+            row,
+            _deps(input_root, Фикс([]), output_root),
+            DedupIndex(),
+            trace=trace,
+        )
+        assert outcome.rebuilt is not None
+        append_row(output_root / "manifest.csv", outcome.rebuilt)
+        return output_root
+
+    plain = run_workspace("plain", False)
+    traced = run_workspace("traced", True)
+
+    assert (plain / "manifest.csv").read_bytes() == (traced / "manifest.csv").read_bytes()
+    plain_crop = next((plain / "crops").rglob("*.jpg"))
+    traced_crop = next((traced / "crops").rglob("*.jpg"))
+    assert (
+        hashlib.sha256(plain_crop.read_bytes()).digest()
+        == hashlib.sha256(traced_crop.read_bytes()).digest()
+    )
 
 
 def test_main_берёт_детекторы_номера_из_единой_фабрики(tmp_path: Path) -> None:
@@ -956,7 +1182,24 @@ def test_main_берёт_детекторы_номера_из_единой_фа�
         patch("pipeline.harvest.backends.YuNetFaceDetector"),
         patch("scripts.rebuild_redaction.current_git_sha", return_value="5" * 40),
         patch("scripts.rebuild_redaction.current_timestamp", return_value="2026-09-07T12:00:00Z"),
-        patch("scripts.rebuild_redaction.rebuild_row", return_value=("accepted", _строка(sha))),
+        patch(
+            "scripts.rebuild_redaction.rebuild_row",
+            return_value=RebuildResult(
+                "accepted",
+                _строка(sha),
+                FrameProfileResult(
+                    photo_id=sha,
+                    class_id="lada__granta",
+                    outcome="accepted",
+                    reject_reason=None,
+                    old_black_frac=0.0,
+                    new_black_frac=0.0,
+                    delta_black=0.0,
+                    pixels_equal=True,
+                    audit_preserved=True,
+                ),
+            ),
+        ),
     ):
         код = main(
             [

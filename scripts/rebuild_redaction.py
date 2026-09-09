@@ -25,6 +25,7 @@ import subprocess
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
+from dataclasses import fields as dataclass_fields
 from datetime import UTC, date, datetime
 from pathlib import Path, PureWindowsPath
 from typing import Any
@@ -37,22 +38,36 @@ from pipeline.crop import VEHICLE_CLASSES, Detector, crop_image, select_primary
 from pipeline.harvest.cache import cache_path, decode_image
 from pipeline.harvest.dedup import DedupIndex
 from pipeline.harvest.detectors import DetectorPin
-from pipeline.harvest.jpeg import encode_jpeg, observed_pixels_equal, write_jpeg_atomic
+from pipeline.harvest.jpeg import EncodedJpeg, encode_jpeg, write_jpeg_atomic
 from pipeline.harvest.manifest import (
     DEFAULT_MANIFEST_PATH,
     HarvestRow,
     load_manifest,
     write_manifest,
 )
-from pipeline.harvest.redact import redact_frame
+from pipeline.harvest.redact import PlateDetectionTrace, RawPlateObservation, redact_frame
 from pipeline.harvest.redaction_profile import RedactionProfile, profile_id
 from pipeline.harvest.run import is_crop_over_redacted
 from pipeline.paths import harvest_dir
+from pipeline.redaction_calibration.measure import (
+    black_fraction,
+    summarize_profile_results,
+    write_frame_profile_results,
+)
+from pipeline.redaction_calibration.model import FrameProfileResult, ProfileMetrics
 
 # Имена, которые workspace резервирует за собой. `--out` не может занять ни одно из них:
 # манифест, перезаписанный отчётом, выглядел бы как пустая пересборка.
 RESERVED_WORKSPACE_NAMES = frozenset(
-    {"crops", "rejects.csv", "observations.csv", "report.json", "profile.json"}
+    {
+        "crops",
+        "observations.csv",
+        "pixel-diff.csv",
+        "profile.json",
+        "quality-metrics.json",
+        "rejects.csv",
+        "report.json",
+    }
 )
 
 
@@ -113,6 +128,8 @@ class WorkspacePaths:
     crops: Path
     rejects: Path
     observations: Path
+    pixel_diff: Path
+    quality_metrics: Path
     report: Path
     profile: Path
 
@@ -129,12 +146,55 @@ class RebuildDeps:
 
 
 @dataclass(frozen=True, slots=True)
+class ObservationRecord:
+    """Один raw или merged бокс фактического прохода детектора номеров."""
+
+    photo_id: str
+    detector: str
+    profile: str
+    zone_x0: int
+    zone_y0: int
+    zone_x1: int
+    zone_y1: int
+    tile_x0: int
+    tile_y0: int
+    tile_x1: int
+    tile_y1: int
+    x: float
+    y: float
+    w: float
+    h: float
+    confidence: float
+    class_id: int
+    raw: bool
+    merged: bool
+    pass_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class RebuildResult:
+    """Решение и наблюдения одного запуска строки без повторного вычисления метрик."""
+
+    reason: str
+    rebuilt: HarvestRow | None
+    profile_result: FrameProfileResult
+    observations: tuple[ObservationRecord, ...] = ()
+
+    def __iter__(self) -> Any:
+        """Сохранить прежнюю распаковку `(reason, rebuilt)` для внутренних потребителей."""
+        yield self.reason
+        yield self.rebuilt
+
+
+@dataclass(frozen=True, slots=True)
 class RowOutcome:
     """Что переderivация сделала с одной строкой входного манифеста."""
 
     source: HarvestRow
     reason: str
     rebuilt: HarvestRow | None
+    profile_result: FrameProfileResult | None = None
+    observations: tuple[ObservationRecord, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +262,8 @@ def prepare_workspace(out_root: Path, data_root: Path) -> WorkspacePaths:
         crops=crops,
         rejects=output_root / "rejects.csv",
         observations=output_root / "observations.csv",
+        pixel_diff=output_root / "pixel-diff.csv",
+        quality_metrics=output_root / "quality-metrics.json",
         report=output_root / "report.json",
         profile=output_root / "profile.json",
     )
@@ -216,33 +278,184 @@ def preflight(rows: Sequence[HarvestRow], root: Path) -> list[str]:
     return пропало
 
 
+def _decode_old_crop(row: HarvestRow, input_root: Path) -> np.ndarray | None:
+    """Декодировать прежний кроп для измерения; отсутствие и порча дают `None`."""
+    try:
+        data = crop_destination(input_root, row).read_bytes()
+        if not data:
+            return None
+        return cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    except (OSError, cv2.error):
+        return None
+
+
+def _profile_result(
+    row: HarvestRow,
+    reason: str,
+    rebuilt: HarvestRow | None,
+    old: np.ndarray | None,
+    encoded: EncodedJpeg | None,
+) -> FrameProfileResult:
+    old_black = black_fraction(old) if old is not None else None
+    new_black = black_fraction(encoded.decoded) if encoded is not None else None
+    delta = (
+        max(0.0, new_black - old_black) if old_black is not None and new_black is not None else None
+    )
+    equal = (
+        bool(np.array_equal(old, encoded.decoded))
+        if old is not None and encoded is not None
+        else None
+    )
+    return FrameProfileResult(
+        photo_id=row.sha256,
+        class_id=row.class_id,
+        outcome="accepted" if rebuilt is not None else "rejected",
+        reject_reason=None if rebuilt is not None else reason,
+        old_black_frac=old_black,
+        new_black_frac=new_black,
+        delta_black=delta,
+        pixels_equal=equal,
+        audit_preserved=bool(rebuilt is not None and row.audit and rebuilt.audit),
+    )
+
+
+def _observation_records(
+    photo_id: str,
+    trace: PlateDetectionTrace,
+    pass_name: str,
+) -> tuple[ObservationRecord, ...]:
+    records: list[ObservationRecord] = []
+    merged = set(trace.merged)
+    for observation in trace.raw:
+        records.append(
+            _observation_record(
+                photo_id,
+                observation,
+                pass_name,
+                raw=True,
+                merged=observation.box in merged,
+            )
+        )
+    raw_boxes = {observation.box for observation in trace.raw}
+    for detector_index, box in enumerate(trace.merged):
+        if box in raw_boxes:
+            continue
+        fallback = RawPlateObservation(
+            detector="merged",
+            zone=(0, 0, 0, 0),
+            tile=(0, 0, 0, 0),
+            box=box,
+        )
+        records.append(
+            _observation_record(
+                photo_id,
+                fallback,
+                pass_name,
+                raw=False,
+                merged=True,
+                profile=f"merged-{detector_index}",
+            )
+        )
+    return tuple(records)
+
+
+def _observation_record(
+    photo_id: str,
+    observation: RawPlateObservation,
+    pass_name: str,
+    *,
+    raw: bool,
+    merged: bool,
+    profile: str | None = None,
+) -> ObservationRecord:
+    zone = observation.zone
+    tile = observation.tile
+    box = observation.box
+    return ObservationRecord(
+        photo_id=photo_id,
+        detector=observation.detector,
+        profile=profile or pass_name,
+        zone_x0=zone[0],
+        zone_y0=zone[1],
+        zone_x1=zone[2],
+        zone_y1=zone[3],
+        tile_x0=tile[0],
+        tile_y0=tile[1],
+        tile_x1=tile[2],
+        tile_y1=tile[3],
+        x=float(box.x),
+        y=float(box.y),
+        w=float(box.w),
+        h=float(box.h),
+        confidence=float(box.conf),
+        class_id=int(box.cls),
+        raw=raw,
+        merged=merged,
+        pass_name=pass_name,
+    )
+
+
+def _rejected_result(
+    row: HarvestRow,
+    reason: str,
+    old: np.ndarray | None,
+    *,
+    encoded: EncodedJpeg | None = None,
+    observations: tuple[ObservationRecord, ...] = (),
+) -> RebuildResult:
+    return RebuildResult(
+        reason,
+        None,
+        _profile_result(row, reason, None, old, encoded),
+        observations,
+    )
+
+
 def rebuild_row(
-    row: HarvestRow, deps: RebuildDeps, dedup: DedupIndex, reset_audit: bool = False
-) -> tuple[str, HarvestRow | None]:
-    """Прогнать один оригинал через новую редакцию. Причина отказа или новая строка."""
+    row: HarvestRow,
+    deps: RebuildDeps,
+    dedup: DedupIndex,
+    reset_audit: bool = False,
+    *,
+    trace: bool = False,
+) -> RebuildResult:
+    """Прогнать один оригинал и вернуть решение вместе с наблюдениями того же прохода."""
+    old = _decode_old_crop(row, deps.input_root)
     сырьё = cache_path(deps.input_root, row.source, row.sha256, "jpg").read_bytes()
     try:
         кадр = decode_image(сырьё)
     except Exception:
-        return "decode_failed", None
+        return _rejected_result(row, "decode_failed", old)
 
     все_боксы = deps.vehicle_detector.detect(кадр)
     высота, ширина = кадр.shape[:2]
     решение = select_primary(все_боксы, ширина, высота)
     if решение.reject_reason is not None:
-        return решение.reject_reason, None
+        return _rejected_result(row, решение.reject_reason, old)
     if решение.is_multi_car:
-        return "multi_car", None
+        return _rejected_result(row, "multi_car", old)
     assert решение.box is not None
 
     машины = [d for d in все_боксы if d.cls in VEHICLE_CLASSES and d.conf > 0.5]
-    итог = redact_frame(кадр, машины, deps.plate_detectors, deps.face_detector)
+    итог = redact_frame(кадр, машины, deps.plate_detectors, deps.face_detector, trace=trace)
+    observations = _observation_records(row.sha256, итог.first_pass, "first")
+    observations += _observation_records(row.sha256, итог.second_pass, "second")
     if not итог.ok:
-        return "redaction_failed", None
+        return _rejected_result(row, "redaction_failed", old, observations=observations)
 
     кроп = crop_image(итог.image, решение.box)
+    try:
+        encoded = encode_jpeg(кроп)
+    except RuntimeError:
+        return _rejected_result(row, "write_failed", old, observations=observations)
     if is_crop_over_redacted(кроп):
-        return "over_redacted", None
+        return _rejected_result(
+            row,
+            "over_redacted",
+            old,
+            encoded=encoded,
+            observations=observations,
+        )
 
     хеш = phash_of(кроп)
 
@@ -257,23 +470,31 @@ def rebuild_row(
     # нужно: молча удалять строку провенанса автомат не должен, спор двух заявлений уходит
     # человеку — как §8 обещает для равно подкреплённых, — а терять победителя было хуже.
     if вердикт.status not in ("new", "supersede"):
-        return вердикт.status, None
+        return _rejected_result(
+            row,
+            вердикт.status,
+            old,
+            encoded=encoded,
+            observations=observations,
+        )
 
-    старый_путь = crop_destination(deps.input_root, row)
     новый_путь = crop_destination(deps.output_root, row)
     новый_путь.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        encoded = encode_jpeg(кроп)
-    except RuntimeError:
-        return "write_failed", None
-    audit = row.audit if not reset_audit and observed_pixels_equal(старый_путь, encoded) else ""
+    pixels_equal = old is not None and np.array_equal(old, encoded.decoded)
+    audit = row.audit if not reset_audit and pixels_equal else ""
     try:
         write_jpeg_atomic(новый_путь, encoded)
     except OSError:
-        return "write_failed", None
+        return _rejected_result(
+            row,
+            "write_failed",
+            old,
+            encoded=encoded,
+            observations=observations,
+        )
     dedup.add(хеш, row.class_id, новый_путь.name, row.basis)
 
-    return "accepted", replace(
+    rebuilt = replace(
         row,
         phash=хеш,
         plates=итог.plates,
@@ -286,6 +507,12 @@ def rebuild_row(
         det_conf=float(решение.box.conf),
         audit=audit,
         checked=date.today().isoformat(),
+    )
+    return RebuildResult(
+        "accepted",
+        rebuilt,
+        _profile_result(row, "accepted", rebuilt, old, encoded),
+        observations,
     )
 
 
@@ -350,6 +577,24 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
         encoding="utf-8",
         newline="\n",
     )
+
+
+def _write_observations(path: Path, observations: Sequence[ObservationRecord]) -> None:
+    fields = [field.name for field in dataclass_fields(ObservationRecord)]
+    fields[-1] = "pass"
+    with path.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        for observation in observations:
+            row = asdict(observation)
+            row["pass"] = row.pop("pass_name")
+            writer.writerow(row)
+
+
+def _metrics_document(metrics: ProfileMetrics) -> dict[str, Any]:
+    document = asdict(metrics)
+    document["rejects"] = [list(item) for item in metrics.rejects]
+    return document
 
 
 def _write_rejects(path: Path, rejects: Sequence[tuple[HarvestRow, str]]) -> None:
@@ -508,15 +753,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     dedup = DedupIndex()
     исходы: list[RowOutcome] = []
     for строка in строки:
-        причина, новая = rebuild_row(строка, deps, dedup, reset_audit=аргументы.reset_audit)
-        исходы.append(RowOutcome(строка, причина, новая))
+        result = rebuild_row(строка, deps, dedup, reset_audit=аргументы.reset_audit, trace=True)
+        исходы.append(
+            RowOutcome(
+                строка,
+                result.reason,
+                result.rebuilt,
+                result.profile_result,
+                result.observations,
+            )
+        )
 
     accepted = [исход.rebuilt for исход in исходы if исход.rebuilt is not None]
     rejects = [(исход.source, исход.reason) for исход in исходы if исход.rebuilt is None]
+    profile_results = [исход.profile_result for исход in исходы if исход.profile_result is not None]
+    observations = [record for исход in исходы for record in исход.observations]
     reasons = Counter(исход.reason for исход in исходы if исход.rebuilt is None)
 
     write_manifest(workspace.manifest, accepted)
     _write_rejects(workspace.rejects, rejects)
+    _write_observations(workspace.observations, observations)
+    write_frame_profile_results(workspace.pixel_diff, profile_results)
+    metrics = summarize_profile_results(profile_results)
+    _write_json(workspace.quality_metrics, _metrics_document(metrics))
     _write_json(workspace.profile, паспорт)
     # Отчёт называет числа прогона и ничего не утверждает про успех калибровки: решение
     # «профиль годится» принимается не здесь и не по этим полям.
@@ -530,7 +789,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "audit": asdict(_audit_counts(исходы, input_root=input_root)),
         "output_hashes": {
             workspace.manifest.relative_to(workspace.root).as_posix(): _sha256(workspace.manifest),
+            "observations.csv": _sha256(workspace.observations),
+            "pixel-diff.csv": _sha256(workspace.pixel_diff),
             "profile.json": _sha256(workspace.profile),
+            "quality-metrics.json": _sha256(workspace.quality_metrics),
             "rejects.csv": _sha256(workspace.rejects),
         },
     }

@@ -73,12 +73,14 @@ class PlateDetectionTrace:
 
 @dataclass(frozen=True, slots=True)
 class RedactionResult:
-    """Итог редакции одного кадра."""
+    """Итог редакции одного кадра с необязательной трассой обоих проходов номеров."""
 
     image: np.ndarray
     plates: int
     faces: int
     ok: bool
+    first_pass: PlateDetectionTrace = PlateDetectionTrace()
+    second_pass: PlateDetectionTrace = PlateDetectionTrace()
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,7 +369,14 @@ def redact_frame(
 
     номера = redact_plates(рабочая, vehicle_boxes, plate_detectors, trace=trace)
     if significant_residuals(номера):
-        return RedactionResult(рабочая, номера.found, 0, False)
+        return RedactionResult(
+            рабочая,
+            номера.found,
+            0,
+            False,
+            номера.first_pass,
+            номера.second_pass,
+        )
 
     лица = _крупные(face_detector.detect(рабочая), MIN_FACE_SIDE_PX, MIN_FACE_SIDE_PX)
     лица_число = len(лица)
@@ -378,4 +387,11 @@ def redact_frame(
             _замыть_лицо(рабочая, бокс, заливкой)
         лица = _крупные(face_detector.detect(рабочая), MIN_FACE_SIDE_PX, MIN_FACE_SIDE_PX)
     ok = not лица
-    return RedactionResult(рабочая, номера.found, лица_число, ok)
+    return RedactionResult(
+        рабочая,
+        номера.found,
+        лица_число,
+        ok,
+        номера.first_pass,
+        номера.second_pass,
+    )
