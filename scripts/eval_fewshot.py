@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -30,12 +31,14 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from pipeline.fewshot.gate import check_gate, render_report
 from pipeline.fewshot.metrics import FEWSHOT_TOP_K, FewShotMetrics, aggregate_fewshot
 from pipeline.index_format import read_index, verify_meta
 from pipeline.knn import ranked_by_centroids
 from pipeline.paths import harvest_dir, splits_dir
+from pipeline.redaction_calibration.baseline import Prediction
 from pipeline.schema import read_split
 from scripts.build_fewshot_index import (
     ENCODER_ARCH,
@@ -94,6 +97,49 @@ def сохранить_отчёт_сборки(report_path: Path, build_report: 
     return путь
 
 
+def ordered_photo_ids(frame: pd.DataFrame) -> list[str]:
+    """Повторить порядок `crops_by_class`: класс по индексу, внутри — порядок parquet."""
+    groups: dict[int, list[str]] = {}
+    for class_idx, photo_id in zip(frame["class_idx"], frame["photo_id"], strict=True):
+        groups.setdefault(int(class_idx), []).append(str(photo_id))
+    return [photo_id for class_idx in sorted(groups) for photo_id in groups[class_idx]]
+
+
+def predictions_from_ranking(
+    photo_ids: Sequence[str], targets: Sequence[int], ranking: Sequence[Sequence[int]] | np.ndarray
+) -> tuple[Prediction, ...]:
+    """Связать ранжирование с исходными кадрами без перестановки порядка сплита."""
+    if len(photo_ids) != len(targets) or len(targets) != len(ranking):
+        raise ValueError(
+            f"несовпадение длин: {len(photo_ids)} photo_id, "
+            f"{len(targets)} меток, {len(ranking)} ранжирований"
+        )
+    return tuple(
+        Prediction(str(photo_id), int(target), tuple(int(value) for value in candidates))
+        for photo_id, target, candidates in zip(photo_ids, targets, ranking, strict=True)
+    )
+
+
+def write_predictions(path: Path, predictions: Sequence[Prediction]) -> None:
+    """Записать полный точный экспорт; одна строка соответствует одному кадру."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=("photo_id", "target", "top_indices"),
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        for prediction in predictions:
+            writer.writerow(
+                {
+                    "photo_id": prediction.photo_id,
+                    "target": prediction.target,
+                    "top_indices": " ".join(map(str, prediction.top_indices)),
+                }
+            )
+
+
 def evaluate(
     embeddings: np.ndarray,
     targets: Sequence[int],
@@ -118,6 +164,12 @@ def build_parser() -> argparse.ArgumentParser:
     парсер.add_argument("--index", type=Path, default=None, help="каталог с catalog_index.bin")
     парсер.add_argument("--split", default=DEFAULT_SPLIT)
     парсер.add_argument("--report", type=Path, default=REPORT_PATH)
+    парсер.add_argument(
+        "--predictions-out",
+        type=Path,
+        default=None,
+        help="опциональный CSV точных предсказаний по каждому кадру",
+    )
     return парсер
 
 
@@ -158,8 +210,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         метки += [номер] * len(свои)
         print(f"{имена[номер]}: {len(свои)} кадров эталона", flush=True)
     эмбеддинги = np.concatenate(куски)
+    ранжирование = ranked_by_centroids(эмбеддинги, центроиды, FEWSHOT_TOP_K)
+    метрики = aggregate_fewshot(ранжирование, метки, idx_to_class_id=имена)
+    if аргументы.predictions_out is not None:
+        photo_ids = ordered_photo_ids(кадр)
+        write_predictions(
+            аргументы.predictions_out,
+            predictions_from_ranking(photo_ids, метки, ранжирование),
+        )
 
-    метрики = evaluate(эмбеддинги, метки, центроиды, имена)
     гейт = check_gate(метрики, catalog_classes=заголовок.num_classes)
     sha = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False

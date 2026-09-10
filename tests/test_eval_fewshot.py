@@ -11,7 +11,10 @@ from scripts.eval_fewshot import (
     evaluate,
     idx_to_class_id_of,
     missing_holdout_classes,
+    ordered_photo_ids,
+    predictions_from_ranking,
     read_split_report,
+    write_predictions,
     сохранить_отчёт_сборки,
 )
 
@@ -96,3 +99,37 @@ def test_отчёт_сборки_переписывается_повторным
     путь = сохранить_отчёт_сборки(отчёт, '{"index_sha256": "новый"}')
 
     assert путь.read_text(encoding="utf-8") == '{"index_sha256": "новый"}'
+
+
+def test_photo_ids_follow_same_class_grouping_as_embeddings() -> None:
+    import pandas as pd
+
+    frame = pd.DataFrame(
+        {
+            "photo_id": ["class-two-a", "class-one", "class-two-b"],
+            "class_idx": [2, 1, 2],
+        }
+    )
+    assert ordered_photo_ids(frame) == ["class-one", "class-two-a", "class-two-b"]
+
+
+def test_prediction_export_preserves_every_frame_in_embedding_order(tmp_path: Path) -> None:
+    predictions = predictions_from_ranking(
+        ["photo-b", "photo-a"],
+        [2, 1],
+        np.asarray([[2, 0, 1], [0, 1, 2]], dtype=np.int64),
+    )
+    path = tmp_path / "predictions.csv"
+
+    write_predictions(path, predictions)
+
+    assert path.read_text(encoding="utf-8") == (
+        "photo_id,target,top_indices\nphoto-b,2,2 0 1\nphoto-a,1,0 1 2\n"
+    )
+
+
+def test_prediction_export_rejects_length_mismatch() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="несовпадение длин"):
+        predictions_from_ranking(["only"], [1, 2], np.asarray([[1, 0, 2]], dtype=np.int64))
