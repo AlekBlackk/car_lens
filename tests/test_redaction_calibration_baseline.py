@@ -25,6 +25,12 @@ from pipeline.redaction_calibration.baseline import (
 )
 from scripts.preregister_redaction_calibration import preregistration_document
 
+PREREGISTRATION_MARKDOWN = (
+    Path(__file__).resolve().parent.parent
+    / "bench"
+    / "plate-redaction-recalibration-preregistration.md"
+)
+
 
 def _frame(rows: list[tuple[str, str]]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["photo_id", "listing_id"])
@@ -280,6 +286,17 @@ def test_budget_exhausts_after_eight_failures_without_remainder() -> None:
 
     with pytest.raises(ValueError, match=r"бюджет исчерпан"):
         open_batch(batches, 9)
+
+
+def test_human_preregistration_preserves_explicit_pareto_selection_rule() -> None:
+    text = PREREGISTRATION_MARKDOWN.read_text(encoding="utf-8")
+    normalized = " ".join(text.split())
+
+    assert (
+        "Взвешенного score, скрытых весов и автоматического tie-break нет. "
+        "Если после veto остаётся несколько профилей, человек письменно выбирает "
+        "по полному Pareto-фронту."
+    ) in normalized
 
 
 def test_preregistration_freezes_every_step_five_decision_without_candidate_results() -> None:
