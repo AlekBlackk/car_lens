@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.fewshot.metrics import FewShotMetrics
+from scripts.build_fewshot_index import crops_by_class
 from scripts.eval_fewshot import (
     evaluate,
     idx_to_class_id_of,
@@ -101,16 +102,24 @@ def test_отчёт_сборки_переписывается_повторным
     assert путь.read_text(encoding="utf-8") == '{"index_sha256": "новый"}'
 
 
-def test_photo_ids_follow_same_class_grouping_as_embeddings() -> None:
+def test_photo_ids_exactly_match_crops_by_class_path_order(tmp_path: Path) -> None:
     import pandas as pd
 
     frame = pd.DataFrame(
         {
-            "photo_id": ["class-two-a", "class-one", "class-two-b"],
-            "class_idx": [2, 1, 2],
+            "photo_id": ["two-b", "zero-a", "two-a", "one-a"],
+            "class_idx": [2, 0, 2, 1],
+            "crop_path": [
+                "class-two/two-b.jpg",
+                "class-zero/zero-a.jpg",
+                "class-two/two-a.jpg",
+                "class-one/one-a.jpg",
+            ],
         }
     )
-    assert ordered_photo_ids(frame) == ["class-one", "class-two-a", "class-two-b"]
+    path_order = [path.stem for _, paths in crops_by_class(frame, tmp_path) for path in paths]
+
+    assert ordered_photo_ids(frame) == path_order == ["zero-a", "one-a", "two-b", "two-a"]
 
 
 def test_prediction_export_preserves_every_frame_in_embedding_order(tmp_path: Path) -> None:

@@ -126,7 +126,8 @@ def preregistration_document(created_at: str) -> dict[str, Any]:
             "median_positive_delta_black",
             "p95_positive_delta_black",
             "delta_black_above_0_25",
-            "new_over_redacted_and_rejects",
+            "new_over_redacted",
+            "rejects_by_reason",
             "changed_crops_for_h3",
         ],
         "pareto_rule": "not worse on every axis and strictly better on at least one",
@@ -146,6 +147,13 @@ def preregistration_document(created_at: str) -> dict[str, Any]:
             ),
         },
         "independent_taxonomy": {
+            "fields": [
+                "pipeline_outcome",
+                "reject_reason",
+                "review_status",
+                "plate_verdict",
+                "human_note",
+            ],
             "pipeline_outcome": ["accepted", "rejected", "operational_error"],
             "review_status": ["pending", "resolved", "unreviewable"],
             "plate_verdict": [

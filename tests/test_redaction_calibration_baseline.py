@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -151,10 +152,15 @@ def test_exact_counts_are_derived_only_from_complete_predictions() -> None:
         "top1": {"k": 1, "n": 3},
         "top3": {"k": 2, "n": 3},
     }
-    with pytest.raises((TypeError, ValueError)):
-        create_baseline_passport(  # type: ignore[call-arg]
-            predictions={"top1": 0.3333, "top3": 0.6667}  # type: ignore[arg-type]
-        )
+
+
+def test_rounded_metrics_are_rejected_with_other_passport_inputs_complete(tmp_path: Path) -> None:
+    _, _, arguments = _passport_fixture(tmp_path)
+    arguments = dict(arguments)
+    arguments["predictions"] = {"top1": 0.3333, "top3": 0.6667}
+
+    with pytest.raises(TypeError, match="последовательностью Prediction"):
+        create_baseline_passport(**arguments)
 
 
 def test_exact_counts_reject_duplicate_missing_foreign_and_short_predictions() -> None:
@@ -200,6 +206,54 @@ def test_passport_rejects_dirty_or_short_git_identity(tmp_path: Path) -> None:
         create_baseline_passport(**arguments)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("git_sha", "g" * 40, "Git SHA"),
+        ("detector_stage_sha256", "z" * 64, "detector_stage_sha256"),
+        ("code_sha256", {"redact.py": "-" * 64}, "code_sha256"),
+        ("weights_sha256", {"plate": "x" * 64}, "weights_sha256"),
+    ],
+)
+def test_passport_rejects_non_hexadecimal_digest_witnesses(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    _, _, arguments = _passport_fixture(tmp_path)
+    arguments = dict(arguments)
+    arguments[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        create_baseline_passport(**arguments)
+
+
+def test_passport_accepts_uppercase_hexadecimal_witnesses(tmp_path: Path) -> None:
+    _, _, arguments = _passport_fixture(tmp_path)
+    arguments = dict(arguments)
+    arguments["git_sha"] = "A" * 40
+    arguments["detector_stage_sha256"] = "B" * 64
+    arguments["code_sha256"] = {"redact.py": "C" * 64}
+    arguments["weights_sha256"] = {"plate": "D" * 64}
+
+    passport = create_baseline_passport(**arguments)
+
+    assert passport.git["sha"] == "A" * 40
+
+
+def test_open_batch_requires_next_party_and_stops_after_pass() -> None:
+    batches, _ = partition_independent_ids(["a", "b", "c"], [], seed=1, batch_size=1, batch_count=3)
+    with pytest.raises(ValueError, match="следующая партия 1"):
+        open_batch(batches, 3)
+
+    completed_first = replace(batches[0], state="completed_fail")
+    ready_for_second = (completed_first, *batches[1:])
+    with pytest.raises(ValueError, match="следующая партия 2"):
+        open_batch(ready_for_second, 3)
+
+    passed = (replace(completed_first, state="completed_pass"), *batches[1:])
+    with pytest.raises(ValueError, match="кампания уже пройдена"):
+        open_batch(passed, 2)
+
+
 def test_open_and_review_batch_enforce_single_active_party() -> None:
     batches, _ = partition_independent_ids(["a", "b", "c"], [], seed=1, batch_size=1, batch_count=3)
     opened = open_batch(batches, 1)
@@ -232,6 +286,18 @@ def test_preregistration_freezes_every_step_five_decision_without_candidate_resu
     document = preregistration_document("2026-09-07T12:00:00Z")
 
     assert document["candidate_results_present"] is False
+    assert document["pareto_axes"][-3:] == [
+        "new_over_redacted",
+        "rejects_by_reason",
+        "changed_crops_for_h3",
+    ]
+    assert document["independent_taxonomy"]["fields"] == [
+        "pipeline_outcome",
+        "reject_reason",
+        "review_status",
+        "plate_verdict",
+        "human_note",
+    ]
     assert set(document) >= {
         "profile_space",
         "pareto_axes",
@@ -300,3 +366,62 @@ def test_fixture_dry_runs_are_byte_identical_and_keep_layout(tmp_path: Path) -> 
     )
     assert "remainder" in batch_document
     assert batch_document["remainder"]["photo_ids"] == []
+
+
+def test_writer_rejects_prediction_counts_that_disagree_with_passport(tmp_path: Path) -> None:
+    passport, predictions, _ = _passport_fixture(tmp_path / "inputs")
+    inconsistent = replace(
+        passport,
+        exact_metrics=replace(passport.exact_metrics, top1_k=passport.exact_metrics.top1_k + 1),
+    )
+    campaign_root = tmp_path / "campaign"
+
+    with pytest.raises(ValueError, match=r"exact_metrics.*predictions"):
+        write_campaign_artifacts(campaign_root, inconsistent, predictions, {})
+
+    assert not campaign_root.exists()
+
+
+def test_writer_allows_identical_noop_and_rejects_checkpoint_changes(tmp_path: Path) -> None:
+    passport, predictions, _ = _passport_fixture(tmp_path / "inputs")
+    campaign_root = tmp_path / "campaign"
+    preregistration = {"created_at": passport.created_at, "candidate_results_present": False}
+    write_campaign_artifacts(campaign_root, passport, predictions, preregistration)
+    before = {
+        path.relative_to(campaign_root): path.read_bytes()
+        for path in campaign_root.rglob("*")
+        if path.is_file()
+    }
+
+    write_campaign_artifacts(campaign_root, passport, predictions, preregistration)
+    changed = dict(preregistration, candidate_results_present=True)
+    with pytest.raises(ValueError, match="неизменяемый checkpoint"):
+        write_campaign_artifacts(campaign_root, passport, predictions, changed)
+
+    after = {
+        path.relative_to(campaign_root): path.read_bytes()
+        for path in campaign_root.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
+    assert not list(campaign_root.parent.glob(f".{campaign_root.name}.staging-*"))
+
+
+def test_writer_renders_before_publish_failure_leaves_no_partial_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    passport, predictions, _ = _passport_fixture(tmp_path / "inputs")
+    campaign_root = tmp_path / "campaign"
+    real_write_text = Path.write_text
+
+    def fail_during_render(self: Path, *args: object, **kwargs: object) -> int:
+        if ".staging-" in str(self):
+            raise OSError("disk full")
+        return real_write_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "write_text", fail_during_render)
+    with pytest.raises(OSError, match="disk full"):
+        write_campaign_artifacts(campaign_root, passport, predictions, {})
+
+    assert not campaign_root.exists()
+    assert not list(campaign_root.parent.glob(f".{campaign_root.name}.staging-*"))

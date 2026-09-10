@@ -6,6 +6,9 @@ import csv
 import hashlib
 import json
 import random
+import re
+import shutil
+import tempfile
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
@@ -206,9 +209,11 @@ def _input_record(path: Path, rows: int) -> dict[str, str | int]:
 
 
 def _validate_hashes(label: str, values: Mapping[str, str]) -> None:
-    invalid = sorted(name for name, value in values.items() if len(value) != 64)
+    invalid = sorted(
+        name for name, value in values.items() if re.fullmatch(r"[0-9a-fA-F]{64}", value) is None
+    )
     if invalid:
-        raise ValueError(f"{label}: SHA256 должен быть полным: {invalid}")
+        raise ValueError(f"{label}: SHA256 должен быть полным шестнадцатеричным: {invalid}")
 
 
 def create_baseline_passport(
@@ -238,12 +243,12 @@ def create_baseline_passport(
         raise TypeError("predictions должны быть последовательностью Prediction, не метриками")
     if not git_clean:
         raise ValueError("Git-дерево должно быть чистым до предрегистрации")
-    if len(git_sha) != 40:
-        raise ValueError("нужен полный Git SHA из 40 символов")
+    if re.fullmatch(r"[0-9a-fA-F]{40}", git_sha) is None:
+        raise ValueError("нужен полный Git SHA из 40 шестнадцатеричных символов")
     _validate_hashes("code_sha256", code_sha256)
     _validate_hashes("weights_sha256", weights_sha256)
-    if len(detector_stage_sha256) != 64:
-        raise ValueError("detector_stage_sha256 должен быть полным")
+    if re.fullmatch(r"[0-9a-fA-F]{64}", detector_stage_sha256) is None:
+        raise ValueError("detector_stage_sha256 должен быть полным шестнадцатеричным")
 
     units = freeze_units(pool, holdout)
     pool_ids = [str(value) for value in pool["photo_id"]]
@@ -322,17 +327,25 @@ def campaign_budget_state(batches: Sequence[IndependentBatch]) -> CampaignBudget
 
 
 def open_batch(batches: Sequence[IndependentBatch], number: int) -> tuple[IndependentBatch, ...]:
-    """Раскрыть одну sealed-партию, только когда другая не расходуется."""
-    if campaign_budget_state(batches) == "budget_exhausted":
+    """Раскрыть только следующую по номеру sealed-партию после завершённых провалов."""
+    budget_state = campaign_budget_state(batches)
+    if budget_state == "passed":
+        raise ValueError("кампания уже пройдена: новые партии не раскрываются")
+    if budget_state == "budget_exhausted":
         raise ValueError("бюджет исчерпан: остаток не становится следующей партией")
     active = [batch.number for batch in batches if batch.state in {"opened", "review_in_progress"}]
     if active:
         raise ValueError(f"уже раскрыта партия {active[0]}")
-    target = next((batch for batch in batches if batch.number == number), None)
-    if target is None:
-        raise ValueError(f"партия {number} не существует")
-    if target.state != "sealed":
-        raise ValueError(f"недопустимый переход {target.state} → opened")
+    remaining = sorted(batch.number for batch in batches if batch.state == "sealed")
+    if not remaining:
+        raise ValueError("нет запечатанной партии для раскрытия")
+    next_number = remaining[0]
+    if number != next_number:
+        raise ValueError(f"следующая партия {next_number}, запрошена {number}")
+    target = next(batch for batch in batches if batch.number == number)
+    preceding = [batch for batch in batches if batch.number < target.number]
+    if any(batch.state != "completed_fail" for batch in preceding):
+        raise ValueError(f"предыдущие партии перед {number} не завершены провалом")
     return _replace_batch(batches, number, "opened")
 
 
@@ -384,23 +397,16 @@ def _write_csv(path: Path, fields: Sequence[str], rows: Sequence[Mapping[str, An
         writer.writerows(rows)
 
 
-def write_campaign_artifacts(
-    campaign_root: Path,
+def _render_campaign_artifacts(
+    root: Path,
     passport: BaselinePassport,
     predictions: Sequence[Prediction],
     preregistration: Mapping[str, Any],
-) -> None:
-    """Атомарная по смыслу граница: проверить всё, затем записать каноническую раскладку §13."""
-    exact_prediction_counts(
-        predictions,
-        expected_ids={
-            unit.photo_id for unit in passport.frozen_units if unit.split == "holdout_ru"
-        },
-    )
-    baseline_root = campaign_root / "baseline"
-    baseline_root.mkdir(parents=True, exist_ok=True)
+) -> tuple[Path, ...]:
+    baseline_root = root / "baseline"
+    baseline_root.mkdir(parents=True)
     _write_json(
-        campaign_root / "campaign.json",
+        root / "campaign.json",
         {
             "schema_version": 1,
             "state": "preregistered",
@@ -410,14 +416,10 @@ def write_campaign_artifacts(
             "candidate_results_present": False,
         },
     )
-    _write_json(campaign_root / "preregistration.json", dict(preregistration))
+    _write_json(root / "preregistration.json", dict(preregistration))
     _write_json(baseline_root / "passport.json", asdict(passport))
     units = [asdict(unit) for unit in passport.frozen_units]
-    _write_csv(
-        baseline_root / "frozen-unit-map.csv",
-        ("photo_id", "listing_id", "split"),
-        units,
-    )
+    _write_csv(baseline_root / "frozen-unit-map.csv", ("photo_id", "listing_id", "split"), units)
     _write_csv(
         baseline_root / "frozen-holdout.csv",
         ("photo_id", "listing_id", "split"),
@@ -449,3 +451,63 @@ def write_campaign_artifacts(
             },
         },
     )
+    return tuple(sorted(path.relative_to(root) for path in root.rglob("*") if path.is_file()))
+
+
+def _publish_checkpoint(campaign_root: Path, staging_root: Path, files: Sequence[Path]) -> None:
+    if campaign_root.exists():
+        existing = tuple(
+            sorted(
+                path.relative_to(campaign_root)
+                for path in campaign_root.rglob("*")
+                if path.is_file()
+            )
+        )
+        if existing != tuple(files) or any(
+            (campaign_root / relative).read_bytes() != (staging_root / relative).read_bytes()
+            for relative in files
+        ):
+            raise ValueError("неизменяемый checkpoint уже существует и отличается")
+        return
+    campaign_root.mkdir(parents=True)
+    try:
+        for relative in files:
+            target = campaign_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            (staging_root / relative).replace(target)
+    except OSError:
+        shutil.rmtree(campaign_root, ignore_errors=True)
+        raise
+
+
+def write_campaign_artifacts(
+    campaign_root: Path,
+    passport: BaselinePassport,
+    predictions: Sequence[Prediction],
+    preregistration: Mapping[str, Any],
+) -> None:
+    """Сверить свидетель, целиком отрендерить staging и неизменяемо опубликовать checkpoint."""
+    counts = exact_prediction_counts(
+        predictions,
+        expected_ids={
+            unit.photo_id for unit in passport.frozen_units if unit.split == "holdout_ru"
+        },
+    )
+    derived = ExactMetrics(
+        top1_k=counts["top1"]["k"],
+        top3_k=counts["top3"]["k"],
+        n=counts["top1"]["n"],
+    )
+    if derived != passport.exact_metrics:
+        raise ValueError(
+            f"passport exact_metrics {passport.exact_metrics!r} != predictions {derived!r}"
+        )
+    campaign_root.parent.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(
+        tempfile.mkdtemp(prefix=f".{campaign_root.name}.staging-", dir=campaign_root.parent)
+    )
+    try:
+        files = _render_campaign_artifacts(staging_root, passport, predictions, preregistration)
+        _publish_checkpoint(campaign_root, staging_root, files)
+    finally:
+        shutil.rmtree(staging_root, ignore_errors=True)
