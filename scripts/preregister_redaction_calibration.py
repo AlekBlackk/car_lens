@@ -85,10 +85,18 @@ def load_predictions(path: Path) -> tuple[Prediction, ...]:
 def _runtime_versions() -> dict[str, str]:
     versions = {
         "python": platform.python_version(),
-        "opencv-python-headless": cv2.__version__,
-        "numpy": np.__version__,
+        "opencv-runtime": cv2.__version__,
+        "numpy-runtime": np.__version__,
     }
-    for package in ("pandas", "pyarrow", "pillow", "open-clip-torch", "torch"):
+    for package in (
+        "opencv-python-headless",
+        "numpy",
+        "pandas",
+        "pyarrow",
+        "pillow",
+        "open-clip-torch",
+        "torch",
+    ):
         try:
             versions[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
