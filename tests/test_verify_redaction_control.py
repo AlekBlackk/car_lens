@@ -293,16 +293,27 @@ def test_verify_control_reports_membership_and_reason_mismatches_together(tmp_pa
     assert any("арифметика workspace не сошлась" in message for message in messages)
 
 
-def test_verify_control_reports_full_manifest_semantic_change(tmp_path: Path) -> None:
+def test_verify_control_accepts_regenerated_checked_date(tmp_path: Path) -> None:
     manifest, workspace, rows = _fixture(tmp_path)
-    changed = replace(rows[0], checked="2026-09-08")
+    regenerated = replace(rows[0], checked="2026-09-08")
+    write_manifest(workspace / "manifest.csv", [regenerated])
+
+    report = verify_control(manifest, tmp_path / "input", workspace)
+
+    assert report["passed"] is True
+    assert not any(mismatch["kind"] == "manifest_row" for mismatch in _mismatches(report))
+
+
+def test_verify_control_reports_binding_manifest_semantic_change(tmp_path: Path) -> None:
+    manifest, workspace, rows = _fixture(tmp_path)
+    changed = replace(rows[0], plates=2)
     write_manifest(workspace / "manifest.csv", [changed])
 
     report = verify_control(manifest, tmp_path / "input", workspace)
 
     assert report["passed"] is False
     assert any(
-        mismatch["kind"] == "manifest_row" and mismatch["fields"] == ["checked"]
+        mismatch["kind"] == "manifest_row" and mismatch["fields"] == ["plates"]
         for mismatch in _mismatches(report)
     )
 
@@ -320,6 +331,26 @@ def test_verify_control_rejects_duplicate_and_malformed_ids(tmp_path: Path) -> N
     assert any("повтор photo_id" in message and "a" * 64 in message for message in messages)
     assert any(
         "некорректный photo_id" in message and "not-a-sha" in message for message in messages
+    )
+
+
+def test_verify_control_keeps_checked_in_trace_manifest_parity(tmp_path: Path) -> None:
+    manifest, plain, rows = _fixture(tmp_path)
+    traced_row = replace(rows[0], checked="2026-09-08")
+    traced = _workspace(
+        tmp_path / "traced",
+        rows,
+        [traced_row],
+        [(rows[1], "redaction_failed")],
+        traced=True,
+    )
+
+    report = verify_control(manifest, tmp_path / "input", plain, traced)
+
+    assert report["passed"] is False
+    assert any(
+        mismatch["kind"] == "trace_hash" and mismatch.get("artifact") == "manifest.csv"
+        for mismatch in _mismatches(report)
     )
 
 

@@ -36,6 +36,7 @@ PARITY_ARTIFACTS = (
     "rejects.csv",
 )
 PROFILE_VOLATILE_FIELDS = frozenset({"timestamp"})
+MANIFEST_VOLATILE_FIELDS = frozenset({"checked"})
 DIAGNOSIS_ORDER = (
     "JPEG parameters/version",
     "detector pins",
@@ -179,7 +180,8 @@ def _row_fields_changed(old: HarvestRow, new: HarvestRow) -> list[str]:
     return [
         field.name
         for field in fields(HarvestRow)
-        if getattr(old, field.name) != getattr(new, field.name)
+        if field.name not in MANIFEST_VOLATILE_FIELDS
+        and getattr(old, field.name) != getattr(new, field.name)
     ]
 
 
