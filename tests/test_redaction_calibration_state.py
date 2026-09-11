@@ -1,8 +1,9 @@
-"""Переходы состояний рекалибровки и их свидетели."""
+"""Контекстные переходы рекалибровки и неизменяемые свидетели."""
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from collections.abc import Callable
+from dataclasses import FrozenInstanceError, replace
 from itertools import product
 
 import pytest
@@ -23,11 +24,13 @@ from pipeline.redaction_calibration.state import (
     transition_promotion,
 )
 
-PROFILE_SHA = "a" * 64
-CANONICAL_SHA = "b" * 64
-WITNESS_SHA = "c" * 64
-NEW_WITNESS_SHA = "d" * 64
-BATCH_SHA = "e" * 64
+SHA_A = "a" * 64
+SHA_B = "b" * 64
+SHA_C = "c" * 64
+SHA_D = "d" * 64
+SHA_E = "e" * 64
+SHA_F = "f" * 64
+INVALID_HASHES = (None, "", "a" * 63, "g" * 64)
 
 CAMPAIGN_EDGES = {
     (CampaignState.DRAFT, CampaignState.PREREGISTERED),
@@ -51,18 +54,16 @@ PROFILE_EDGES = {
     (ProfileState.GEOMETRY_FRESH, ProfileState.GEOMETRY_STALE),
     (ProfileState.GEOMETRY_FRESH, ProfileState.CALIBRATION_PASSED),
     (ProfileState.GEOMETRY_FRESH, ProfileState.CALIBRATION_FAILED),
+    (ProfileState.CALIBRATION_PASSED, ProfileState.GEOMETRY_STALE),
     (ProfileState.CALIBRATION_PASSED, ProfileState.VISUAL_VETO_PASSED),
     (ProfileState.CALIBRATION_PASSED, ProfileState.VISUAL_VETO_FAILED),
+    (ProfileState.VISUAL_VETO_PASSED, ProfileState.GEOMETRY_STALE),
     (ProfileState.VISUAL_VETO_PASSED, ProfileState.QUALITY_GUARDRAIL_PASSED),
     (ProfileState.VISUAL_VETO_PASSED, ProfileState.QUALITY_GUARDRAIL_FAILED),
-    (
-        ProfileState.QUALITY_GUARDRAIL_PASSED,
-        ProfileState.INDEPENDENT_PRIVACY_PASSED,
-    ),
-    (
-        ProfileState.QUALITY_GUARDRAIL_PASSED,
-        ProfileState.INDEPENDENT_PRIVACY_FAILED,
-    ),
+    (ProfileState.QUALITY_GUARDRAIL_PASSED, ProfileState.GEOMETRY_STALE),
+    (ProfileState.QUALITY_GUARDRAIL_PASSED, ProfileState.INDEPENDENT_PRIVACY_PASSED),
+    (ProfileState.QUALITY_GUARDRAIL_PASSED, ProfileState.INDEPENDENT_PRIVACY_FAILED),
+    (ProfileState.INDEPENDENT_PRIVACY_PASSED, ProfileState.GEOMETRY_STALE),
 }
 
 PROMOTION_EDGES = {
@@ -84,58 +85,279 @@ BATCH_EDGES = {
     (BatchState.REVIEW_IN_PROGRESS, BatchState.COMPLETED_FAIL),
 }
 
+PROFILE_RESULT_FIELDS = {
+    ProfileState.BUILT: "build_result_sha256",
+    ProfileState.BUILD_FAILED: "build_result_sha256",
+    ProfileState.GEOMETRY_FRESH: "geometry_result_sha256",
+    ProfileState.CALIBRATION_PASSED: "calibration_result_sha256",
+    ProfileState.CALIBRATION_FAILED: "calibration_result_sha256",
+    ProfileState.VISUAL_VETO_PASSED: "visual_veto_result_sha256",
+    ProfileState.VISUAL_VETO_FAILED: "visual_veto_result_sha256",
+    ProfileState.QUALITY_GUARDRAIL_PASSED: "quality_guardrail_result_sha256",
+    ProfileState.QUALITY_GUARDRAIL_FAILED: "quality_guardrail_result_sha256",
+    ProfileState.INDEPENDENT_PRIVACY_PASSED: "independent_privacy_result_sha256",
+    ProfileState.INDEPENDENT_PRIVACY_FAILED: "independent_privacy_result_sha256",
+}
+
+CAMPAIGN_RESULT_FIELDS = {
+    CampaignState.PREREGISTERED: "preregistration_result_sha256",
+    CampaignState.TOOLING_VERIFIED: "tooling_result_sha256",
+    CampaignState.CONTROL_VERIFIED: "control_result_sha256",
+    CampaignState.ANNOTATIONS_RESOLVED: "annotations_result_sha256",
+    CampaignState.PROFILES_EVALUATED: "profile_evaluation_result_sha256",
+    CampaignState.CAMPAIGN_COMPLETE: "selection_result_sha256",
+    CampaignState.BUDGET_EXHAUSTED: "budget_result_sha256",
+}
+
+PROMOTION_RESULT_FIELDS = {
+    PromotionState.PROMOTABLE: "snapshot_result_sha256",
+    PromotionState.PROMOTED: "promotion_result_sha256",
+    PromotionState.PROMOTION_FAILED: "promotion_result_sha256",
+    PromotionState.H3_REAUDITED: "h3_result_sha256",
+    PromotionState.H3_REAUDIT_FAILED: "h3_result_sha256",
+    PromotionState.END_TO_END_REPORTED: "end_to_end_result_sha256",
+    PromotionState.END_TO_END_FAILED: "end_to_end_result_sha256",
+    PromotionState.FULL_POOL_AUDITED: "full_pool_result_sha256",
+}
+
+BATCH_RESULT_FIELDS = {
+    BatchState.OPENED: "open_result_sha256",
+    BatchState.REVIEW_IN_PROGRESS: "review_result_sha256",
+    BatchState.COMPLETED_PASS: "completion_result_sha256",
+    BatchState.COMPLETED_FAIL: "completion_result_sha256",
+}
+
 
 def _campaign(state: CampaignState) -> CampaignRecord:
-    return CampaignRecord(state=state)
-
-
-def _profile(state: ProfileState) -> ProfileRecord:
-    return ProfileRecord(
-        profile_id="profile-a",
+    survivors = {
+        CampaignState.PROFILES_EVALUATED: ("profile-a", "profile-b"),
+        CampaignState.SELECTION_REQUIRED: ("profile-a", "profile-b"),
+    }.get(state, ())
+    return CampaignRecord(
         state=state,
-        profile_sha256=PROFILE_SHA,
-        canonical_sha256=CANONICAL_SHA,
-        geometry_witness_sha256=(
-            WITNESS_SHA
-            if state
-            not in {
-                ProfileState.DECLARED,
-                ProfileState.BUILT,
-                ProfileState.BUILD_FAILED,
-            }
-            else None
-        ),
+        preregistration_result_sha256=SHA_A,
+        tooling_result_sha256=SHA_A,
+        control_result_sha256=SHA_A,
+        annotations_result_sha256=SHA_A,
+        profile_evaluation_result_sha256=SHA_A,
+        selection_result_sha256=SHA_A,
+        budget_result_sha256=SHA_A,
+        evaluated_survivor_ids=survivors,
+    )
+
+
+def _profile(state: ProfileState, *, profile_id: str = "profile-a") -> ProfileRecord:
+    return ProfileRecord(
+        profile_id=profile_id,
+        state=state,
+        profile_sha256=SHA_A,
+        canonical_sha256=SHA_B,
+        geometry_witness_sha256=SHA_C,
         w_max=17,
         h_max=11,
+        build_result_sha256=SHA_D,
+        geometry_result_sha256=SHA_E,
+        calibration_result_sha256=SHA_F,
+        visual_veto_result_sha256=SHA_D,
+        quality_guardrail_result_sha256=SHA_E,
+        independent_privacy_result_sha256=SHA_F,
     )
 
 
 def _promotion(state: PromotionState) -> PromotionRecord:
+    selected = state is not PromotionState.NOT_SELECTED
     return PromotionRecord(
         state=state,
-        profile_id="profile-a" if state is not PromotionState.NOT_SELECTED else None,
-        profile_sha256=PROFILE_SHA if state is not PromotionState.NOT_SELECTED else None,
-        geometry_witness_sha256=(WITNESS_SHA if state is not PromotionState.NOT_SELECTED else None),
+        profile_id="profile-a" if selected else None,
+        profile_sha256=SHA_A if selected else None,
+        geometry_witness_sha256=SHA_C if selected else None,
+        snapshot_result_sha256=SHA_D if selected else None,
+        promotion_result_sha256=SHA_E if selected else None,
+        h3_result_sha256=SHA_F if selected else None,
+        end_to_end_result_sha256=SHA_D if selected else None,
+        full_pool_result_sha256=SHA_E if selected else None,
     )
 
 
-def _batch(state: BatchState) -> BatchRecord:
+def _batch(state: BatchState, number: int = 1) -> BatchRecord:
+    opened = state is not BatchState.SEALED
     return BatchRecord(
-        number=1,
+        number=number,
         state=state,
-        batch_sha256=BATCH_SHA,
-        profile_id="profile-a" if state is not BatchState.SEALED else None,
-        profile_sha256=PROFILE_SHA if state is not BatchState.SEALED else None,
-        geometry_witness_sha256=WITNESS_SHA if state is not BatchState.SEALED else None,
+        batch_sha256=SHA_A,
+        profile_id="profile-a" if opened else None,
+        profile_sha256=SHA_A if opened else None,
+        geometry_witness_sha256=SHA_C if opened else None,
+        open_result_sha256=SHA_D if opened else None,
+        review_result_sha256=SHA_E if opened else None,
+        completion_result_sha256=SHA_F if opened else None,
     )
 
 
-@pytest.mark.parametrize(
-    ("source", "target"),
-    sorted(CAMPAIGN_EDGES),
-)
-def test_campaign_allows_declared_edges(source: CampaignState, target: CampaignState) -> None:
-    result = transition_campaign(_campaign(source), target)
+def _assert_campaign_transition(record: CampaignRecord, target: CampaignState) -> CampaignRecord:
+    if target is CampaignState.PREREGISTERED:
+        return transition_campaign(record, target, preregistration_result_sha256=SHA_B)
+    if target is CampaignState.TOOLING_VERIFIED:
+        return transition_campaign(record, target, tooling_result_sha256=SHA_B)
+    if target is CampaignState.CONTROL_VERIFIED:
+        return transition_campaign(record, target, control_result_sha256=SHA_B)
+    if target is CampaignState.ANNOTATIONS_RESOLVED:
+        return transition_campaign(
+            record,
+            target,
+            unresolved_count=0,
+            annotations_result_sha256=SHA_B,
+        )
+    if target is CampaignState.PROFILES_EVALUATED:
+        return transition_campaign(
+            record,
+            target,
+            evaluated_survivor_ids=("profile-a", "profile-b"),
+            profile_evaluation_result_sha256=SHA_B,
+        )
+    if target is CampaignState.SELECTION_REQUIRED:
+        return transition_campaign(
+            record,
+            target,
+            evaluated_survivor_ids=("profile-a", "profile-b"),
+        )
+    if target is CampaignState.CAMPAIGN_COMPLETE:
+        if record.state is CampaignState.PROFILES_EVALUATED:
+            return transition_campaign(
+                record,
+                target,
+                evaluated_survivor_ids=("profile-a",),
+                selection_result_sha256=SHA_B,
+            )
+        return transition_campaign(
+            record,
+            target,
+            selected_profile_id=(
+                record.evaluated_survivor_ids[0] if record.evaluated_survivor_ids else "profile-a"
+            ),
+            selection_result_sha256=SHA_B,
+        )
+    if target is CampaignState.BUDGET_EXHAUSTED:
+        return transition_campaign(record, target, budget_result_sha256=SHA_B)
+    return transition_campaign(record, target)
+
+
+def _assert_profile_transition(record: ProfileRecord, target: ProfileState) -> ProfileRecord:
+    if target is ProfileState.BUILT or target is ProfileState.BUILD_FAILED:
+        return transition_profile(record, target, build_result_sha256=SHA_D)
+    if target is ProfileState.GEOMETRY_FRESH:
+        return transition_profile(
+            record,
+            target,
+            canonical_sha256=SHA_B,
+            geometry_witness_sha256=SHA_C,
+            w_max=17,
+            h_max=11,
+            geometry_result_sha256=SHA_D,
+        )
+    if target is ProfileState.CALIBRATION_PASSED:
+        return transition_profile(
+            record,
+            target,
+            calibration_result_sha256=SHA_D,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    if target is ProfileState.CALIBRATION_FAILED:
+        return transition_profile(record, target, calibration_result_sha256=SHA_D)
+    if target is ProfileState.VISUAL_VETO_PASSED:
+        return transition_profile(
+            record,
+            target,
+            visual_veto_result_sha256=SHA_D,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    if target is ProfileState.VISUAL_VETO_FAILED:
+        return transition_profile(record, target, visual_veto_result_sha256=SHA_D)
+    if target is ProfileState.QUALITY_GUARDRAIL_PASSED:
+        return transition_profile(
+            record,
+            target,
+            quality_guardrail_result_sha256=SHA_D,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    if target is ProfileState.QUALITY_GUARDRAIL_FAILED:
+        return transition_profile(record, target, quality_guardrail_result_sha256=SHA_D)
+    if target is ProfileState.INDEPENDENT_PRIVACY_PASSED:
+        return transition_profile(
+            record,
+            target,
+            independent_privacy_result_sha256=SHA_D,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    if target is ProfileState.INDEPENDENT_PRIVACY_FAILED:
+        return transition_profile(record, target, independent_privacy_result_sha256=SHA_D)
+    return transition_profile(record, target)
+
+
+def _assert_promotion_transition(
+    record: PromotionRecord, target: PromotionState
+) -> PromotionRecord:
+    if target is PromotionState.PROMOTABLE:
+        return transition_promotion(
+            record,
+            target,
+            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+            snapshot_result_sha256=SHA_B,
+        )
+    if target is PromotionState.PROMOTED or target is PromotionState.PROMOTION_FAILED:
+        return transition_promotion(record, target, promotion_result_sha256=SHA_B)
+    if target is PromotionState.H3_REAUDITED or target is PromotionState.H3_REAUDIT_FAILED:
+        return transition_promotion(record, target, h3_result_sha256=SHA_B)
+    if target in {PromotionState.END_TO_END_REPORTED, PromotionState.END_TO_END_FAILED}:
+        return transition_promotion(record, target, end_to_end_result_sha256=SHA_B)
+    if target is PromotionState.FULL_POOL_AUDITED:
+        return transition_promotion(record, target, full_pool_result_sha256=SHA_B)
+    return transition_promotion(record, target)
+
+
+def _assert_batch_transition(record: BatchRecord, target: BatchState) -> BatchRecord:
+    if target is BatchState.OPENED:
+        return transition_batch(
+            record,
+            target,
+            batches=(record,),
+            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+            open_result_sha256=SHA_B,
+        )
+    if target is BatchState.REVIEW_IN_PROGRESS:
+        return transition_batch(record, target, review_result_sha256=SHA_B)
+    if target is BatchState.COMPLETED_PASS or target is BatchState.COMPLETED_FAIL:
+        return transition_batch(record, target, completion_result_sha256=SHA_B)
+    return transition_batch(record, target)
+
+
+@pytest.mark.parametrize(("source", "target"), sorted(CAMPAIGN_EDGES))
+def test_campaign_allows_declared_edges_with_context(
+    source: CampaignState, target: CampaignState
+) -> None:
+    record = _campaign(source)
+
+    result = _assert_campaign_transition(record, target)
 
     assert result.state is target
 
@@ -144,28 +366,19 @@ def test_campaign_allows_declared_edges(source: CampaignState, target: CampaignS
     ("source", "target"),
     [edge for edge in product(CampaignState, repeat=2) if edge not in CAMPAIGN_EDGES],
 )
-def test_campaign_rejects_every_other_edge(source: CampaignState, target: CampaignState) -> None:
+def test_campaign_rejects_every_other_enum_edge(
+    source: CampaignState, target: CampaignState
+) -> None:
+    record = _campaign(source)
     with pytest.raises(CalibrationStateError, match="недопустимый переход кампании"):
-        transition_campaign(_campaign(source), target)
+        _assert_campaign_transition(record, target)
 
 
-@pytest.mark.parametrize(
-    ("source", "target"),
-    sorted(PROFILE_EDGES),
-)
-def test_profile_allows_declared_edges(source: ProfileState, target: ProfileState) -> None:
-    record = _profile(source)
-    if target is ProfileState.GEOMETRY_FRESH:
-        result = transition_profile(
-            record,
-            target,
-            canonical_sha256=CANONICAL_SHA,
-            geometry_witness_sha256=WITNESS_SHA,
-            w_max=17,
-            h_max=11,
-        )
-    else:
-        result = transition_profile(record, target)
+@pytest.mark.parametrize(("source", "target"), sorted(PROFILE_EDGES))
+def test_profile_allows_declared_edges_with_context(
+    source: ProfileState, target: ProfileState
+) -> None:
+    result = _assert_profile_transition(_profile(source), target)
 
     assert result.state is target
 
@@ -174,18 +387,18 @@ def test_profile_allows_declared_edges(source: ProfileState, target: ProfileStat
     ("source", "target"),
     [edge for edge in product(ProfileState, repeat=2) if edge not in PROFILE_EDGES],
 )
-def test_profile_rejects_every_other_edge(source: ProfileState, target: ProfileState) -> None:
+def test_profile_rejects_every_other_enum_edge(source: ProfileState, target: ProfileState) -> None:
     with pytest.raises(CalibrationStateError, match="недопустимый переход профиля"):
-        transition_profile(_profile(source), target)
+        _assert_profile_transition(_profile(source), target)
 
 
-@pytest.mark.parametrize(
-    ("source", "target"),
-    sorted(PROMOTION_EDGES),
-)
-def test_promotion_allows_declared_edges(source: PromotionState, target: PromotionState) -> None:
-    profile = _profile(ProfileState.INDEPENDENT_PRIVACY_PASSED)
-    result = transition_promotion(_promotion(source), target, profile=profile)
+@pytest.mark.parametrize(("source", "target"), sorted(PROMOTION_EDGES))
+def test_promotion_allows_declared_edges_with_context(
+    source: PromotionState, target: PromotionState
+) -> None:
+    record = _promotion(source)
+
+    result = _assert_promotion_transition(record, target)
 
     assert result.state is target
 
@@ -194,26 +407,19 @@ def test_promotion_allows_declared_edges(source: PromotionState, target: Promoti
     ("source", "target"),
     [edge for edge in product(PromotionState, repeat=2) if edge not in PROMOTION_EDGES],
 )
-def test_promotion_rejects_every_other_edge(source: PromotionState, target: PromotionState) -> None:
-    profile = _profile(ProfileState.INDEPENDENT_PRIVACY_PASSED)
+def test_promotion_rejects_every_other_enum_edge(
+    source: PromotionState, target: PromotionState
+) -> None:
+    record = _promotion(source)
     with pytest.raises(CalibrationStateError, match="недопустимый переход продвижения"):
-        transition_promotion(_promotion(source), target, profile=profile)
+        _assert_promotion_transition(record, target)
 
 
-@pytest.mark.parametrize(
-    ("source", "target"),
-    sorted(BATCH_EDGES),
-)
-def test_batch_allows_declared_edges(source: BatchState, target: BatchState) -> None:
+@pytest.mark.parametrize(("source", "target"), sorted(BATCH_EDGES))
+def test_batch_allows_declared_edges_with_context(source: BatchState, target: BatchState) -> None:
     record = _batch(source)
-    if target is BatchState.OPENED:
-        result = transition_batch(
-            record,
-            target,
-            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
-        )
-    else:
-        result = transition_batch(record, target)
+
+    result = _assert_batch_transition(record, target)
 
     assert result.state is target
 
@@ -222,110 +428,786 @@ def test_batch_allows_declared_edges(source: BatchState, target: BatchState) -> 
     ("source", "target"),
     [edge for edge in product(BatchState, repeat=2) if edge not in BATCH_EDGES],
 )
-def test_batch_rejects_every_other_edge(source: BatchState, target: BatchState) -> None:
+def test_batch_rejects_every_other_enum_edge(source: BatchState, target: BatchState) -> None:
+    record = _batch(source)
     with pytest.raises(CalibrationStateError, match="недопустимый переход партии"):
-        transition_batch(_batch(source), target)
+        _assert_batch_transition(record, target)
 
 
-def test_geometry_fresh_requires_matching_canonical_hash_exact_extents_and_witness() -> None:
-    built = _profile(ProfileState.BUILT)
+@pytest.mark.parametrize("active", [BatchState.OPENED, BatchState.REVIEW_IN_PROGRESS])
+def test_batch_open_rejects_another_active_batch(active: BatchState) -> None:
+    first = _batch(active, 1)
+    second = _batch(BatchState.SEALED, 2)
 
-    for canonical_sha256, geometry_witness_sha256, w_max, h_max in [
-        (NEW_WITNESS_SHA, WITNESS_SHA, 17, 11),
-        (CANONICAL_SHA, WITNESS_SHA, 18, 11),
-        (CANONICAL_SHA, WITNESS_SHA, 17, 12),
-        (CANONICAL_SHA, None, 17, 11),
-    ]:
-        with pytest.raises(CalibrationStateError, match="геометрический свидетель"):
-            transition_profile(
-                built,
-                ProfileState.GEOMETRY_FRESH,
-                canonical_sha256=canonical_sha256,
-                geometry_witness_sha256=geometry_witness_sha256,
-                w_max=w_max,
-                h_max=h_max,
+    with pytest.raises(CalibrationStateError, match="активная партия"):
+        transition_batch(
+            second,
+            BatchState.OPENED,
+            batches=(first, second),
+            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            open_result_sha256=SHA_D,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+
+
+@pytest.mark.parametrize(
+    ("history", "message"),
+    [
+        ((BatchState.SEALED, BatchState.SEALED), "следующая sealed-партия 1"),
+        ((BatchState.OPENED, BatchState.SEALED), "активная партия"),
+        ((BatchState.REVIEW_IN_PROGRESS, BatchState.SEALED), "активная партия"),
+        ((BatchState.COMPLETED_PASS, BatchState.SEALED), "кампания уже прошла"),
+    ],
+)
+def test_second_batch_open_requires_failed_prior_history(
+    history: tuple[BatchState, BatchState], message: str
+) -> None:
+    first = _batch(history[0], 1)
+    second = _batch(history[1], 2)
+
+    with pytest.raises(CalibrationStateError, match=message):
+        transition_batch(
+            second,
+            BatchState.OPENED,
+            batches=(first, second),
+            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            open_result_sha256=SHA_D,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+
+
+def test_second_batch_opens_after_prior_failure_without_mutating_history() -> None:
+    first = _batch(BatchState.COMPLETED_FAIL, 1)
+    second = _batch(BatchState.SEALED, 2)
+
+    opened = transition_batch(
+        second,
+        BatchState.OPENED,
+        batches=(first, second),
+        profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+        open_result_sha256=SHA_D,
+        current_canonical_sha256=SHA_B,
+        current_geometry_witness_sha256=SHA_C,
+        current_w_max=17,
+        current_h_max=11,
+    )
+
+    assert first == _batch(BatchState.COMPLETED_FAIL, 1)
+    assert opened.number == 2
+    assert opened.state is BatchState.OPENED
+    assert opened.open_result_sha256 == SHA_D
+
+
+def test_batch_open_rejects_nonfailed_lower_number_even_when_it_is_not_prior_in_order() -> None:
+    target = _batch(BatchState.SEALED, 2)
+    future_active = _batch(BatchState.OPENED, 3)
+
+    with pytest.raises(CalibrationStateError, match="активная партия"):
+        transition_batch(
+            target,
+            BatchState.OPENED,
+            batches=(target, future_active),
+            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            open_result_sha256=SHA_D,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+
+
+def test_batch_open_rejects_missing_lower_batch_number() -> None:
+    target = _batch(BatchState.SEALED, 2)
+
+    with pytest.raises(CalibrationStateError, match="предыдущие партии"):
+        transition_batch(
+            target,
+            BatchState.OPENED,
+            batches=(target,),
+            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            open_result_sha256=SHA_D,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+
+
+def test_batch_open_rejects_missing_target_or_duplicate_numbers() -> None:
+    target = _batch(BatchState.SEALED, 2)
+    profile = _profile(ProfileState.INDEPENDENT_PRIVACY_PASSED)
+
+    for batches in ((_batch(BatchState.SEALED, 1),), (target, target)):
+        with pytest.raises(CalibrationStateError, match="история партий"):
+            transition_batch(
+                target,
+                BatchState.OPENED,
+                batches=batches,
+                profile=profile,
+                open_result_sha256=SHA_D,
+                current_canonical_sha256=SHA_B,
+                current_geometry_witness_sha256=SHA_C,
+                current_w_max=17,
+                current_h_max=11,
             )
 
 
-def test_profile_pass_states_retain_geometry_witness() -> None:
-    fresh = _profile(ProfileState.GEOMETRY_FRESH)
+@pytest.mark.parametrize("survivors", [(), ("profile-a", "profile-b")])
+def test_campaign_direct_completion_requires_exactly_one_survivor(
+    survivors: tuple[str, ...],
+) -> None:
+    record = replace(
+        _campaign(CampaignState.PROFILES_EVALUATED),
+        evaluated_survivor_ids=survivors,
+    )
 
-    passed = transition_profile(fresh, ProfileState.CALIBRATION_PASSED)
+    with pytest.raises(CalibrationStateError, match="ровно один survivor"):
+        transition_campaign(
+            record,
+            CampaignState.CAMPAIGN_COMPLETE,
+            selection_result_sha256=SHA_D,
+        )
 
-    assert passed.canonical_sha256 == CANONICAL_SHA
-    assert passed.geometry_witness_sha256 == WITNESS_SHA
-    assert (passed.w_max, passed.h_max) == (17, 11)
+
+def test_campaign_direct_completion_retains_single_survivor_and_witness() -> None:
+    record = replace(
+        _campaign(CampaignState.PROFILES_EVALUATED),
+        evaluated_survivor_ids=("profile-a",),
+        profile_evaluation_result_sha256=SHA_C,
+    )
+
+    result = transition_campaign(
+        record,
+        CampaignState.CAMPAIGN_COMPLETE,
+        selection_result_sha256=SHA_D,
+    )
+
+    assert result.evaluated_survivor_ids == ("profile-a",)
+    assert result.selected_profile_id == "profile-a"
+    assert result.profile_evaluation_result_sha256 == SHA_C
+    assert result.selection_result_sha256 == SHA_D
 
 
-def test_stale_profile_cannot_advance_to_any_pass_state() -> None:
-    stale = transition_profile(_profile(ProfileState.GEOMETRY_FRESH), ProfileState.GEOMETRY_STALE)
+def test_selection_required_needs_multiple_survivors_and_selected_member() -> None:
+    evaluated = replace(
+        _campaign(CampaignState.PROFILES_EVALUATED),
+        evaluated_survivor_ids=("profile-a", "profile-b"),
+    )
+    selection = transition_campaign(evaluated, CampaignState.SELECTION_REQUIRED)
+    assert selection.evaluated_survivor_ids == ("profile-a", "profile-b")
 
-    for target in (
+    for selected in (None, "profile-c"):
+        with pytest.raises(CalibrationStateError, match="выбранный профиль"):
+            transition_campaign(
+                selection,
+                CampaignState.CAMPAIGN_COMPLETE,
+                selected_profile_id=selected,
+                selection_result_sha256=SHA_D,
+            )
+
+
+def test_campaign_profiles_evaluated_persists_unique_nonempty_survivors() -> None:
+    record = _campaign(CampaignState.ANNOTATIONS_RESOLVED)
+
+    result = transition_campaign(
+        record,
+        CampaignState.PROFILES_EVALUATED,
+        evaluated_survivor_ids=("profile-b", "profile-a"),
+        profile_evaluation_result_sha256=SHA_D,
+    )
+
+    assert result.evaluated_survivor_ids == ("profile-b", "profile-a")
+    assert result.profile_evaluation_result_sha256 == SHA_D
+    for survivors in ((), ("",), ("profile-a", "profile-a")):
+        with pytest.raises(CalibrationStateError, match="survivor"):
+            transition_campaign(
+                record,
+                CampaignState.PROFILES_EVALUATED,
+                evaluated_survivor_ids=survivors,
+                profile_evaluation_result_sha256=SHA_D,
+            )
+
+
+@pytest.mark.parametrize("unresolved_count", [1, -1, True])
+def test_annotations_resolved_requires_zero_unresolved_rows(unresolved_count: int) -> None:
+    with pytest.raises(CalibrationStateError, match="unresolved"):
+        transition_campaign(
+            _campaign(CampaignState.ANNOTATIONS_OPEN),
+            CampaignState.ANNOTATIONS_RESOLVED,
+            unresolved_count=unresolved_count,
+            annotations_result_sha256=SHA_D,
+        )
+
+
+def test_annotations_resolved_retains_empty_evidence() -> None:
+    result = transition_campaign(
+        _campaign(CampaignState.ANNOTATIONS_OPEN),
+        CampaignState.ANNOTATIONS_RESOLVED,
+        unresolved_count=0,
+        annotations_result_sha256=SHA_D,
+    )
+
+    assert result.unresolved_count == 0
+    assert result.annotations_result_sha256 == SHA_D
+
+
+def test_annotations_resolved_requires_explicit_unresolved_evidence() -> None:
+    with pytest.raises(CalibrationStateError, match="unresolved"):
+        transition_campaign(
+            _campaign(CampaignState.ANNOTATIONS_OPEN),
+            CampaignState.ANNOTATIONS_RESOLVED,
+            annotations_result_sha256=SHA_D,
+        )
+
+
+def _campaign_witness_call(
+    target: CampaignState, witness: str | None
+) -> Callable[[], CampaignRecord]:
+    sources = {
+        CampaignState.PREREGISTERED: CampaignState.DRAFT,
+        CampaignState.TOOLING_VERIFIED: CampaignState.PREREGISTERED,
+        CampaignState.CONTROL_VERIFIED: CampaignState.TOOLING_VERIFIED,
+        CampaignState.ANNOTATIONS_RESOLVED: CampaignState.ANNOTATIONS_OPEN,
+        CampaignState.PROFILES_EVALUATED: CampaignState.ANNOTATIONS_RESOLVED,
+        CampaignState.CAMPAIGN_COMPLETE: CampaignState.PROFILES_EVALUATED,
+        CampaignState.BUDGET_EXHAUSTED: CampaignState.SELECTION_REQUIRED,
+    }
+    record = _campaign(sources[target])
+    if target is CampaignState.PREREGISTERED:
+        return lambda: transition_campaign(record, target, preregistration_result_sha256=witness)
+    if target is CampaignState.TOOLING_VERIFIED:
+        return lambda: transition_campaign(record, target, tooling_result_sha256=witness)
+    if target is CampaignState.CONTROL_VERIFIED:
+        return lambda: transition_campaign(record, target, control_result_sha256=witness)
+    if target is CampaignState.ANNOTATIONS_RESOLVED:
+        return lambda: transition_campaign(
+            record,
+            target,
+            unresolved_count=0,
+            annotations_result_sha256=witness,
+        )
+    if target is CampaignState.PROFILES_EVALUATED:
+        return lambda: transition_campaign(
+            record,
+            target,
+            evaluated_survivor_ids=("profile-a", "profile-b"),
+            profile_evaluation_result_sha256=witness,
+        )
+    if target is CampaignState.CAMPAIGN_COMPLETE:
+        record = replace(record, evaluated_survivor_ids=("profile-a",))
+        return lambda: transition_campaign(record, target, selection_result_sha256=witness)
+    return lambda: transition_campaign(record, target, budget_result_sha256=witness)
+
+
+def _profile_witness_call(target: ProfileState, witness: str | None) -> Callable[[], ProfileRecord]:
+    sources = {
+        ProfileState.BUILT: ProfileState.DECLARED,
+        ProfileState.BUILD_FAILED: ProfileState.DECLARED,
+        ProfileState.GEOMETRY_FRESH: ProfileState.BUILT,
+        ProfileState.CALIBRATION_PASSED: ProfileState.GEOMETRY_FRESH,
+        ProfileState.CALIBRATION_FAILED: ProfileState.GEOMETRY_FRESH,
+        ProfileState.VISUAL_VETO_PASSED: ProfileState.CALIBRATION_PASSED,
+        ProfileState.VISUAL_VETO_FAILED: ProfileState.CALIBRATION_PASSED,
+        ProfileState.QUALITY_GUARDRAIL_PASSED: ProfileState.VISUAL_VETO_PASSED,
+        ProfileState.QUALITY_GUARDRAIL_FAILED: ProfileState.VISUAL_VETO_PASSED,
+        ProfileState.INDEPENDENT_PRIVACY_PASSED: ProfileState.QUALITY_GUARDRAIL_PASSED,
+        ProfileState.INDEPENDENT_PRIVACY_FAILED: ProfileState.QUALITY_GUARDRAIL_PASSED,
+    }
+    record = _profile(sources[target])
+    if target is ProfileState.BUILT or target is ProfileState.BUILD_FAILED:
+        return lambda: transition_profile(record, target, build_result_sha256=witness)
+    if target is ProfileState.GEOMETRY_FRESH:
+        return lambda: transition_profile(
+            record,
+            target,
+            canonical_sha256=SHA_B,
+            geometry_witness_sha256=SHA_C,
+            w_max=17,
+            h_max=11,
+            geometry_result_sha256=witness,
+        )
+    if target is ProfileState.CALIBRATION_PASSED:
+        return lambda: transition_profile(
+            record,
+            target,
+            calibration_result_sha256=witness,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    if target is ProfileState.CALIBRATION_FAILED:
+        return lambda: transition_profile(record, target, calibration_result_sha256=witness)
+    if target is ProfileState.VISUAL_VETO_PASSED:
+        return lambda: transition_profile(
+            record,
+            target,
+            visual_veto_result_sha256=witness,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    if target is ProfileState.VISUAL_VETO_FAILED:
+        return lambda: transition_profile(record, target, visual_veto_result_sha256=witness)
+    if target is ProfileState.QUALITY_GUARDRAIL_PASSED:
+        return lambda: transition_profile(
+            record,
+            target,
+            quality_guardrail_result_sha256=witness,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    if target is ProfileState.QUALITY_GUARDRAIL_FAILED:
+        return lambda: transition_profile(record, target, quality_guardrail_result_sha256=witness)
+    if target is ProfileState.INDEPENDENT_PRIVACY_PASSED:
+        return lambda: transition_profile(
+            record,
+            target,
+            independent_privacy_result_sha256=witness,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    return lambda: transition_profile(record, target, independent_privacy_result_sha256=witness)
+
+
+def _promotion_witness_call(
+    target: PromotionState, witness: str | None
+) -> Callable[[], PromotionRecord]:
+    sources = {
+        PromotionState.PROMOTABLE: PromotionState.NOT_SELECTED,
+        PromotionState.PROMOTED: PromotionState.PROMOTABLE,
+        PromotionState.PROMOTION_FAILED: PromotionState.PROMOTABLE,
+        PromotionState.H3_REAUDITED: PromotionState.H3_REAUDIT_PENDING,
+        PromotionState.H3_REAUDIT_FAILED: PromotionState.H3_REAUDIT_PENDING,
+        PromotionState.END_TO_END_REPORTED: PromotionState.H3_REAUDITED,
+        PromotionState.END_TO_END_FAILED: PromotionState.H3_REAUDITED,
+        PromotionState.FULL_POOL_AUDITED: PromotionState.END_TO_END_REPORTED,
+    }
+    record = _promotion(sources[target])
+    if target is PromotionState.PROMOTABLE:
+        return lambda: transition_promotion(
+            record,
+            target,
+            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+            snapshot_result_sha256=witness,
+        )
+    if target is PromotionState.PROMOTED or target is PromotionState.PROMOTION_FAILED:
+        return lambda: transition_promotion(record, target, promotion_result_sha256=witness)
+    if target is PromotionState.H3_REAUDITED or target is PromotionState.H3_REAUDIT_FAILED:
+        return lambda: transition_promotion(record, target, h3_result_sha256=witness)
+    if target in {PromotionState.END_TO_END_REPORTED, PromotionState.END_TO_END_FAILED}:
+        return lambda: transition_promotion(record, target, end_to_end_result_sha256=witness)
+    return lambda: transition_promotion(record, target, full_pool_result_sha256=witness)
+
+
+def _batch_witness_call(target: BatchState, witness: str | None) -> Callable[[], BatchRecord]:
+    sources = {
+        BatchState.OPENED: BatchState.SEALED,
+        BatchState.REVIEW_IN_PROGRESS: BatchState.OPENED,
+        BatchState.COMPLETED_PASS: BatchState.REVIEW_IN_PROGRESS,
+        BatchState.COMPLETED_FAIL: BatchState.REVIEW_IN_PROGRESS,
+    }
+    record = _batch(sources[target])
+    if target is BatchState.OPENED:
+        return lambda: transition_batch(
+            record,
+            target,
+            batches=(record,),
+            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+            open_result_sha256=witness,
+        )
+    if target is BatchState.REVIEW_IN_PROGRESS:
+        return lambda: transition_batch(record, target, review_result_sha256=witness)
+    return lambda: transition_batch(record, target, completion_result_sha256=witness)
+
+
+WITNESS_CASES = [
+    *(
+        pytest.param(_campaign_witness_call, target, id=f"campaign-{target.value}")
+        for target in CAMPAIGN_RESULT_FIELDS
+    ),
+    *(
+        pytest.param(_profile_witness_call, target, id=f"profile-{target.value}")
+        for target in PROFILE_RESULT_FIELDS
+    ),
+    *(
+        pytest.param(_promotion_witness_call, target, id=f"promotion-{target.value}")
+        for target in PROMOTION_RESULT_FIELDS
+    ),
+    *(
+        pytest.param(_batch_witness_call, target, id=f"batch-{target.value}")
+        for target in BATCH_RESULT_FIELDS
+    ),
+]
+
+
+def _call_invalid_witness(
+    factory: object, target: object, witness: str | None
+) -> CampaignRecord | ProfileRecord | PromotionRecord | BatchRecord:
+    if factory is _campaign_witness_call and isinstance(target, CampaignState):
+        return _campaign_witness_call(target, witness)()
+    if factory is _profile_witness_call and isinstance(target, ProfileState):
+        return _profile_witness_call(target, witness)()
+    if factory is _promotion_witness_call and isinstance(target, PromotionState):
+        return _promotion_witness_call(target, witness)()
+    if factory is _batch_witness_call and isinstance(target, BatchState):
+        return _batch_witness_call(target, witness)()
+    raise AssertionError("несогласованный witness case")
+
+
+@pytest.mark.parametrize(("factory", "target"), WITNESS_CASES)
+@pytest.mark.parametrize("witness", INVALID_HASHES)
+def test_every_evidence_milestone_rejects_missing_empty_or_malformed_sha256(
+    factory: object,
+    target: object,
+    witness: str | None,
+) -> None:
+    with pytest.raises(CalibrationStateError, match="SHA256"):
+        _call_invalid_witness(factory, target, witness)
+
+
+def _positive_profile_transition(
+    record: ProfileRecord, target: ProfileState, result_sha256: str = SHA_D
+) -> ProfileRecord:
+    if target is ProfileState.CALIBRATION_PASSED:
+        return transition_profile(
+            record,
+            target,
+            calibration_result_sha256=result_sha256,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    if target is ProfileState.VISUAL_VETO_PASSED:
+        return transition_profile(
+            record,
+            target,
+            visual_veto_result_sha256=result_sha256,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    if target is ProfileState.QUALITY_GUARDRAIL_PASSED:
+        return transition_profile(
+            record,
+            target,
+            quality_guardrail_result_sha256=result_sha256,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    if target is ProfileState.INDEPENDENT_PRIVACY_PASSED:
+        return transition_profile(
+            record,
+            target,
+            independent_privacy_result_sha256=result_sha256,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
+    raise AssertionError(f"{target.value} не является положительным переходом")
+
+
+@pytest.mark.parametrize(
+    ("target", "field"),
+    [
+        (ProfileState.CALIBRATION_PASSED, "calibration_result_sha256"),
+        (ProfileState.VISUAL_VETO_PASSED, "visual_veto_result_sha256"),
+        (ProfileState.QUALITY_GUARDRAIL_PASSED, "quality_guardrail_result_sha256"),
+        (ProfileState.INDEPENDENT_PRIVACY_PASSED, "independent_privacy_result_sha256"),
+    ],
+)
+def test_positive_profile_transitions_require_current_geometry_and_retain_results(
+    target: ProfileState, field: str
+) -> None:
+    sources = {
+        ProfileState.CALIBRATION_PASSED: ProfileState.GEOMETRY_FRESH,
+        ProfileState.VISUAL_VETO_PASSED: ProfileState.CALIBRATION_PASSED,
+        ProfileState.QUALITY_GUARDRAIL_PASSED: ProfileState.VISUAL_VETO_PASSED,
+        ProfileState.INDEPENDENT_PRIVACY_PASSED: ProfileState.QUALITY_GUARDRAIL_PASSED,
+    }
+    record = _profile(sources[target])
+    result = _positive_profile_transition(record, target)
+
+    assert getattr(result, field) == SHA_D
+    assert result.geometry_witness_sha256 == SHA_C
+    assert result.canonical_sha256 == SHA_B
+
+
+@pytest.mark.parametrize(
+    (
+        "current_canonical_sha256",
+        "current_geometry_witness_sha256",
+        "current_w_max",
+        "current_h_max",
+    ),
+    [
+        (SHA_D, SHA_C, 17, 11),
+        (SHA_B, SHA_D, 17, 11),
+        (SHA_B, SHA_C, 18, 11),
+        (SHA_B, SHA_C, 17, 12),
+    ],
+)
+def test_later_profile_pass_rejects_current_geometry_mismatch(
+    current_canonical_sha256: str,
+    current_geometry_witness_sha256: str,
+    current_w_max: int,
+    current_h_max: int,
+) -> None:
+    record = _profile(ProfileState.CALIBRATION_PASSED)
+
+    with pytest.raises(CalibrationStateError, match="текущей геометрии"):
+        transition_profile(
+            record,
+            ProfileState.VISUAL_VETO_PASSED,
+            visual_veto_result_sha256=SHA_D,
+            current_canonical_sha256=current_canonical_sha256,
+            current_geometry_witness_sha256=current_geometry_witness_sha256,
+            current_w_max=current_w_max,
+            current_h_max=current_h_max,
+        )
+    assert record == _profile(ProfileState.CALIBRATION_PASSED)
+
+
+def test_failed_profile_milestones_do_not_require_current_geometry() -> None:
+    calibration = transition_profile(
+        _profile(ProfileState.GEOMETRY_FRESH),
+        ProfileState.CALIBRATION_FAILED,
+        calibration_result_sha256=SHA_D,
+    )
+    visual = transition_profile(
+        _profile(ProfileState.CALIBRATION_PASSED),
+        ProfileState.VISUAL_VETO_FAILED,
+        visual_veto_result_sha256=SHA_D,
+    )
+    quality = transition_profile(
+        _profile(ProfileState.VISUAL_VETO_PASSED),
+        ProfileState.QUALITY_GUARDRAIL_FAILED,
+        quality_guardrail_result_sha256=SHA_D,
+    )
+    privacy = transition_profile(
+        _profile(ProfileState.QUALITY_GUARDRAIL_PASSED),
+        ProfileState.INDEPENDENT_PRIVACY_FAILED,
+        independent_privacy_result_sha256=SHA_D,
+    )
+
+    assert (
+        calibration.state,
+        visual.state,
+        quality.state,
+        privacy.state,
+    ) == (
+        ProfileState.CALIBRATION_FAILED,
+        ProfileState.VISUAL_VETO_FAILED,
+        ProfileState.QUALITY_GUARDRAIL_FAILED,
+        ProfileState.INDEPENDENT_PRIVACY_FAILED,
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        ProfileState.GEOMETRY_FRESH,
         ProfileState.CALIBRATION_PASSED,
         ProfileState.VISUAL_VETO_PASSED,
         ProfileState.QUALITY_GUARDRAIL_PASSED,
         ProfileState.INDEPENDENT_PRIVACY_PASSED,
-    ):
-        with pytest.raises(CalibrationStateError, match="недопустимый переход профиля"):
-            transition_profile(stale, target)
+    ],
+)
+def test_every_geometry_dependent_positive_state_can_be_explicitly_invalidated(
+    source: ProfileState,
+) -> None:
+    record = _profile(source)
+
+    stale = transition_profile(record, ProfileState.GEOMETRY_STALE)
+
+    assert stale.state is ProfileState.GEOMETRY_STALE
+    assert stale.geometry_witness_sha256 == SHA_C
+    assert record.state is source
 
 
-def test_promotion_authorization_requires_independent_pass_and_copies_hashes() -> None:
-    promotion = _promotion(PromotionState.NOT_SELECTED)
-    passed = _profile(ProfileState.INDEPENDENT_PRIVACY_PASSED)
+@pytest.mark.parametrize(
+    (
+        "current_canonical_sha256",
+        "current_geometry_witness_sha256",
+        "current_w_max",
+        "current_h_max",
+    ),
+    [
+        (SHA_D, SHA_C, 17, 11),
+        (SHA_B, SHA_D, 17, 11),
+        (SHA_B, SHA_C, 18, 11),
+        (SHA_B, SHA_C, 17, 12),
+    ],
+)
+def test_promotion_authorization_rejects_current_geometry_mismatch(
+    current_canonical_sha256: str,
+    current_geometry_witness_sha256: str,
+    current_w_max: int,
+    current_h_max: int,
+) -> None:
+    record = _promotion(PromotionState.NOT_SELECTED)
 
-    result = transition_promotion(promotion, PromotionState.PROMOTABLE, profile=passed)
+    with pytest.raises(CalibrationStateError, match="текущей геометрии"):
+        transition_promotion(
+            record,
+            PromotionState.PROMOTABLE,
+            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            snapshot_result_sha256=SHA_D,
+            current_canonical_sha256=current_canonical_sha256,
+            current_geometry_witness_sha256=current_geometry_witness_sha256,
+            current_w_max=current_w_max,
+            current_h_max=current_h_max,
+        )
 
-    assert result.profile_id == passed.profile_id
-    assert result.profile_sha256 == passed.profile_sha256
-    assert result.geometry_witness_sha256 == passed.geometry_witness_sha256
-    with pytest.raises(CalibrationStateError, match="independent_privacy_passed"):
-        transition_promotion(promotion, PromotionState.PROMOTABLE)
+
+def test_promotion_and_batch_open_require_independent_privacy_passed() -> None:
     for state in ProfileState:
         if state is ProfileState.INDEPENDENT_PRIVACY_PASSED:
             continue
+        profile = _profile(state)
         with pytest.raises(CalibrationStateError, match="independent_privacy_passed"):
-            transition_promotion(promotion, PromotionState.PROMOTABLE, profile=_profile(state))
+            transition_promotion(
+                _promotion(PromotionState.NOT_SELECTED),
+                PromotionState.PROMOTABLE,
+                profile=profile,
+                snapshot_result_sha256=SHA_D,
+                current_canonical_sha256=SHA_B,
+                current_geometry_witness_sha256=SHA_C,
+                current_w_max=17,
+                current_h_max=11,
+            )
+        with pytest.raises(CalibrationStateError, match="independent_privacy_passed"):
+            transition_batch(
+                _batch(BatchState.SEALED),
+                BatchState.OPENED,
+                batches=(_batch(BatchState.SEALED),),
+                profile=profile,
+                open_result_sha256=SHA_D,
+                current_canonical_sha256=SHA_B,
+                current_geometry_witness_sha256=SHA_C,
+                current_w_max=17,
+                current_h_max=11,
+            )
 
 
-def test_opening_batch_captures_profile_and_witness_hashes() -> None:
-    profile = _profile(ProfileState.INDEPENDENT_PRIVACY_PASSED)
-
-    opened = transition_batch(_batch(BatchState.SEALED), BatchState.OPENED, profile=profile)
-
-    assert opened.profile_id == profile.profile_id
-    assert opened.profile_sha256 == profile.profile_sha256
-    assert opened.geometry_witness_sha256 == profile.geometry_witness_sha256
-
-
-def test_opening_batch_requires_profile_with_geometry_witness() -> None:
+def test_promotion_and_batch_open_require_profile_argument() -> None:
+    with pytest.raises(CalibrationStateError, match="independent_privacy_passed"):
+        transition_promotion(
+            _promotion(PromotionState.NOT_SELECTED),
+            PromotionState.PROMOTABLE,
+            snapshot_result_sha256=SHA_D,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
     sealed = _batch(BatchState.SEALED)
-    missing_witness = _profile(ProfileState.BUILT)
-
-    with pytest.raises(CalibrationStateError, match="профиль со свидетелем"):
-        transition_batch(sealed, BatchState.OPENED)
-    with pytest.raises(CalibrationStateError, match="профиль со свидетелем"):
-        transition_batch(sealed, BatchState.OPENED, profile=missing_witness)
-
-
-def test_completed_batch_outcomes_are_terminal_and_retain_witness() -> None:
-    for completed in (BatchState.COMPLETED_PASS, BatchState.COMPLETED_FAIL):
-        record = _batch(completed)
-        assert record.geometry_witness_sha256 == WITNESS_SHA
-        for target in BatchState:
-            with pytest.raises(CalibrationStateError, match="недопустимый переход партии"):
-                transition_batch(record, target)
+    with pytest.raises(CalibrationStateError, match="independent_privacy_passed"):
+        transition_batch(
+            sealed,
+            BatchState.OPENED,
+            batches=(sealed,),
+            open_result_sha256=SHA_D,
+            current_canonical_sha256=SHA_B,
+            current_geometry_witness_sha256=SHA_C,
+            current_w_max=17,
+            current_h_max=11,
+        )
 
 
-def test_records_are_frozen_and_slotted() -> None:
+@pytest.mark.parametrize("profile_id", ["", "   "])
+def test_profile_rejects_empty_id(profile_id: str) -> None:
+    with pytest.raises(CalibrationStateError, match="profile_id"):
+        _profile(ProfileState.DECLARED, profile_id=profile_id)
+
+
+@pytest.mark.parametrize("profile_sha256", INVALID_HASHES)
+def test_profile_rejects_missing_or_malformed_identity_hash(
+    profile_sha256: str | None,
+) -> None:
+    with pytest.raises(CalibrationStateError, match="profile_sha256"):
+        ProfileRecord(
+            profile_id="profile-a",
+            state=ProfileState.DECLARED,
+            profile_sha256=profile_sha256 or "",
+        )
+
+
+@pytest.mark.parametrize("number", [0, -1, True])
+def test_batch_rejects_invalid_number(number: int) -> None:
+    with pytest.raises(CalibrationStateError, match="number"):
+        BatchRecord(number=number, state=BatchState.SEALED, batch_sha256=SHA_A)
+
+
+@pytest.mark.parametrize("batch_sha256", INVALID_HASHES)
+def test_batch_rejects_missing_or_malformed_identity_hash(batch_sha256: str | None) -> None:
+    with pytest.raises(CalibrationStateError, match="batch_sha256"):
+        BatchRecord(number=1, state=BatchState.SEALED, batch_sha256=batch_sha256 or "")
+
+
+@pytest.mark.parametrize(
+    ("w_max", "h_max"),
+    [(-1, 11), (17, -1), (True, 11), (17, False), (None, 11), (17, None)],
+)
+def test_geometry_fresh_rejects_invalid_dimensions(w_max: int | None, h_max: int | None) -> None:
+    with pytest.raises(CalibrationStateError, match="w_max/h_max"):
+        transition_profile(
+            _profile(ProfileState.BUILT),
+            ProfileState.GEOMETRY_FRESH,
+            canonical_sha256=SHA_B,
+            geometry_witness_sha256=SHA_C,
+            geometry_result_sha256=SHA_D,
+            w_max=w_max,
+            h_max=h_max,
+        )
+
+
+def test_records_are_frozen_slotted_and_transition_retains_prior_witnesses() -> None:
     records = (
         _campaign(CampaignState.DRAFT),
-        _profile(ProfileState.DECLARED),
-        _promotion(PromotionState.NOT_SELECTED),
-        _batch(BatchState.SEALED),
+        _profile(ProfileState.GEOMETRY_FRESH),
+        _promotion(PromotionState.PROMOTABLE),
+        _batch(BatchState.OPENED),
     )
-
     for record in records:
         assert not hasattr(record, "__dict__")
         with pytest.raises(FrozenInstanceError):
             record.state = record.state  # type: ignore[misc]
+
+    passed = transition_profile(
+        records[1],
+        ProfileState.CALIBRATION_PASSED,
+        calibration_result_sha256=SHA_D,
+        current_canonical_sha256=SHA_B,
+        current_geometry_witness_sha256=SHA_C,
+        current_w_max=17,
+        current_h_max=11,
+    )
+    assert passed.build_result_sha256 == SHA_D
+    assert passed.geometry_result_sha256 == SHA_E
+    assert passed.calibration_result_sha256 == SHA_D
+    assert records[1].state is ProfileState.GEOMETRY_FRESH
