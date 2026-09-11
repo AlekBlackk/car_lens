@@ -6,6 +6,15 @@ from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 FrameOutcome: TypeAlias = Literal["accepted", "rejected"]
+HardGate: TypeAlias = Literal[
+    "provenance_workspace_freshness",
+    "unresolved_empty",
+    "current_geometry_witness",
+    "structural_actual_tile_preflight",
+    "full_canonical_coverage",
+    "strict_calibration_review",
+    "report_arithmetic",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,3 +43,54 @@ class ProfileMetrics:
     new_over_redacted: int
     changed_crops: int
     rejects: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ConfidenceMargin:
+    """Запас порога детектора до соседней границы и слабейшего истинного номера."""
+
+    to_next_lower: float
+    to_min_true: float
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileScore:
+    """Раздельные Pareto-оси профиля без скалярной свёртки."""
+
+    profile_id: str
+    ssd_margin: ConfidenceMargin
+    yolo_margin: ConfidenceMargin
+    median_delta: float
+    p95_delta: float
+    above_quarter: int
+    new_over_redacted: int
+    changed_crops: int
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileGateReport:
+    """Факты семи упорядоченных калибровочных гейтов одного профиля."""
+
+    profile_id: str
+    provenance_fresh: bool
+    unresolved_count: int
+    geometry_current: bool
+    geometry_preflight_passed: bool
+    canonical_coverage_complete: bool
+    strict_leaks: int
+    unreviewable_accepted: int
+    report_arithmetic_closed: bool
+    canonical_sha256: str | None = None
+    w_max: int | None = None
+    h_max: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class VisualVeto:
+    """Трассируемая дисквалификация профиля по уничтоженному признаку модели."""
+
+    profile_id: str
+    sha256: str | None
+    plate_id: str | None
+    destroyed_feature: str
+    reason: str

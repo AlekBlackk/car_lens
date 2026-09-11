@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import math
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, fields
 from pathlib import Path
 from typing import cast
@@ -14,10 +14,21 @@ import cv2
 import numpy as np
 
 from pipeline.harvest.run import BLACK_PIXEL_THRESHOLD, MAX_BLACK_PIXEL_FRAC
+from pipeline.redaction_calibration.geometry import (
+    CanonicalPlate,
+    DetectorObservation,
+    GeometryWitness,
+    box_fits_actual_tile,
+    tile_guarantee,
+)
 from pipeline.redaction_calibration.model import (
+    ConfidenceMargin,
     FrameOutcome,
     FrameProfileResult,
+    HardGate,
+    ProfileGateReport,
     ProfileMetrics,
+    ProfileScore,
 )
 
 
@@ -119,3 +130,162 @@ def load_frame_profile_results(path: Path) -> list[FrameProfileResult]:
                 )
             )
     return loaded
+
+
+_HARD_GATES: tuple[tuple[HardGate, Callable[[ProfileGateReport], bool]], ...] = (
+    ("provenance_workspace_freshness", lambda row: row.provenance_fresh),
+    ("unresolved_empty", lambda row: row.unresolved_count == 0),
+    ("current_geometry_witness", lambda row: row.geometry_current),
+    ("structural_actual_tile_preflight", lambda row: row.geometry_preflight_passed),
+    ("full_canonical_coverage", lambda row: row.canonical_coverage_complete),
+    (
+        "strict_calibration_review",
+        lambda row: row.strict_leaks == 0 and row.unreviewable_accepted == 0,
+    ),
+    ("report_arithmetic", lambda row: row.report_arithmetic_closed),
+)
+
+
+def confidence_breakpoints(
+    observations: Sequence[DetectorObservation], detector: str
+) -> tuple[float, ...]:
+    """Вернуть только наблюдавшиеся уникальные confidence выбранного детектора."""
+    if not detector.strip():
+        raise ValueError("detector должен быть непустым")
+    return tuple(
+        sorted({float(row.confidence) for row in observations if row.detector == detector})
+    )
+
+
+def confidence_margin(
+    selected: float,
+    breakpoints: Sequence[float],
+    *,
+    min_true_confidence: float,
+) -> ConfidenceMargin:
+    """Вычислить запас выбранного breakpoint без произвольного шага между наблюдениями."""
+    ordered = tuple(sorted(set(float(value) for value in breakpoints)))
+    if selected not in ordered:
+        raise ValueError("выбранный confidence должен быть наблюдавшимся breakpoint")
+    index = ordered.index(selected)
+    if selected > min_true_confidence:
+        raise ValueError("порог выше confidence слабейшего истинного номера")
+    lower = ordered[index - 1] if index else 0.0
+    return ConfidenceMargin(
+        to_next_lower=selected - lower,
+        to_min_true=min_true_confidence - selected,
+    )
+
+
+def first_failed_gate(report: ProfileGateReport) -> HardGate | None:
+    """Вернуть первый провал строго в предзарегистрированном порядке семи гейтов."""
+    for name, predicate in _HARD_GATES:
+        if not predicate(report):
+            return name
+    return None
+
+
+def geometry_preflight(
+    tile: int,
+    overlap: float,
+    witness: GeometryWitness,
+    canonical: Sequence[CanonicalPlate],
+    frame_sizes: Mapping[str, tuple[int, int]],
+) -> bool:
+    """Проверить структурную границу и фактические origins каждого истинного номера."""
+    if overlap != 0.25:
+        return False
+    if tile_guarantee(tile, overlap) < max(witness.w_max, witness.h_max):
+        return False
+    true_plates = [plate for plate in canonical if plate.verdict == "true_plate"]
+    try:
+        return bool(true_plates) and all(
+            box_fits_actual_tile(frame_sizes[plate.sha256], plate, tile, overlap)
+            for plate in true_plates
+        )
+    except KeyError:
+        return False
+
+
+def dominates(left: ProfileScore, right: ProfileScore) -> bool:
+    """Проверить строгое Pareto-доминирование по отдельным margin и cost осям."""
+    left_margins = (
+        left.ssd_margin.to_next_lower,
+        left.ssd_margin.to_min_true,
+        left.yolo_margin.to_next_lower,
+        left.yolo_margin.to_min_true,
+    )
+    right_margins = (
+        right.ssd_margin.to_next_lower,
+        right.ssd_margin.to_min_true,
+        right.yolo_margin.to_next_lower,
+        right.yolo_margin.to_min_true,
+    )
+    left_costs = (
+        left.median_delta,
+        left.p95_delta,
+        left.above_quarter,
+        left.new_over_redacted,
+        left.changed_crops,
+    )
+    right_costs = (
+        right.median_delta,
+        right.p95_delta,
+        right.above_quarter,
+        right.new_over_redacted,
+        right.changed_crops,
+    )
+    no_worse = all(a >= b for a, b in zip(left_margins, right_margins, strict=True)) and all(
+        a <= b for a, b in zip(left_costs, right_costs, strict=True)
+    )
+    strictly_better = any(a > b for a, b in zip(left_margins, right_margins, strict=True)) or any(
+        a < b for a, b in zip(left_costs, right_costs, strict=True)
+    )
+    return no_worse and strictly_better
+
+
+def pareto_frontier(scores: Sequence[ProfileScore]) -> tuple[ProfileScore, ...]:
+    """Оставить недоминируемые профили; равные строки не дедуплицировать."""
+    return tuple(
+        sorted(
+            (
+                score
+                for index, score in enumerate(scores)
+                if not any(
+                    other_index != index and dominates(other, score)
+                    for other_index, other in enumerate(scores)
+                )
+            ),
+            key=lambda row: row.profile_id,
+        )
+    )
+
+
+def rank_profiles(
+    candidates: Sequence[tuple[ProfileGateReport, ProfileScore]],
+) -> tuple[ProfileScore, ...]:
+    """Пустить в Pareto только профили, прошедшие семь гейтов."""
+    survivors: list[ProfileScore] = []
+    for report, score in candidates:
+        if report.profile_id != score.profile_id:
+            raise ValueError("gate report и score принадлежат разным профилям")
+        if first_failed_gate(report) is None:
+            survivors.append(score)
+    return pareto_frontier(survivors)
+
+
+def stale_profile_ids(
+    reports: Sequence[ProfileGateReport], current: GeometryWitness
+) -> tuple[str, ...]:
+    """Назвать только отчёты, не совпадающие с текущими canonical SHA и W_max/H_max."""
+    return tuple(
+        sorted(
+            report.profile_id
+            for report in reports
+            if (
+                report.canonical_sha256 != current.canonical_sha256
+                or report.w_max != current.w_max
+                or report.h_max != current.h_max
+            )
+        )
+    )
