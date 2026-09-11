@@ -615,9 +615,11 @@ def transition_batch(
     if target is BatchState.OPENED:
         open_result = _require_sha256("open_result_sha256", open_result_sha256)
         _validate_batch_open(record, batches)
-        if profile is None or profile.state is not ProfileState.INDEPENDENT_PRIVACY_PASSED:
+        # Партия и есть источник independent-вердикта (спека §10.2), поэтому требовать здесь
+        # `independent_privacy_passed` значило бы требовать результат самой этой партии.
+        if profile is None or profile.state is not ProfileState.QUALITY_GUARDRAIL_PASSED:
             raise CalibrationStateError(
-                "партия открывается только профилем в independent_privacy_passed"
+                "партия открывается только профилем в quality_guardrail_passed"
             )
         _require_current_geometry(
             profile,

@@ -337,7 +337,7 @@ def _assert_batch_transition(record: BatchRecord, target: BatchState) -> BatchRe
             record,
             target,
             batches=(record,),
-            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            profile=_profile(ProfileState.QUALITY_GUARDRAIL_PASSED),
             current_canonical_sha256=SHA_B,
             current_geometry_witness_sha256=SHA_C,
             current_w_max=17,
@@ -444,7 +444,7 @@ def test_batch_open_rejects_another_active_batch(active: BatchState) -> None:
             second,
             BatchState.OPENED,
             batches=(first, second),
-            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            profile=_profile(ProfileState.QUALITY_GUARDRAIL_PASSED),
             open_result_sha256=SHA_D,
             current_canonical_sha256=SHA_B,
             current_geometry_witness_sha256=SHA_C,
@@ -473,7 +473,7 @@ def test_second_batch_open_requires_failed_prior_history(
             second,
             BatchState.OPENED,
             batches=(first, second),
-            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            profile=_profile(ProfileState.QUALITY_GUARDRAIL_PASSED),
             open_result_sha256=SHA_D,
             current_canonical_sha256=SHA_B,
             current_geometry_witness_sha256=SHA_C,
@@ -490,7 +490,7 @@ def test_second_batch_opens_after_prior_failure_without_mutating_history() -> No
         second,
         BatchState.OPENED,
         batches=(first, second),
-        profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+        profile=_profile(ProfileState.QUALITY_GUARDRAIL_PASSED),
         open_result_sha256=SHA_D,
         current_canonical_sha256=SHA_B,
         current_geometry_witness_sha256=SHA_C,
@@ -513,7 +513,7 @@ def test_batch_open_rejects_nonfailed_lower_number_even_when_it_is_not_prior_in_
             target,
             BatchState.OPENED,
             batches=(target, future_active),
-            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            profile=_profile(ProfileState.QUALITY_GUARDRAIL_PASSED),
             open_result_sha256=SHA_D,
             current_canonical_sha256=SHA_B,
             current_geometry_witness_sha256=SHA_C,
@@ -530,7 +530,7 @@ def test_batch_open_rejects_missing_lower_batch_number() -> None:
             target,
             BatchState.OPENED,
             batches=(target,),
-            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            profile=_profile(ProfileState.QUALITY_GUARDRAIL_PASSED),
             open_result_sha256=SHA_D,
             current_canonical_sha256=SHA_B,
             current_geometry_witness_sha256=SHA_C,
@@ -541,7 +541,7 @@ def test_batch_open_rejects_missing_lower_batch_number() -> None:
 
 def test_batch_open_rejects_missing_target_or_duplicate_numbers() -> None:
     target = _batch(BatchState.SEALED, 2)
-    profile = _profile(ProfileState.INDEPENDENT_PRIVACY_PASSED)
+    profile = _profile(ProfileState.QUALITY_GUARDRAIL_PASSED)
 
     for batches in ((_batch(BatchState.SEALED, 1),), (target, target)):
         with pytest.raises(CalibrationStateError, match="история партий"):
@@ -828,7 +828,7 @@ def _batch_witness_call(target: BatchState, witness: str | None) -> Callable[[],
             record,
             target,
             batches=(record,),
-            profile=_profile(ProfileState.INDEPENDENT_PRIVACY_PASSED),
+            profile=_profile(ProfileState.QUALITY_GUARDRAIL_PASSED),
             current_canonical_sha256=SHA_B,
             current_geometry_witness_sha256=SHA_C,
             current_w_max=17,
@@ -1084,34 +1084,50 @@ def test_promotion_authorization_rejects_current_geometry_mismatch(
         )
 
 
-def test_promotion_and_batch_open_require_independent_privacy_passed() -> None:
+def test_promotion_requires_independent_privacy_passed() -> None:
     for state in ProfileState:
         if state is ProfileState.INDEPENDENT_PRIVACY_PASSED:
             continue
-        profile = _profile(state)
         with pytest.raises(CalibrationStateError, match="independent_privacy_passed"):
             transition_promotion(
                 _promotion(PromotionState.NOT_SELECTED),
                 PromotionState.PROMOTABLE,
-                profile=profile,
+                profile=_profile(state),
                 snapshot_result_sha256=SHA_D,
                 current_canonical_sha256=SHA_B,
                 current_geometry_witness_sha256=SHA_C,
                 current_w_max=17,
                 current_h_max=11,
             )
-        with pytest.raises(CalibrationStateError, match="independent_privacy_passed"):
-            transition_batch(
-                _batch(BatchState.SEALED),
-                BatchState.OPENED,
-                batches=(_batch(BatchState.SEALED),),
-                profile=profile,
-                open_result_sha256=SHA_D,
-                current_canonical_sha256=SHA_B,
-                current_geometry_witness_sha256=SHA_C,
-                current_w_max=17,
-                current_h_max=11,
-            )
+
+
+def _open_first_batch(profile: ProfileRecord) -> BatchRecord:
+    sealed = _batch(BatchState.SEALED)
+    return transition_batch(
+        sealed,
+        BatchState.OPENED,
+        batches=(sealed,),
+        profile=profile,
+        open_result_sha256=SHA_D,
+        current_canonical_sha256=SHA_B,
+        current_geometry_witness_sha256=SHA_C,
+        current_w_max=17,
+        current_h_max=11,
+    )
+
+
+def test_batch_open_requires_quality_guardrail_passed_profile() -> None:
+    """Партия — источник independent-вердикта, поэтому открывает её guardrail-профиль."""
+    opened = _open_first_batch(_profile(ProfileState.QUALITY_GUARDRAIL_PASSED))
+
+    assert opened.state is BatchState.OPENED
+    assert opened.profile_id == "profile-a"
+
+    for state in ProfileState:
+        if state is ProfileState.QUALITY_GUARDRAIL_PASSED:
+            continue
+        with pytest.raises(CalibrationStateError, match="quality_guardrail_passed"):
+            _open_first_batch(_profile(state))
 
 
 def test_promotion_and_batch_open_require_profile_argument() -> None:
@@ -1126,7 +1142,7 @@ def test_promotion_and_batch_open_require_profile_argument() -> None:
             current_h_max=11,
         )
     sealed = _batch(BatchState.SEALED)
-    with pytest.raises(CalibrationStateError, match="independent_privacy_passed"):
+    with pytest.raises(CalibrationStateError, match="quality_guardrail_passed"):
         transition_batch(
             sealed,
             BatchState.OPENED,
