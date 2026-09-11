@@ -11,8 +11,10 @@ import numpy as np
 import pytest
 from PIL import Image, ImageChops, ImageFont
 
+from pipeline.redaction_calibration.geometry import GeometryWitness
 from pipeline.redaction_calibration.model import (
     ConfidenceMargin,
+    ProfileGateReport,
     ProfileScore,
     VisualVeto,
 )
@@ -20,6 +22,7 @@ from scripts.evaluate_redaction_profiles import (
     ChangedCrop,
     apply_visual_vetoes,
     load_visual_vetoes,
+    main,
     stage_changed_crops,
     write_campaign_artifacts,
     write_visual_vetoes,
@@ -36,6 +39,29 @@ def _score(profile_id: str, *, changed: int = 1) -> ProfileScore:
         above_quarter=0,
         new_over_redacted=0,
         changed_crops=changed,
+    )
+
+
+def _gate_report(
+    profile_id: str,
+    *,
+    canonical_sha256: str = "c" * 64,
+    w_max: int = 160,
+    h_max: int = 50,
+) -> ProfileGateReport:
+    return ProfileGateReport(
+        profile_id=profile_id,
+        provenance_fresh=True,
+        unresolved_count=0,
+        geometry_current=True,
+        geometry_preflight_passed=True,
+        canonical_coverage_complete=True,
+        strict_leaks=0,
+        unreviewable_accepted=0,
+        report_arithmetic_closed=True,
+        canonical_sha256=canonical_sha256,
+        w_max=w_max,
+        h_max=h_max,
     )
 
 
@@ -105,6 +131,10 @@ def test_visual_veto_требует_уничтоженный_признак_и_�
             path,
             [VisualVeto("profile-a", "a" * 64, None, "badge", "косметика")],
         )
+    write_visual_vetoes(
+        path,
+        [VisualVeto("profile-a", "a" * 64, None, "badge", "заливка скрыла эмблему")],
+    )
 
 
 def test_veto_только_удаляет_профиль_и_ledger_roundtrip_строгий(tmp_path: Path) -> None:
@@ -150,6 +180,138 @@ def test_single_survivor_пишет_явный_результат_без_selecti
         "profile": asdict(_score("profile-a"))
     }
     assert not (tmp_path / "selection_required.json").exists()
+
+
+def test_cli_пишет_candidates_frontier_stale_и_changed_views(tmp_path: Path) -> None:
+    candidates = tmp_path / "candidates.json"
+    candidates.write_text(
+        json.dumps(
+            [
+                {
+                    "report": asdict(_gate_report("profile-fresh")),
+                    "score": asdict(_score("profile-fresh")),
+                },
+                {
+                    "report": asdict(_gate_report("profile-stale", canonical_sha256="d" * 64)),
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    witness = tmp_path / "witness.json"
+    witness.write_text(
+        json.dumps(asdict(GeometryWitness(160, 50, "c" * 64))),
+        encoding="utf-8",
+    )
+    unresolved = tmp_path / "unresolved.csv"
+    unresolved.write_text("link_id,observation_id,plate_id,reason\n", encoding="utf-8")
+    vetoes = tmp_path / "vetoes.csv"
+    write_visual_vetoes(vetoes, [])
+    source = tmp_path / "changed.jpg"
+    Image.new("RGB", (180, 100), "red").save(source)
+    changed = tmp_path / "changed.csv"
+    with changed.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=("profile_id", "frame_id", "sha256", "source"),
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "profile_id": "profile-fresh",
+                "frame_id": "frame-001",
+                "sha256": "a" * 64,
+                "source": source,
+            }
+        )
+    out = tmp_path / "campaign"
+    views = tmp_path / "views"
+
+    assert (
+        main(
+            [
+                "--candidates",
+                str(candidates),
+                "--current-witness",
+                str(witness),
+                "--unresolved",
+                str(unresolved),
+                "--vetoes",
+                str(vetoes),
+                "--changed-crops",
+                str(changed),
+                "--views",
+                str(views),
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+
+    candidate_rows = json.loads((out / "candidate_profiles.json").read_text(encoding="utf-8"))
+    assert [row["profile_id"] for row in candidate_rows] == ["profile-fresh", "profile-stale"]
+    assert candidate_rows[0]["failed_gate"] is None
+    assert candidate_rows[1]["failed_gate"] == "current_geometry_witness"
+    assert json.loads((out / "geometry_stale.json").read_text(encoding="utf-8")) == {
+        "profile_ids": ["profile-stale"]
+    }
+    assert json.loads((out / "pareto.json").read_text(encoding="utf-8")) == [
+        asdict(_score("profile-fresh"))
+    ]
+    assert (views / "profile-fresh__frame-001.png").is_file()
+
+
+def test_cli_отвергает_неполный_staging_changed_crops(tmp_path: Path) -> None:
+    candidates = tmp_path / "candidates.json"
+    candidates.write_text(
+        json.dumps(
+            [
+                {
+                    "report": asdict(_gate_report("profile-a")),
+                    "score": asdict(_score("profile-a", changed=2)),
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    witness = tmp_path / "witness.json"
+    witness.write_text(
+        json.dumps(asdict(GeometryWitness(160, 50, "c" * 64))),
+        encoding="utf-8",
+    )
+    unresolved = tmp_path / "unresolved.csv"
+    unresolved.write_text("link_id,observation_id,plate_id,reason\n", encoding="utf-8")
+    vetoes = tmp_path / "vetoes.csv"
+    write_visual_vetoes(vetoes, [])
+    source = tmp_path / "changed.jpg"
+    Image.new("RGB", (180, 100), "red").save(source)
+    changed = tmp_path / "changed.csv"
+    changed.write_text(
+        f"profile_id,frame_id,sha256,source\nprofile-a,frame-001,{'a' * 64},{source}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="changed_crops"):
+        main(
+            [
+                "--candidates",
+                str(candidates),
+                "--current-witness",
+                str(witness),
+                "--unresolved",
+                str(unresolved),
+                "--vetoes",
+                str(vetoes),
+                "--changed-crops",
+                str(changed),
+                "--views",
+                str(tmp_path / "views"),
+                "--out",
+                str(tmp_path / "campaign"),
+            ]
+        )
 
 
 def test_campaign_не_объявляет_annotations_resolved_с_unresolved(tmp_path: Path) -> None:

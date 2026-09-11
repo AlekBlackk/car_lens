@@ -142,7 +142,10 @@ _HARD_GATES: tuple[tuple[HardGate, Callable[[ProfileGateReport], bool]], ...] = 
         "strict_calibration_review",
         lambda row: row.strict_leaks == 0 and row.unreviewable_accepted == 0,
     ),
-    ("report_arithmetic", lambda row: row.report_arithmetic_closed),
+    (
+        "report_arithmetic",
+        lambda row: row.operational_errors == 0 and row.report_arithmetic_closed,
+    ),
 )
 
 
@@ -183,6 +186,22 @@ def first_failed_gate(report: ProfileGateReport) -> HardGate | None:
         if not predicate(report):
             return name
     return None
+
+
+def geometry_fixpoint_converged(
+    previous_plate_ids: set[str],
+    current_plate_ids: set[str],
+    previous_witness: GeometryWitness,
+    current_witness: GeometryWitness,
+    *,
+    unresolved_count: int,
+) -> bool:
+    """Подтвердить отсутствие новых canonical-объектов и расширения observed boundary."""
+    boundary_unchanged = (
+        previous_witness.w_max == current_witness.w_max
+        and previous_witness.h_max == current_witness.h_max
+    )
+    return unresolved_count == 0 and current_plate_ids == previous_plate_ids and boundary_unchanged
 
 
 def geometry_preflight(

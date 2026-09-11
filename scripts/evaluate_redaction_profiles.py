@@ -7,32 +7,31 @@ import csv
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageFont
 
-from pipeline.redaction_calibration.geometry import DetectorLink
-from pipeline.redaction_calibration.model import ProfileScore, VisualVeto
+from pipeline.redaction_calibration.geometry import DetectorLink, GeometryWitness
+from pipeline.redaction_calibration.measure import (
+    first_failed_gate,
+    rank_profiles,
+    stale_profile_ids,
+)
+from pipeline.redaction_calibration.model import (
+    ConfidenceMargin,
+    ProfileGateReport,
+    ProfileScore,
+    VisualVeto,
+)
 from scripts.stage_plate_leak_views import render_view
 
 VETO_COLUMNS = tuple(field.name for field in fields(VisualVeto))
 UNRESOLVED_COLUMNS = tuple(field.name for field in fields(DetectorLink))
 VIEW_COLUMNS = ("profile_id", "frame_id", "sha256", "file")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_NONCOSMETIC_TOKENS = (
-    "destroy",
-    "unread",
-    "recogn",
-    "model",
-    "feature",
-    "уничтож",
-    "нечита",
-    "распозна",
-    "модел",
-    "признак",
-)
+_COSMETIC_REASONS = frozenset(("cosmetic", "косметика", "только косметика"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,11 +112,7 @@ def _validate_veto(veto: VisualVeto) -> None:
     if not veto.destroyed_feature.strip():
         raise ValueError("veto требует destroyed_feature")
     reason = veto.reason.strip().casefold()
-    if (
-        len(reason) < 12
-        or reason == "косметика"
-        or not any(token in reason for token in _NONCOSMETIC_TOKENS)
-    ):
+    if len(reason) < 12 or reason in _COSMETIC_REASONS:
         raise ValueError("veto требует некосметическую причину дисквалификации")
 
 
@@ -201,8 +196,6 @@ def write_campaign_artifacts(
 
 
 def _score(document: Mapping[str, Any]) -> ProfileScore:
-    from pipeline.redaction_calibration.model import ConfidenceMargin
-
     return ProfileScore(
         profile_id=str(document["profile_id"]),
         ssd_margin=ConfidenceMargin(**document["ssd_margin"]),
@@ -215,26 +208,150 @@ def _score(document: Mapping[str, Any]) -> ProfileScore:
     )
 
 
+def _gate_report(document: Mapping[str, Any]) -> ProfileGateReport:
+    return ProfileGateReport(
+        profile_id=str(document["profile_id"]),
+        provenance_fresh=bool(document["provenance_fresh"]),
+        unresolved_count=int(document["unresolved_count"]),
+        geometry_current=bool(document["geometry_current"]),
+        geometry_preflight_passed=bool(document["geometry_preflight_passed"]),
+        canonical_coverage_complete=bool(document["canonical_coverage_complete"]),
+        strict_leaks=int(document["strict_leaks"]),
+        unreviewable_accepted=int(document["unreviewable_accepted"]),
+        report_arithmetic_closed=bool(document["report_arithmetic_closed"]),
+        operational_errors=int(document.get("operational_errors", 0)),
+        canonical_sha256=(
+            str(document["canonical_sha256"])
+            if document.get("canonical_sha256") is not None
+            else None
+        ),
+        w_max=int(document["w_max"]) if document.get("w_max") is not None else None,
+        h_max=int(document["h_max"]) if document.get("h_max") is not None else None,
+    )
+
+
+def _load_candidates(
+    path: Path, current: GeometryWitness
+) -> tuple[list[tuple[ProfileGateReport, ProfileScore | None]], tuple[str, ...]]:
+    documents = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(documents, list):
+        raise ValueError("candidates JSON должен быть массивом")
+    reports = [_gate_report(document["report"]) for document in documents]
+    stale = stale_profile_ids(reports, current)
+    stale_set = set(stale)
+    candidates: list[tuple[ProfileGateReport, ProfileScore | None]] = []
+    for document, report in zip(documents, reports, strict=True):
+        if report.profile_id in stale_set:
+            report = replace(report, geometry_current=False)
+        failed_gate = first_failed_gate(report)
+        score_document = document.get("score")
+        if failed_gate is None and score_document is None:
+            raise ValueError(f"прошедший профиль {report.profile_id} требует score")
+        score = _score(score_document) if score_document is not None else None
+        if score is not None and report.profile_id != score.profile_id:
+            raise ValueError("candidate report и score принадлежат разным профилям")
+        candidates.append((report, score))
+    return candidates, stale
+
+
+def _load_changed_crops(path: Path) -> list[ChangedCrop]:
+    columns = ("profile_id", "frame_id", "sha256", "source")
+    with path.open(encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        if tuple(reader.fieldnames or ()) != columns:
+            raise ValueError(f"неверные колонки changed crops: {reader.fieldnames}")
+        return [
+            ChangedCrop(
+                profile_id=row["profile_id"],
+                frame_id=row["frame_id"],
+                sha256=row["sha256"],
+                source=Path(row["source"]),
+            )
+            for row in reader
+        ]
+
+
+def _write_candidate_profiles(
+    path: Path, candidates: Sequence[tuple[ProfileGateReport, ProfileScore | None]]
+) -> None:
+    rows = [
+        {
+            "profile_id": report.profile_id,
+            "failed_gate": first_failed_gate(report),
+            "report": asdict(report),
+            "score": asdict(score) if score is not None else None,
+        }
+        for report, score in sorted(candidates, key=lambda item: item[0].profile_id)
+    ]
+    _write_json(path, rows)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Запись Pareto и visual-veto артефактов")
-    parser.add_argument("--frontier", type=Path, required=True, help="JSON-массив ProfileScore")
+    parser.add_argument("--candidates", type=Path, required=True)
+    parser.add_argument("--current-witness", type=Path, required=True)
     parser.add_argument("--unresolved", type=Path, required=True)
     parser.add_argument("--vetoes", type=Path, required=True)
+    parser.add_argument("--changed-crops", type=Path, required=True)
+    parser.add_argument("--views", type=Path, required=True)
+    parser.add_argument("--font", type=Path, default=None)
     parser.add_argument("--out", type=Path, required=True)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Перенести проверенные pure-результаты в строгие campaign-артефакты."""
+    """Отсечь stale/failed профили и записать полный набор campaign-артефактов."""
     arguments = build_parser().parse_args(argv)
-    frontier = [_score(row) for row in json.loads(arguments.frontier.read_text(encoding="utf-8"))]
+    witness_document = json.loads(arguments.current_witness.read_text(encoding="utf-8"))
+    current = GeometryWitness(
+        w_max=int(witness_document["w_max"]),
+        h_max=int(witness_document["h_max"]),
+        canonical_sha256=str(witness_document["canonical_sha256"]),
+    )
+    candidates, stale = _load_candidates(arguments.candidates, current)
     with arguments.unresolved.open(encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
         if tuple(reader.fieldnames or ()) != UNRESOLVED_COLUMNS:
             raise ValueError(f"неверные колонки unresolved.csv: {reader.fieldnames}")
         unresolved = list(reader)
+    if unresolved:
+        raise ValueError("annotations_resolved запрещён, пока unresolved.csv содержит строки")
+
+    scored_candidates = [(report, score) for report, score in candidates if score is not None]
+    frontier = rank_profiles(scored_candidates)
     vetoes = load_visual_vetoes(arguments.vetoes)
-    write_campaign_artifacts(arguments.out, frontier, unresolved_rows=unresolved, vetoes=vetoes)
+    changed_crops = _load_changed_crops(arguments.changed_crops)
+    frontier_by_id = {score.profile_id: score for score in frontier}
+    review_crops = [crop for crop in changed_crops if crop.profile_id in frontier_by_id]
+    changed_ids: dict[str, set[str]] = {}
+    for crop in review_crops:
+        changed_ids.setdefault(crop.profile_id, set()).add(crop.frame_id)
+    for profile_id, score in frontier_by_id.items():
+        actual = len(changed_ids.get(profile_id, set()))
+        if actual != score.changed_crops:
+            raise ValueError(
+                f"changed_crops профиля {profile_id}: staged={actual}, report={score.changed_crops}"
+            )
+    font = (
+        ImageFont.truetype(str(arguments.font), 30)
+        if arguments.font is not None
+        else ImageFont.load_default()
+    )
+    stage_changed_crops(
+        review_crops,
+        arguments.views,
+        font=font,
+        expected_changed_ids=changed_ids,
+    )
+    arguments.out.mkdir(parents=True, exist_ok=True)
+    _write_candidate_profiles(arguments.out / "candidate_profiles.json", candidates)
+    _write_json(arguments.out / "geometry_stale.json", {"profile_ids": list(stale)})
+    write_campaign_artifacts(
+        arguments.out,
+        frontier,
+        unresolved_rows=unresolved,
+        vetoes=vetoes,
+    )
     return 0
 
 

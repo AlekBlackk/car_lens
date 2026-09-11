@@ -80,6 +80,7 @@ class ProfileGateReport:
     strict_leaks: int
     unreviewable_accepted: int
     report_arithmetic_closed: bool
+    operational_errors: int = 0
     canonical_sha256: str | None = None
     w_max: int | None = None
     h_max: int | None = None

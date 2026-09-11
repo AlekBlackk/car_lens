@@ -15,6 +15,7 @@ from pipeline.redaction_calibration.measure import (
     confidence_margin,
     dominates,
     first_failed_gate,
+    geometry_fixpoint_converged,
     geometry_preflight,
     load_frame_profile_results,
     pareto_frontier,
@@ -254,6 +255,44 @@ def test_hard_gates_идут_в_заданном_порядке_до_pareto() ->
     ]
     for expected, overrides in ordered_failures:
         assert first_failed_gate(_gate_report(expected, **overrides)) == expected
+    assert (
+        first_failed_gate(_gate_report("operations", operational_errors=1)) == "report_arithmetic"
+    )
+
+
+def test_geometry_fixpoint_не_утверждает_полную_recall() -> None:
+    previous = GeometryWitness(w_max=160, h_max=50, canonical_sha256="a" * 64)
+    unchanged_boundary = GeometryWitness(w_max=160, h_max=50, canonical_sha256="b" * 64)
+    extended_boundary = GeometryWitness(w_max=161, h_max=50, canonical_sha256="c" * 64)
+
+    assert geometry_fixpoint_converged(
+        {"plate-001"},
+        {"plate-001"},
+        previous,
+        unchanged_boundary,
+        unresolved_count=0,
+    )
+    assert not geometry_fixpoint_converged(
+        {"plate-001"},
+        {"plate-001", "plate-002"},
+        previous,
+        unchanged_boundary,
+        unresolved_count=0,
+    )
+    assert not geometry_fixpoint_converged(
+        {"plate-001"},
+        {"plate-001"},
+        previous,
+        extended_boundary,
+        unresolved_count=0,
+    )
+    assert not geometry_fixpoint_converged(
+        {"plate-001"},
+        {"plate-001"},
+        previous,
+        unchanged_boundary,
+        unresolved_count=1,
+    )
 
 
 def test_geometry_preflight_использует_структурную_границу_и_реальные_origins() -> None:
