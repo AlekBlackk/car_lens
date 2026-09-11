@@ -40,7 +40,7 @@ def render_view(
     image: Image.Image,
     caption: str,
     *,
-    long_side: int,
+    long_side: int | None = DEFAULT_LONG_SIDE,
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
 ) -> Image.Image:
     """Уменьшить (если нужно) до `long_side`, дописать белую полосу с подписью сверху.
@@ -49,10 +49,15 @@ def render_view(
     белый или подпись легла на светлый участок кузова.
     """
     ш, в = image.size
-    к = long_side / max(ш, в)
-    вид = (
-        image if к >= 1.0 else image.resize((round(ш * к), round(в * к)), Image.Resampling.LANCZOS)
-    )
+    if long_side is None:
+        вид = image
+    else:
+        к = long_side / max(ш, в)
+        вид = (
+            image
+            if к >= 1.0
+            else image.resize((round(ш * к), round(в * к)), Image.Resampling.LANCZOS)
+        )
     полотно = Image.new("RGB", (вид.size[0], вид.size[1] + CAPTION_HEIGHT), "white")
     полотно.paste(вид, (0, CAPTION_HEIGHT))
     ImageDraw.Draw(полотно).text((10, 8), caption, fill="black", font=font)

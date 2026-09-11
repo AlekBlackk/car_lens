@@ -42,6 +42,21 @@ def test_рендер_не_увеличивает_кадр_меньше_long_sid
     assert вид.size == (800, 600 + 46)
 
 
+def test_рендер_полного_разрешения_не_уменьшает_и_впаивает_подпись() -> None:
+    исходник = Image.new("RGB", (3200, 2000), "red")
+    шрифт = ImageFont.load_default()
+
+    вид = render_view(
+        исходник,
+        "plate-001 sha=aaaa #007 (10,20,30,40)",
+        long_side=None,
+        font=шрифт,
+    )
+
+    assert вид.size == (3200, 2000 + 46)
+    assert вид.getpixel((10, 8)) != исходник.getpixel((10, 8))
+
+
 def test_main_роняет_на_черновике_без_crop_path(tmp_path: Path) -> None:
     выборка = tmp_path / "sample.csv"
     pd.DataFrame(
