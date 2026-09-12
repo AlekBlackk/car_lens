@@ -5,16 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from pipeline.fewshot.metrics import FewShotMetrics
 from scripts.build_fewshot_index import crops_by_class
 from scripts.eval_fewshot import (
+    build_parser,
     evaluate,
     idx_to_class_id_of,
     missing_holdout_classes,
     ordered_photo_ids,
     predictions_from_ranking,
     read_split_report,
+    resolve_paths,
     write_predictions,
     сохранить_отчёт_сборки,
 )
@@ -142,3 +145,41 @@ def test_prediction_export_rejects_length_mismatch() -> None:
 
     with pytest.raises(ValueError, match="несовпадение длин"):
         predictions_from_ranking(["only"], [1, 2], np.asarray([[1, 0, 2]], dtype=np.int64))
+
+
+def test_explicit_eval_paths_are_parsed_and_preserved() -> None:
+    arguments = build_parser().parse_args(
+        [
+            "--split-path",
+            "/fixture/holdout.parquet",
+            "--crops-root",
+            "/fixture/crops",
+            "--predictions-out",
+            "/fixture/predictions.csv",
+        ]
+    )
+
+    paths = resolve_paths(arguments)
+
+    assert paths.split_path == Path("/fixture/holdout.parquet")
+    assert paths.crops_root == Path("/fixture/crops")
+    assert paths.predictions_out == Path("/fixture/predictions.csv")
+
+
+def test_eval_path_defaults_remain_current_split_and_crops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    split_root = Path("/legacy/splits")
+    harvest_root = Path("/legacy/harvest")
+    monkeypatch.setattr("scripts.eval_fewshot.splits_dir", lambda: split_root)
+    monkeypatch.setattr("scripts.eval_fewshot.harvest_dir", lambda: harvest_root)
+
+    arguments = build_parser().parse_args([])
+    paths = resolve_paths(arguments)
+
+    assert arguments.split_path is None
+    assert arguments.crops_root is None
+    assert arguments.predictions_out is None
+    assert paths.split_path == split_root / "holdout_ru.parquet"
+    assert paths.crops_root == harvest_root / "crops"
+    assert paths.predictions_out is None

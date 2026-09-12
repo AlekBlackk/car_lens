@@ -19,6 +19,7 @@ from scripts.build_fewshot_index import (
     build_parser,
     check_full_coverage,
     crops_by_class,
+    resolve_paths,
 )
 from scripts.build_holdout_ru import строки_в_кадр
 from tests.test_holdout import _класс
@@ -111,3 +112,43 @@ def test_дефицит_разрешается_только_флагом() -> No
     """По умолчанию сборка обязана падать: молчаливый пустой слот — тот самый дефект."""
     assert build_parser().parse_args([]).allow_missing_classes is False
     assert build_parser().parse_args(["--allow-missing-classes"]).allow_missing_classes is True
+
+
+def test_explicit_paths_are_parsed_as_paths_and_preserved() -> None:
+    arguments = build_parser().parse_args(
+        [
+            "--split-path",
+            "/fixture/guardrail.parquet",
+            "--crops-root",
+            "/fixture/crops",
+            "--out",
+            "/fixture/index",
+        ]
+    )
+
+    paths = resolve_paths(arguments)
+
+    assert paths.split_path == Path("/fixture/guardrail.parquet")
+    assert paths.crops_root == Path("/fixture/crops")
+    assert paths.out == Path("/fixture/index")
+
+
+def test_path_defaults_remain_current_split_crops_and_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    split_root = Path("/legacy/splits")
+    harvest_root = Path("/legacy/harvest")
+    output_root = Path("/legacy/index")
+    monkeypatch.setattr("scripts.build_fewshot_index.splits_dir", lambda: split_root)
+    monkeypatch.setattr("scripts.build_fewshot_index.harvest_dir", lambda: harvest_root)
+    monkeypatch.setattr("scripts.build_fewshot_index.index_dir", lambda: output_root)
+
+    arguments = build_parser().parse_args([])
+    paths = resolve_paths(arguments)
+
+    assert arguments.split_path is None
+    assert arguments.crops_root is None
+    assert arguments.out is None
+    assert paths.split_path == split_root / "pool.parquet"
+    assert paths.crops_root == harvest_root / "crops"
+    assert paths.out == output_root

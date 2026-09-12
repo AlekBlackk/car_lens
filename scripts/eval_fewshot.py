@@ -26,6 +26,7 @@ import csv
 import json
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,15 @@ from scripts.build_fewshot_index import (
 
 REPORT_PATH = Path(__file__).resolve().parent.parent / "bench" / "fewshot-m2.md"
 DEFAULT_SPLIT = "holdout_ru"
+
+
+@dataclass(frozen=True, slots=True)
+class EvalPaths:
+    """Конкретные пути замера после разбора опциональных CLI overrides."""
+
+    split_path: Path
+    crops_root: Path
+    predictions_out: Path | None
 
 
 def idx_to_class_id_of(meta: Mapping[str, Any]) -> dict[int, str]:
@@ -163,6 +173,8 @@ def build_parser() -> argparse.ArgumentParser:
     парсер = argparse.ArgumentParser(description="Замер few-shot по holdout_ru (Р-11)")
     парсер.add_argument("--index", type=Path, default=None, help="каталог с catalog_index.bin")
     парсер.add_argument("--split", default=DEFAULT_SPLIT)
+    парсер.add_argument("--split-path", type=Path, default=None)
+    парсер.add_argument("--crops-root", type=Path, default=None)
     парсер.add_argument("--report", type=Path, default=REPORT_PATH)
     парсер.add_argument(
         "--predictions-out",
@@ -173,6 +185,15 @@ def build_parser() -> argparse.ArgumentParser:
     return парсер
 
 
+def resolve_paths(arguments: argparse.Namespace) -> EvalPaths:
+    """Разрешить legacy defaults после parse, не меняя глобальное окружение данных."""
+    return EvalPaths(
+        split_path=arguments.split_path or splits_dir() / f"{arguments.split}.parquet",
+        crops_root=arguments.crops_root or harvest_dir() / "crops",
+        predictions_out=arguments.predictions_out,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Замерить эталон, проверить гейт, записать отчёт. `0` — гейт пройден."""
     import open_clip  # type: ignore[import-untyped]
@@ -181,6 +202,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from pipeline.harvest.backends import ClipImageEncoder
 
     аргументы = build_parser().parse_args(argv)
+    пути = resolve_paths(аргументы)
     каталог_индекса = аргументы.index or index_dir()
     заголовок, центроиды = read_index(каталог_индекса / "catalog_index.bin")
     байты_меты = (каталог_индекса / "catalog_meta.json").read_bytes()
@@ -191,8 +213,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     сборка_текст = (каталог_индекса / "report.json").read_text(encoding="utf-8")
     сборка = json.loads(сборка_текст)
 
-    кадр = read_split(splits_dir() / f"{аргументы.split}.parquet")
-    группы = crops_by_class(кадр, harvest_dir() / "crops")
+    кадр = read_split(пути.split_path)
+    группы = crops_by_class(кадр, пути.crops_root)
 
     # Те же веса, что в сборке индекса. Индекс и запрос, посчитанные разными энкодерами,
     # дают косинус, который ничего не значит, поэтому пин один и импортируется, а не
@@ -204,18 +226,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     куски: list[np.ndarray] = []
     метки: list[int] = []
-    for номер, пути in группы:
-        свои = embed_crops(пути, энкодер)
+    for номер, пути_класса in группы:
+        свои = embed_crops(пути_класса, энкодер)
         куски.append(свои)
         метки += [номер] * len(свои)
         print(f"{имена[номер]}: {len(свои)} кадров эталона", flush=True)
     эмбеддинги = np.concatenate(куски)
     ранжирование = ranked_by_centroids(эмбеддинги, центроиды, FEWSHOT_TOP_K)
     метрики = aggregate_fewshot(ранжирование, метки, idx_to_class_id=имена)
-    if аргументы.predictions_out is not None:
+    if пути.predictions_out is not None:
         photo_ids = ordered_photo_ids(кадр)
         write_predictions(
-            аргументы.predictions_out,
+            пути.predictions_out,
             predictions_from_ranking(photo_ids, метки, ранжирование),
         )
 
@@ -224,7 +246,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
 
-    отчёт_сплита_путь = splits_dir() / f"{аргументы.split}_report.json"
+    отчёт_сплита_путь = пути.split_path.with_name(f"{пути.split_path.stem}_report.json")
     дроблёные = read_split_report(отчёт_сплита_путь)
 
     аргументы.report.parent.mkdir(parents=True, exist_ok=True)

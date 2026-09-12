@@ -22,6 +22,7 @@ import argparse
 import json
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -43,6 +44,15 @@ ENCODER_REVISION = "1a25a446712ba5ee05982a381eed697ef9b435cf"
 ENCODER_WEIGHTS_SHA256 = "1bd3c7172de5b207ceac554f5ab5266166f3b9baccc9af5989bc801016d080ad"
 
 DEFAULT_SPLIT = "pool"
+
+
+@dataclass(frozen=True, slots=True)
+class BuildPaths:
+    """Конкретные пути сборки после разбора опциональных CLI overrides."""
+
+    split_path: Path
+    crops_root: Path
+    out: Path
 
 
 class BuildFewShotError(RuntimeError):
@@ -107,6 +117,8 @@ def build_parser() -> argparse.ArgumentParser:
     """Разбор аргументов. Флага `--device` нет намеренно, см. докстринг модуля."""
     парсер = argparse.ArgumentParser(description="Индекс центроидов few-shot (Р-11)")
     парсер.add_argument("--split", default=DEFAULT_SPLIT, help="сплит-источник центроидов")
+    парсер.add_argument("--split-path", type=Path, default=None)
+    парсер.add_argument("--crops-root", type=Path, default=None)
     парсер.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
     парсер.add_argument("--out", type=Path, default=None)
     парсер.add_argument("--seed", type=int, default=1337, help="сид k-means")
@@ -118,6 +130,15 @@ def build_parser() -> argparse.ArgumentParser:
     return парсер
 
 
+def resolve_paths(arguments: argparse.Namespace) -> BuildPaths:
+    """Разрешить legacy defaults после parse, не меняя глобальное окружение данных."""
+    return BuildPaths(
+        split_path=arguments.split_path or splits_dir() / f"{arguments.split}.parquet",
+        crops_root=arguments.crops_root or harvest_dir() / "crops",
+        out=arguments.out or index_dir(),
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Собрать `catalog_index.bin` по сплиту-пулу и записать отчёт сборки."""
     import open_clip  # type: ignore[import-untyped]
@@ -126,12 +147,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     from training.build_index import kmeans_factory
 
     аргументы = build_parser().parse_args(argv)
+    пути = resolve_paths(аргументы)
     каталог = load_catalog(аргументы.catalog)
     индекс = class_index(каталог)
     по_индексу = {значение: ключ for ключ, значение in индекс.items()}
 
-    кадр = read_split(splits_dir() / f"{аргументы.split}.parquet")
-    группы = crops_by_class(кадр, harvest_dir() / "crops")
+    кадр = read_split(пути.split_path)
+    группы = crops_by_class(кадр, пути.crops_root)
     дефицитные = check_full_coverage(
         группы, len(индекс), по_индексу, allow_missing=аргументы.allow_missing_classes
     )
@@ -149,8 +171,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     куски: list[np.ndarray] = []
     метки: list[np.ndarray] = []
-    for номер, пути in группы:
-        свои = embed_crops(пути, энкодер)
+    for номер, пути_класса in группы:
+        свои = embed_crops(пути_класса, энкодер)
         куски.append(свои)
         метки.append(np.full(len(свои), номер, dtype=np.int64))
         print(f"{по_индексу[номер]}: {len(свои)} кропов", flush=True)
@@ -166,7 +188,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         allow_empty=True,
     )
 
-    вывод = аргументы.out or index_dir()
+    вывод = пути.out
     вывод.mkdir(parents=True, exist_ok=True)
     мета = meta_json(
         каталог.classes,
