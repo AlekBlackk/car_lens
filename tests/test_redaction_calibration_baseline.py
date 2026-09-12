@@ -14,13 +14,10 @@ from pipeline.redaction_calibration.baseline import (
     IndependentBatch,
     Prediction,
     campaign_budget_state,
-    complete_batch,
     create_baseline_passport,
     exact_prediction_counts,
     freeze_units,
-    open_batch,
     partition_independent_ids,
-    start_batch_review,
     write_campaign_artifacts,
 )
 from scripts.preregister_redaction_calibration import preregistration_document
@@ -245,47 +242,20 @@ def test_passport_accepts_uppercase_hexadecimal_witnesses(tmp_path: Path) -> Non
     assert passport.git["sha"] == "A" * 40
 
 
-def test_open_batch_requires_next_party_and_stops_after_pass() -> None:
-    batches, _ = partition_independent_ids(["a", "b", "c"], [], seed=1, batch_size=1, batch_count=3)
-    with pytest.raises(ValueError, match="следующая партия 1"):
-        open_batch(batches, 3)
-
-    completed_first = replace(batches[0], state="completed_fail")
-    ready_for_second = (completed_first, *batches[1:])
-    with pytest.raises(ValueError, match="следующая партия 2"):
-        open_batch(ready_for_second, 3)
-
-    passed = (replace(completed_first, state="completed_pass"), *batches[1:])
-    with pytest.raises(ValueError, match="кампания уже пройдена"):
-        open_batch(passed, 2)
-
-
-def test_open_and_review_batch_enforce_single_active_party() -> None:
-    batches, _ = partition_independent_ids(["a", "b", "c"], [], seed=1, batch_size=1, batch_count=3)
-    opened = open_batch(batches, 1)
-    assert opened[0].state == "opened"
-    with pytest.raises(ValueError, match=r"уже раскрыта"):
-        open_batch(opened, 2)
-
-    in_review = start_batch_review(opened, 1)
-    assert in_review[0].state == "review_in_progress"
-    with pytest.raises(ValueError, match=r"переход"):
-        complete_batch(opened, 1, passed=True)
-    completed = complete_batch(in_review, 1, passed=False)
-    assert completed[0].state == "completed_fail"
-
-
 def test_budget_exhausts_after_eight_failures_without_remainder() -> None:
+    """Персистентные партии отвечают тем же правилом, что и автомат из `state`."""
     batches = tuple(
         IndependentBatch(
-            number=number, state="completed_fail", photo_ids=(str(number),), sha256="x"
+            number=number,
+            state="completed_fail",
+            photo_ids=(str(number),),
+            sha256=f"{number:064x}",
         )
         for number in range(1, 9)
     )
-    assert campaign_budget_state(batches) == "budget_exhausted"
 
-    with pytest.raises(ValueError, match=r"бюджет исчерпан"):
-        open_batch(batches, 9)
+    assert campaign_budget_state(batches) == "budget_exhausted"
+    assert campaign_budget_state((*batches[:7], replace(batches[7], state="sealed"))) == "available"
 
 
 def test_human_preregistration_preserves_explicit_pareto_selection_rule() -> None:

@@ -18,6 +18,7 @@ from pipeline.redaction_calibration.state import (
     ProfileState,
     PromotionRecord,
     PromotionState,
+    campaign_budget_state,
     transition_batch,
     transition_campaign,
     transition_profile,
@@ -44,6 +45,9 @@ CAMPAIGN_EDGES = {
     (CampaignState.PROFILES_EVALUATED, CampaignState.CAMPAIGN_COMPLETE),
     (CampaignState.SELECTION_REQUIRED, CampaignState.CAMPAIGN_COMPLETE),
     (CampaignState.SELECTION_REQUIRED, CampaignState.BUDGET_EXHAUSTED),
+    # Единственный выживший профиль тоже способен сжечь бюджет: без этого ребра кампания
+    # уходила бы в campaign_complete с проваленным профилем в selected_profile_id.
+    (CampaignState.PROFILES_EVALUATED, CampaignState.BUDGET_EXHAUSTED),
 }
 
 PROFILE_EDGES = {
@@ -238,8 +242,17 @@ def _assert_campaign_transition(record: CampaignRecord, target: CampaignState) -
             selection_result_sha256=SHA_B,
         )
     if target is CampaignState.BUDGET_EXHAUSTED:
-        return transition_campaign(record, target, budget_result_sha256=SHA_B)
+        return transition_campaign(
+            record,
+            target,
+            batches=_exhausted_batches(),
+            budget_result_sha256=SHA_B,
+        )
     return transition_campaign(record, target)
+
+
+def _exhausted_batches() -> tuple[BatchRecord, ...]:
+    return tuple(_batch(BatchState.COMPLETED_FAIL, number) for number in range(1, 9))
 
 
 def _assert_profile_transition(record: ProfileRecord, target: ProfileState) -> ProfileRecord:
@@ -372,6 +385,64 @@ def test_campaign_rejects_every_other_enum_edge(
     record = _campaign(source)
     with pytest.raises(CalibrationStateError, match="недопустимый переход кампании"):
         _assert_campaign_transition(record, target)
+
+
+def test_budget_exhausted_requires_fully_failed_batch_history() -> None:
+    """`budget_exhausted` — вывод из истории партий, а не ярлык на усмотрение вызывающего."""
+    record = _campaign(CampaignState.PROFILES_EVALUATED)
+    exhausted = _exhausted_batches()
+
+    with pytest.raises(CalibrationStateError, match="историю партий"):
+        transition_campaign(record, CampaignState.BUDGET_EXHAUSTED, budget_result_sha256=SHA_B)
+    for incomplete in (
+        (*exhausted[:7], _batch(BatchState.SEALED, 8)),
+        (*exhausted[:7], _batch(BatchState.COMPLETED_PASS, 8)),
+        (*exhausted[:7], _batch(BatchState.REVIEW_IN_PROGRESS, 8)),
+    ):
+        with pytest.raises(CalibrationStateError, match="бюджет не исчерпан"):
+            transition_campaign(
+                record,
+                CampaignState.BUDGET_EXHAUSTED,
+                batches=incomplete,
+                budget_result_sha256=SHA_B,
+            )
+
+    result = transition_campaign(
+        record,
+        CampaignState.BUDGET_EXHAUSTED,
+        batches=exhausted,
+        budget_result_sha256=SHA_B,
+    )
+
+    assert result.state is CampaignState.BUDGET_EXHAUSTED
+    assert result.selected_profile_id is None
+
+
+def test_campaign_budget_state_derives_outcome_from_batches() -> None:
+    sealed = tuple(_batch(BatchState.SEALED, number) for number in range(1, 9))
+    exhausted = _exhausted_batches()
+    passed = (*exhausted[:3], _batch(BatchState.COMPLETED_PASS, 4), *sealed[4:])
+
+    assert campaign_budget_state(()) == "available"
+    assert campaign_budget_state(sealed) == "available"
+    assert campaign_budget_state((*exhausted[:7], sealed[7])) == "available"
+    assert campaign_budget_state(passed) == "passed"
+    assert campaign_budget_state(exhausted) == "budget_exhausted"
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        (2, 3),  # нумерация не с единицы: потеряна первая партия
+        (1, 3),  # дыра в середине
+        (1, 1),  # дубль
+    ],
+)
+def test_campaign_budget_state_rejects_broken_numbering(broken: tuple[int, ...]) -> None:
+    batches = tuple(_batch(BatchState.COMPLETED_FAIL, number) for number in broken)
+
+    with pytest.raises(CalibrationStateError, match="подряд с 1"):
+        campaign_budget_state(batches)
 
 
 @pytest.mark.parametrize(("source", "target"), sorted(PROFILE_EDGES))
@@ -702,7 +773,12 @@ def _campaign_witness_call(
     if target is CampaignState.CAMPAIGN_COMPLETE:
         record = replace(record, evaluated_survivor_ids=("profile-a",))
         return lambda: transition_campaign(record, target, selection_result_sha256=witness)
-    return lambda: transition_campaign(record, target, budget_result_sha256=witness)
+    return lambda: transition_campaign(
+        record,
+        target,
+        batches=_exhausted_batches(),
+        budget_result_sha256=witness,
+    )
 
 
 def _profile_witness_call(target: ProfileState, witness: str | None) -> Callable[[], ProfileRecord]:

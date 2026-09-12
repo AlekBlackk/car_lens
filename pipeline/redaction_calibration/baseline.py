@@ -11,16 +11,20 @@ import shutil
 import tempfile
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeAlias, cast
 
 import pandas as pd
 
-BatchState: TypeAlias = Literal[
+from pipeline.redaction_calibration.state import BatchRecord, BatchState, CampaignBudgetState
+from pipeline.redaction_calibration.state import (
+    campaign_budget_state as state_campaign_budget_state,
+)
+
+PersistedBatchState: TypeAlias = Literal[
     "sealed", "opened", "review_in_progress", "completed_pass", "completed_fail"
 ]
-CampaignBudgetState: TypeAlias = Literal["available", "passed", "budget_exhausted"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +50,7 @@ class IndependentBatch:
     """Запечатанная независимая партия с полным списком и его хешем."""
 
     number: int
-    state: BatchState
+    state: PersistedBatchState
     photo_ids: tuple[str, ...]
     sha256: str
 
@@ -301,75 +305,23 @@ def _csv_rows(path: Path) -> int:
         return sum(1 for _ in csv.DictReader(file))
 
 
-def _replace_batch(
-    batches: Sequence[IndependentBatch], number: int, state: BatchState
-) -> tuple[IndependentBatch, ...]:
-    found = False
-    updated: list[IndependentBatch] = []
-    for batch in batches:
-        if batch.number == number:
-            found = True
-            updated.append(replace(batch, state=state))
-        else:
-            updated.append(batch)
-    if not found:
-        raise ValueError(f"партия {number} не существует")
-    return tuple(updated)
-
-
 def campaign_budget_state(batches: Sequence[IndependentBatch]) -> CampaignBudgetState:
-    """Вернуть границу бюджета, не превращая остаток в девятую партию."""
-    if any(batch.state == "completed_pass" for batch in batches):
-        return "passed"
-    if batches and all(batch.state == "completed_fail" for batch in batches):
-        return "budget_exhausted"
-    return "available"
+    """Вернуть границу бюджета для персистентных партий по правилу из `state`.
 
-
-def open_batch(batches: Sequence[IndependentBatch], number: int) -> tuple[IndependentBatch, ...]:
-    """Раскрыть только следующую по номеру sealed-партию после завершённых провалов."""
-    budget_state = campaign_budget_state(batches)
-    if budget_state == "passed":
-        raise ValueError("кампания уже пройдена: новые партии не раскрываются")
-    if budget_state == "budget_exhausted":
-        raise ValueError("бюджет исчерпан: остаток не становится следующей партией")
-    active = [batch.number for batch in batches if batch.state in {"opened", "review_in_progress"}]
-    if active:
-        raise ValueError(f"уже раскрыта партия {active[0]}")
-    remaining = sorted(batch.number for batch in batches if batch.state == "sealed")
-    if not remaining:
-        raise ValueError("нет запечатанной партии для раскрытия")
-    next_number = remaining[0]
-    if number != next_number:
-        raise ValueError(f"следующая партия {next_number}, запрошена {number}")
-    target = next(batch for batch in batches if batch.number == number)
-    preceding = [batch for batch in batches if batch.number < target.number]
-    if any(batch.state != "completed_fail" for batch in preceding):
-        raise ValueError(f"предыдущие партии перед {number} не завершены провалом")
-    return _replace_batch(batches, number, "opened")
-
-
-def start_batch_review(
-    batches: Sequence[IndependentBatch], number: int
-) -> tuple[IndependentBatch, ...]:
-    """Зафиксировать, что раскрытая партия уже расходуется человеческим просмотром."""
-    target = next((batch for batch in batches if batch.number == number), None)
-    if target is None or target.state != "opened":
-        actual = "missing" if target is None else target.state
-        raise ValueError(f"недопустимый переход {actual} → review_in_progress")
-    return _replace_batch(batches, number, "review_in_progress")
-
-
-def complete_batch(
-    batches: Sequence[IndependentBatch], number: int, *, passed: bool
-) -> tuple[IndependentBatch, ...]:
-    """Завершить полностью просмотренную партию одним необратимым исходом."""
-    target = next((batch for batch in batches if batch.number == number), None)
-    if target is None or target.state != "review_in_progress":
-        actual = "missing" if target is None else target.state
-        raise ValueError(f"недопустимый переход {actual} → completed")
-    state: BatchState = "completed_pass" if passed else "completed_fail"
-    return _replace_batch(batches, number, state)
+    Переходы партий принадлежат `state.transition_batch` (решение В-1 плана рекалибровки от
+    2026-09-12); здесь остаётся только persistence, поэтому правило не дублируется, а
+    вызывается через перевод записей в `BatchRecord`.
+    """
+    return state_campaign_budget_state(
+        [
+            BatchRecord(
+                number=batch.number,
+                state=BatchState(batch.state),
+                batch_sha256=batch.sha256,
+            )
+            for batch in batches
+        ]
+    )
 
 
 def _json_document(value: Any) -> Any:

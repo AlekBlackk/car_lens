@@ -6,6 +6,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from typing import Literal, TypeAlias
 
 
 class CalibrationStateError(ValueError):
@@ -60,6 +61,9 @@ class BatchState(StrEnum):
     REVIEW_IN_PROGRESS = "review_in_progress"
     COMPLETED_PASS = "completed_pass"
     COMPLETED_FAIL = "completed_fail"
+
+
+CampaignBudgetState: TypeAlias = Literal["available", "passed", "budget_exhausted"]
 
 
 def _require_sha256(name: str, value: str | None) -> str:
@@ -168,6 +172,10 @@ _CAMPAIGN_TRANSITIONS = {
     CampaignState.PROFILES_EVALUATED: {
         CampaignState.SELECTION_REQUIRED,
         CampaignState.CAMPAIGN_COMPLETE,
+        # Единственный выживший профиль тоже способен сжечь все восемь партий. Без этого
+        # ребра такая кампания уходила бы в `campaign_complete` и записывала проваленный
+        # профиль в `selected_profile_id`; решение В-2 плана рекалибровки от 2026-09-12.
+        CampaignState.BUDGET_EXHAUSTED,
     },
     CampaignState.SELECTION_REQUIRED: {
         CampaignState.CAMPAIGN_COMPLETE,
@@ -239,10 +247,29 @@ def _validate_survivors(values: Sequence[str]) -> tuple[str, ...]:
     return survivors
 
 
+def campaign_budget_state(batches: Sequence[BatchRecord]) -> CampaignBudgetState:
+    """Вывести границу бюджета из полного списка партий, не делая остаток девятой партией.
+
+    Вызывающий обязан передать весь замороженный preregistration список: исчерпание означает
+    «каждая запланированная партия провалена», и по обрезанной истории его не отличить от
+    незаконченной кампании. Нумерация проверяется на дыры и дубли — это ловит всё, кроме
+    потери хвоста, которую обязан исключить сам прогон кампании.
+    """
+    numbers = sorted(batch.number for batch in batches)
+    if numbers and numbers != list(range(1, len(numbers) + 1)):
+        raise CalibrationStateError("история партий должна нумероваться подряд с 1 без дублей")
+    if any(batch.state is BatchState.COMPLETED_PASS for batch in batches):
+        return "passed"
+    if batches and all(batch.state is BatchState.COMPLETED_FAIL for batch in batches):
+        return "budget_exhausted"
+    return "available"
+
+
 def transition_campaign(
     record: CampaignRecord,
     target: CampaignState,
     *,
+    batches: Sequence[BatchRecord] | None = None,
     preregistration_result_sha256: str | None = None,
     tooling_result_sha256: str | None = None,
     control_result_sha256: str | None = None,
@@ -326,6 +353,10 @@ def transition_campaign(
             ),
         )
     if target is CampaignState.BUDGET_EXHAUSTED:
+        if batches is None:
+            raise CalibrationStateError("budget_exhausted требует полную историю партий")
+        if campaign_budget_state(batches) != "budget_exhausted":
+            raise CalibrationStateError("бюджет не исчерпан: остались партии или есть пройденная")
         return replace(
             record,
             state=target,
