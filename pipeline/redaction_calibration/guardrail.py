@@ -18,6 +18,7 @@ from pipeline.schema import COLUMNS
 GUARDRAIL_SUCCESS_PHRASE = (
     "guardrail не обнаружил обвала; это не доказательство отсутствия ухудшения"
 )
+GUARDRAIL_LINEAGE_FRAMES = 1523
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +201,29 @@ def _guardrail_metric(
         lower_bound=lower_bound,
         passed=candidate_k / n >= lower_bound,
     )
+
+
+def validate_guardrail_lineage(
+    baseline: Sequence[Prediction],
+    frozen_units: Sequence[FrozenUnit],
+    *,
+    expected_frames: int = GUARDRAIL_LINEAGE_FRAMES,
+) -> None:
+    """Сверить exact baseline со всеми frozen holdout ID и каноническим знаменателем."""
+    baseline_ids = [prediction.photo_id for prediction in baseline]
+    duplicates = _duplicates(baseline_ids)
+    if duplicates:
+        raise ValueError(f"дубликат photo_id в baseline: {duplicates[:5]}")
+    holdout_ids = {unit.photo_id for unit in frozen_units if unit.split == "holdout_ru"}
+    if len(holdout_ids) != expected_frames:
+        raise ValueError(
+            f"frozen holdout должен содержать ровно {expected_frames} кадров, получено "
+            f"{len(holdout_ids)}"
+        )
+    missing = sorted(holdout_ids - set(baseline_ids))
+    extra = sorted(set(baseline_ids) - holdout_ids)
+    if missing or extra:
+        raise ValueError(f"baseline lineage: missing={missing[:5]}, extra={extra[:5]}")
 
 
 def calculate_guardrail_report(

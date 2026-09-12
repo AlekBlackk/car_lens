@@ -21,8 +21,10 @@ from pipeline.redaction_calibration.guardrail import (
     build_guardrail_pool,
     calculate_guardrail_report,
     render_guardrail_report,
+    validate_guardrail_lineage,
 )
 from pipeline.schema import read_split, write_split
+from scripts.eval_fewshot import write_predictions
 from scripts.preregister_redaction_calibration import load_predictions
 
 DEFAULT_CAMPAIGN_ROOT = data_root() / "redaction-calibration"
@@ -149,19 +151,25 @@ def run_eval(arguments: argparse.Namespace, paths: GuardrailPaths) -> None:
             str(paths.predictions),
             "--report",
             str(paths.report.with_name("fewshot-survivors.md")),
+            "--diagnostic-only",
         ],
         check=True,
     )
 
 
 def run_guardrail(arguments: argparse.Namespace) -> int:
-    """Выполнить success path: split → leakage check → index → eval → report."""
+    """Выполнить success path: lineage → leakage check → index → eval → report."""
     frozen, paths = prepare_guardrail_splits(arguments)
+    baseline = load_baseline_predictions(arguments.baseline_predictions)
+    validate_guardrail_lineage(baseline, frozen)
     final_pool = read_split(paths.pool)
     assert_no_frozen_units(final_pool, frozen)
     run_build_index(arguments, paths)
-    run_eval(arguments, paths)
-    baseline = load_baseline_predictions(arguments.baseline_predictions)
+    final_holdout = read_split(paths.holdout)
+    if final_holdout.empty:
+        write_predictions(paths.predictions, ())
+    else:
+        run_eval(arguments, paths)
     candidate = load_predictions(paths.predictions)
     report = calculate_guardrail_report(
         baseline,

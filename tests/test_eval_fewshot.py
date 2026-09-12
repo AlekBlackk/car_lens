@@ -12,6 +12,7 @@ from scripts.build_fewshot_index import crops_by_class
 from scripts.eval_fewshot import (
     build_parser,
     evaluate,
+    exit_status,
     idx_to_class_id_of,
     missing_holdout_classes,
     ordered_photo_ids,
@@ -145,6 +146,17 @@ def test_prediction_export_rejects_length_mismatch() -> None:
 
     with pytest.raises(ValueError, match="несовпадение длин"):
         predictions_from_ranking(["only"], [1, 2], np.asarray([[1, 0, 2]], dtype=np.int64))
+
+
+def test_diagnostic_only_mode_keeps_legacy_default_but_does_not_block() -> None:
+    arguments = build_parser().parse_args([])
+    diagnostic = build_parser().parse_args(["--diagnostic-only"])
+
+    assert arguments.diagnostic_only is False
+    assert diagnostic.diagnostic_only is True
+    assert exit_status(gate_passed=False, diagnostic_only=False) == 1
+    assert exit_status(gate_passed=False, diagnostic_only=True) == 0
+    assert exit_status(gate_passed=True, diagnostic_only=False) == 0
 
 
 def test_explicit_eval_paths_are_parsed_and_preserved() -> None:

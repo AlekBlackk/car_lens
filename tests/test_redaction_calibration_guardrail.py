@@ -18,9 +18,10 @@ from pipeline.redaction_calibration.guardrail import (
     build_guardrail_pool,
     calculate_guardrail_report,
     render_guardrail_report,
+    validate_guardrail_lineage,
 )
-from pipeline.schema import read_split, write_split
-from scripts.eval_redaction_guardrail import GuardrailPaths, run_guardrail
+from pipeline.schema import empty_frame, read_split, write_split
+from scripts.eval_redaction_guardrail import GuardrailPaths, run_eval, run_guardrail
 
 
 def _manifest_row(
@@ -204,6 +205,149 @@ def test_passing_report_claims_not_collapsed_but_never_not_worse() -> None:
     assert "эффект профиля при постоянной линейке из 1523 кадров" in rendered
 
 
+def test_guardrail_prediction_boundaries_reject_duplicates_and_foreign_candidate() -> None:
+    baseline = (
+        Prediction("a", 1, (1, 2, 3)),
+        Prediction("a", 1, (1, 2, 3)),
+    )
+    with pytest.raises(ValueError, match=r"дубликат photo_id в baseline.*a"):
+        calculate_guardrail_report(
+            baseline,
+            (),
+            pool_sha256="a" * 64,
+            split_sha256="b" * 64,
+            index_sha256="c" * 64,
+        )
+
+    clean = (Prediction("a", 1, (1, 2, 3)),)
+    duplicate_candidate = (clean[0], clean[0])
+    with pytest.raises(ValueError, match=r"дубликат photo_id в candidate.*a"):
+        calculate_guardrail_report(
+            clean,
+            duplicate_candidate,
+            pool_sha256="a" * 64,
+            split_sha256="b" * 64,
+            index_sha256="c" * 64,
+        )
+
+    with pytest.raises(ValueError, match=r"неизвестные candidate photo_id.*foreign"):
+        calculate_guardrail_report(
+            clean,
+            (Prediction("foreign", 1, (1, 2, 3)),),
+            pool_sha256="a" * 64,
+            split_sha256="b" * 64,
+            index_sha256="c" * 64,
+        )
+
+
+def test_lineage_requires_exact_frozen_holdout_ids_and_production_count() -> None:
+    frozen = (
+        FrozenUnit("a", "unit-a", "holdout_ru"),
+        FrozenUnit("b", "unit-b", "holdout_ru"),
+        FrozenUnit("pool", "unit-p", "pool"),
+    )
+    baseline = (
+        Prediction("a", 1, (1, 2, 3)),
+        Prediction("b", 2, (2, 1, 3)),
+    )
+
+    validate_guardrail_lineage(baseline, frozen, expected_frames=2)
+    with pytest.raises(ValueError, match=r"baseline.*missing.*b"):
+        validate_guardrail_lineage(baseline[:1], frozen, expected_frames=2)
+    with pytest.raises(ValueError, match=r"baseline.*extra.*foreign"):
+        validate_guardrail_lineage(
+            (*baseline, Prediction("foreign", 1, (1, 2, 3))),
+            frozen,
+            expected_frames=2,
+        )
+    with pytest.raises(ValueError, match=r"дубликат photo_id в baseline.*a"):
+        validate_guardrail_lineage((baseline[0], baseline[0]), frozen, expected_frames=2)
+    with pytest.raises(ValueError, match=r"ровно 1523.*2"):
+        validate_guardrail_lineage(baseline, frozen)
+
+
+def test_guardrail_cli_rejects_truncated_baseline_before_evaluation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = GuardrailPaths.for_fixture(tmp_path)
+    write_split(empty_frame(), paths.pool)
+    write_split(empty_frame(), paths.holdout)
+    frozen = tuple(FrozenUnit(str(index), f"unit-{index}", "holdout_ru") for index in range(1523))
+    truncated = tuple(Prediction(str(index), 1, (1, 2, 3)) for index in range(1000))
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.prepare_guardrail_splits",
+        lambda arguments: (frozen, paths),
+    )
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.load_baseline_predictions", lambda path: truncated
+    )
+    evaluation_started = False
+
+    def forbidden_eval(*arguments: object) -> None:
+        nonlocal evaluation_started
+        evaluation_started = True
+
+    monkeypatch.setattr("scripts.eval_redaction_guardrail.run_eval", forbidden_eval)
+
+    with pytest.raises(ValueError, match=r"baseline.*missing"):
+        run_guardrail(argparse.Namespace(baseline_predictions=tmp_path / "baseline.csv"))
+    assert evaluation_started is False
+
+
+def test_guardrail_all_destroyed_writes_header_only_predictions_and_failed_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = GuardrailPaths.for_fixture(tmp_path)
+    write_split(empty_frame(), paths.pool)
+    write_split(empty_frame(), paths.holdout)
+    paths.index.mkdir(parents=True)
+    (paths.index / "catalog_index.bin").write_bytes(b"index")
+    frozen = tuple(FrozenUnit(str(index), f"unit-{index}", "holdout_ru") for index in range(1523))
+    baseline = tuple(Prediction(str(index), 1, (1, 2, 3)) for index in range(1523))
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.prepare_guardrail_splits",
+        lambda arguments: (frozen, paths),
+    )
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.load_baseline_predictions", lambda path: baseline
+    )
+    monkeypatch.setattr("scripts.eval_redaction_guardrail.run_build_index", lambda *args: None)
+    encoder_started = False
+
+    def forbidden_eval(*arguments: object) -> None:
+        nonlocal encoder_started
+        encoder_started = True
+
+    monkeypatch.setattr("scripts.eval_redaction_guardrail.run_eval", forbidden_eval)
+
+    result = run_guardrail(argparse.Namespace(baseline_predictions=tmp_path / "baseline.csv"))
+
+    assert result == 1
+    assert encoder_started is False
+    assert paths.predictions.read_text(encoding="utf-8") == "photo_id,target,top_indices\n"
+    report = paths.report.read_text(encoding="utf-8")
+    assert "уничтожено/не принято кадров линейки: 1523" in report
+    assert "| top-1 | 1523/1523" in report
+    assert "| 0/1523 | 0/0 (0.0000) | НЕ ПРОЙДЕН |" in report
+
+
+def test_guardrail_eval_uses_nonblocking_diagnostic_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = GuardrailPaths.for_fixture(tmp_path)
+    captured: list[str] = []
+
+    def capture(command: list[str], *, check: bool) -> None:
+        assert check is True
+        captured.extend(command)
+
+    monkeypatch.setattr("scripts.eval_redaction_guardrail.subprocess.run", capture)
+
+    run_eval(argparse.Namespace(), paths)
+
+    assert "--diagnostic-only" in captured
+
+
 def test_candidate_prediction_target_must_match_frozen_baseline() -> None:
     baseline = (Prediction("a", 1, (1, 2, 3)),)
     candidate = (Prediction("a", 2, (1, 2, 3)),)
@@ -236,6 +380,15 @@ def test_guardrail_cli_checks_final_parquet_before_building_encoder(
         "scripts.eval_redaction_guardrail.prepare_guardrail_splits",
         lambda arguments: (frozen, paths),
     )
+    baseline = tuple(
+        Prediction(unit.photo_id, 1, (1, 2, 3)) for unit in frozen if unit.split == "holdout_ru"
+    )
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.load_baseline_predictions", lambda path: baseline
+    )
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.validate_guardrail_lineage", lambda *args: None
+    )
     encoder_started = False
 
     def forbidden_build(*arguments: object) -> None:
@@ -245,7 +398,7 @@ def test_guardrail_cli_checks_final_parquet_before_building_encoder(
     monkeypatch.setattr("scripts.eval_redaction_guardrail.run_build_index", forbidden_build)
 
     with pytest.raises(ValueError, match="замороженными holdout-единицами"):
-        run_guardrail(argparse.Namespace())
+        run_guardrail(argparse.Namespace(baseline_predictions=tmp_path / "base.csv"))
     assert encoder_started is False
 
 
@@ -289,6 +442,9 @@ def test_guardrail_cli_writes_report_predictions_and_input_hashes(
     monkeypatch.setattr("scripts.eval_redaction_guardrail.load_predictions", lambda path: candidate)
     monkeypatch.setattr(
         "scripts.eval_redaction_guardrail.load_baseline_predictions", lambda _: baseline
+    )
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.validate_guardrail_lineage", lambda *args: None
     )
 
     result = run_guardrail(argparse.Namespace(baseline_predictions=tmp_path / "base.csv"))

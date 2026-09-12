@@ -182,7 +182,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="опциональный CSV точных предсказаний по каждому кадру",
     )
+    парсер.add_argument(
+        "--diagnostic-only",
+        action="store_true",
+        help="записать диагностику, но не блокировать exit status по legacy few-shot gate",
+    )
     return парсер
+
+
+def exit_status(*, gate_passed: bool, diagnostic_only: bool) -> int:
+    """Legacy gate блокирует по умолчанию; diagnostic-only всегда завершает замер успешно."""
+    return 0 if gate_passed or diagnostic_only else 1
 
 
 def resolve_paths(arguments: argparse.Namespace) -> EvalPaths:
@@ -288,7 +298,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"отчёт сборки индекса: {путь_сборки}")
     for провал in гейт.failures:
         print(f"  ✗ {провал}")
-    return 0 if гейт.passed else 1
+    return exit_status(gate_passed=гейт.passed, diagnostic_only=аргументы.diagnostic_only)
 
 
 if __name__ == "__main__":
