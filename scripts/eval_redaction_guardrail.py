@@ -28,6 +28,9 @@ from scripts.eval_fewshot import write_predictions
 from scripts.preregister_redaction_calibration import load_predictions
 
 DEFAULT_CAMPAIGN_ROOT = data_root() / "redaction-calibration"
+# Имя обязано жить в одном месте: страж путей и сам прогон обязаны говорить об одном файле,
+# иначе переименование тихо выведет отчёт выживших из-под защиты от перезаписи.
+SURVIVOR_REPORT_NAME = "fewshot-survivors.md"
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +101,29 @@ def _paths(arguments: argparse.Namespace) -> GuardrailPaths:
     )
 
 
+def _resolved(path: Path) -> Path:
+    return path.resolve(strict=False)
+
+
+def validate_guardrail_paths(arguments: argparse.Namespace) -> GuardrailPaths:
+    """Не дать report перезаписать входы, обязательные outputs или crops."""
+    paths = _paths(arguments)
+    report = _resolved(paths.report)
+    reserved_files = {
+        _resolved(arguments.manifest),
+        _resolved(arguments.frozen_map),
+        _resolved(arguments.baseline_predictions),
+        _resolved(paths.pool),
+        _resolved(paths.holdout),
+        _resolved(paths.predictions),
+        _resolved(paths.report.with_name(SURVIVOR_REPORT_NAME)),
+    }
+    reserved_roots = (_resolved(paths.index), _resolved(paths.crops_root))
+    if report in reserved_files or any(report.is_relative_to(root) for root in reserved_roots):
+        raise ValueError(f"--report пересекается с входом или обязательным output: {paths.report}")
+    return paths
+
+
 def prepare_guardrail_splits(
     arguments: argparse.Namespace,
 ) -> tuple[tuple[FrozenUnit, ...], GuardrailPaths]:
@@ -150,7 +176,7 @@ def run_eval(arguments: argparse.Namespace, paths: GuardrailPaths) -> None:
             "--predictions-out",
             str(paths.predictions),
             "--report",
-            str(paths.report.with_name("fewshot-survivors.md")),
+            str(paths.report.with_name(SURVIVOR_REPORT_NAME)),
             "--diagnostic-only",
         ],
         check=True,
@@ -158,7 +184,8 @@ def run_eval(arguments: argparse.Namespace, paths: GuardrailPaths) -> None:
 
 
 def run_guardrail(arguments: argparse.Namespace) -> int:
-    """Выполнить success path: lineage → leakage check → index → eval → report."""
+    """Выполнить success path: path gate → lineage → leakage check → eval → report."""
+    validate_guardrail_paths(arguments)
     frozen, paths = prepare_guardrail_splits(arguments)
     baseline = load_baseline_predictions(arguments.baseline_predictions)
     validate_guardrail_lineage(baseline, frozen)

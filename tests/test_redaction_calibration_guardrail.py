@@ -21,7 +21,13 @@ from pipeline.redaction_calibration.guardrail import (
     validate_guardrail_lineage,
 )
 from pipeline.schema import empty_frame, read_split, write_split
-from scripts.eval_redaction_guardrail import GuardrailPaths, run_eval, run_guardrail
+from scripts.eval_redaction_guardrail import (
+    SURVIVOR_REPORT_NAME,
+    GuardrailPaths,
+    build_parser,
+    run_eval,
+    run_guardrail,
+)
 
 
 def _manifest_row(
@@ -89,6 +95,47 @@ def test_guardrail_pool_excludes_entire_frozen_holdout_unit_and_keeps_authority(
             next(row for row in catalog.classes if row.class_id == "lada__2107")
         )
     ]
+
+
+@pytest.mark.parametrize(
+    "unsafe_file",
+    [
+        "../../../other.jpg",
+        "/tmp/other.jpg",
+        "..\\..\\other.jpg",
+        "\\rooted.jpg",
+        "\\\\server\\share\\other.jpg",
+        "C:\\tmp\\other.jpg",
+        "C:other.jpg",
+        "other.jpg:stream",
+        "nested/other.jpg",
+        "nested\\other.jpg",
+        "",
+        ".",
+        "..",
+    ],
+)
+def test_guardrail_split_rejects_unsafe_manifest_filename(unsafe_file: str) -> None:
+    row = _manifest_row("survivor", file=unsafe_file)
+
+    with pytest.raises(ValueError, match=r"небезопасное имя кропа"):
+        build_guardrail_pool(
+            [row],
+            _frozen_units(),
+            {"holdout", "surviving-holdout"},
+            load_catalog(DEFAULT_CATALOG_PATH),
+        )
+
+
+def test_guardrail_split_accepts_single_filename_segment() -> None:
+    pool = build_guardrail_pool(
+        [_manifest_row("survivor", file="valid crop-01.jpg")],
+        _frozen_units(),
+        {"holdout", "surviving-holdout"},
+        load_catalog(DEFAULT_CATALOG_PATH),
+    )
+
+    assert pool["crop_path"].tolist() == ["lada__2107/valid crop-01.jpg"]
 
 
 def test_guardrail_pool_rejects_photo_absent_from_frozen_map() -> None:
@@ -279,6 +326,9 @@ def test_guardrail_cli_rejects_truncated_baseline_before_evaluation(
         lambda arguments: (frozen, paths),
     )
     monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.validate_guardrail_paths", lambda _: paths
+    )
+    monkeypatch.setattr(
         "scripts.eval_redaction_guardrail.load_baseline_predictions", lambda path: truncated
     )
     evaluation_started = False
@@ -307,6 +357,9 @@ def test_guardrail_all_destroyed_writes_header_only_predictions_and_failed_repor
     monkeypatch.setattr(
         "scripts.eval_redaction_guardrail.prepare_guardrail_splits",
         lambda arguments: (frozen, paths),
+    )
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.validate_guardrail_paths", lambda _: paths
     )
     monkeypatch.setattr(
         "scripts.eval_redaction_guardrail.load_baseline_predictions", lambda path: baseline
@@ -380,6 +433,9 @@ def test_guardrail_cli_checks_final_parquet_before_building_encoder(
         "scripts.eval_redaction_guardrail.prepare_guardrail_splits",
         lambda arguments: (frozen, paths),
     )
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.validate_guardrail_paths", lambda _: paths
+    )
     baseline = tuple(
         Prediction(unit.photo_id, 1, (1, 2, 3)) for unit in frozen if unit.split == "holdout_ru"
     )
@@ -400,6 +456,102 @@ def test_guardrail_cli_checks_final_parquet_before_building_encoder(
     with pytest.raises(ValueError, match="замороженными holdout-единицами"):
         run_guardrail(argparse.Namespace(baseline_predictions=tmp_path / "base.csv"))
     assert encoder_started is False
+
+
+def _guardrail_arguments(tmp_path: Path, *, report: Path | None = None) -> argparse.Namespace:
+    return build_parser().parse_args(
+        [
+            "--manifest",
+            str(tmp_path / "manifest.csv"),
+            "--crops-root",
+            str(tmp_path / "crops"),
+            "--frozen-map",
+            str(tmp_path / "frozen.csv"),
+            "--baseline-predictions",
+            str(tmp_path / "baseline.csv"),
+            "--out",
+            str(tmp_path / "out"),
+            *(["--report", str(report)] if report is not None else []),
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "collision",
+    [
+        "manifest",
+        "frozen_map",
+        "baseline_predictions",
+        "pool",
+        "holdout",
+        "predictions",
+        "survivor_report",
+        "index_file",
+        "index_subtree",
+        "crops_subtree",
+    ],
+)
+def test_guardrail_rejects_report_collisions_before_writing(
+    tmp_path: Path, collision: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arguments = _guardrail_arguments(tmp_path)
+    paths = GuardrailPaths.for_fixture(tmp_path / "out")
+    reports = {
+        "manifest": arguments.manifest,
+        "frozen_map": arguments.frozen_map,
+        "baseline_predictions": arguments.baseline_predictions,
+        "pool": paths.pool,
+        "holdout": paths.holdout,
+        "predictions": paths.predictions,
+        "survivor_report": paths.report.with_name(SURVIVOR_REPORT_NAME),
+        "index_file": paths.index / "catalog_index.bin",
+        "index_subtree": paths.index / "nested" / "report.md",
+        "crops_subtree": arguments.crops_root / "report.md",
+    }
+    arguments.report = reports[collision]
+    prepared = False
+
+    def forbidden_prepare(arguments: argparse.Namespace) -> None:
+        nonlocal prepared
+        prepared = True
+
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.prepare_guardrail_splits", forbidden_prepare
+    )
+
+    with pytest.raises(ValueError, match=r"--report.*пересекается"):
+        run_guardrail(arguments)
+    assert prepared is False
+
+
+def test_guardrail_rejects_normalized_report_alias(tmp_path: Path) -> None:
+    arguments = _guardrail_arguments(
+        tmp_path,
+        report=tmp_path / "out" / "x" / ".." / "candidate-predictions.csv",
+    )
+
+    with pytest.raises(ValueError, match=r"--report.*пересекается"):
+        run_guardrail(arguments)
+
+
+def test_guardrail_default_report_path_is_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arguments = _guardrail_arguments(tmp_path)
+    validated = False
+
+    def prepared_after_validation(arguments: argparse.Namespace) -> None:
+        nonlocal validated
+        validated = True
+        raise RuntimeError("prepared")
+
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.prepare_guardrail_splits", prepared_after_validation
+    )
+
+    with pytest.raises(RuntimeError, match="prepared"):
+        run_guardrail(arguments)
+    assert validated is True
 
 
 def test_guardrail_cli_writes_report_predictions_and_input_hashes(
@@ -433,6 +585,9 @@ def test_guardrail_cli_writes_report_predictions_and_input_hashes(
     monkeypatch.setattr(
         "scripts.eval_redaction_guardrail.prepare_guardrail_splits",
         lambda arguments: (_frozen_units(), paths),
+    )
+    monkeypatch.setattr(
+        "scripts.eval_redaction_guardrail.validate_guardrail_paths", lambda _: paths
     )
     monkeypatch.setattr(
         "scripts.eval_redaction_guardrail.assert_no_frozen_units", lambda *args: None

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import PureWindowsPath
 from typing import Literal
 
 import pandas as pd
@@ -57,6 +58,22 @@ def _frozen_by_photo(frozen_map: Sequence[FrozenUnit]) -> dict[str, FrozenUnit]:
     return {unit.photo_id: unit for unit in frozen_map}
 
 
+def _safe_filename(value: str) -> str:
+    """Проверить manifest file одинаково на Windows и в WSL."""
+    name = PureWindowsPath(value)
+    if (
+        name.is_absolute()
+        or name.drive
+        or name.name != value
+        or "/" in value
+        or "\\" in value
+        or ":" in value
+        or value in {"", ".", ".."}
+    ):
+        raise ValueError(f"небезопасное имя кропа: {value!r}")
+    return value
+
+
 def _manifest_to_split(
     new_manifest: Sequence[HarvestRow],
     frozen_map: Sequence[FrozenUnit],
@@ -82,6 +99,7 @@ def _manifest_to_split(
     records: list[dict[str, object]] = []
     for row in new_manifest:
         unit = frozen[row.sha256]
+        filename = _safe_filename(row.file)
         if unit.split != split or unit.listing_id in excluded_listing_ids:
             continue
         if row.class_id not in class_ids:
@@ -94,7 +112,7 @@ def _manifest_to_split(
                 "photo_id": row.sha256,
                 "listing_id": unit.listing_id,
                 "source": row.source,
-                "crop_path": f"{row.class_id}/{row.file}",
+                "crop_path": f"{row.class_id}/{filename}",
                 "brand": models[model_id].brand,
                 "model_id": model_id,
                 "class_idx": class_ids[row.class_id],
