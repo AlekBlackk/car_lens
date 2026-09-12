@@ -26,6 +26,7 @@ from pipeline.paths import data_root, harvest_dir
 DEFAULT_LONG_SIDE = 1600
 CAPTION_HEIGHT = 46
 CAPTION_FONT_SIZE = 30
+STATUS_TILE_SIZE = (1600, 900)
 DEFAULT_FONT = Path(r"C:\Windows\Fonts\arialbd.ttf")
 
 
@@ -34,6 +35,26 @@ def caption_text(
 ) -> str:
     """Подпись, впаиваемая в кадр целиком: номер, класс, числа детектора, размер."""
     return f"#{number:03d}  {class_id}  plates={plates} faces={faces}  {width}x{height}"
+
+
+def party_caption_text(
+    *,
+    party_number: int,
+    frame_number: int,
+    photo_id: str,
+    class_id: str,
+    pipeline_outcome: str,
+    plates: int,
+    faces: int,
+    width: int,
+    height: int,
+) -> str:
+    """Связать party-вид с immutable ID, порядком, исходом и детекторными числами."""
+    return (
+        f"party={party_number:03d} frame={frame_number:03d} photo={photo_id[:12]} "
+        f"{class_id} outcome={pipeline_outcome} plates={plates} faces={faces} "
+        f"{width}x{height}"
+    )
 
 
 def render_view(
@@ -68,9 +89,10 @@ def build_parser() -> argparse.ArgumentParser:
     парсер = argparse.ArgumentParser(
         description="Просмотровые виды выборки утечки номера с впаянным номером"
     )
-    парсер.add_argument(
-        "--sample", type=Path, required=True, help="черновик выборки с колонкой crop_path"
-    )
+    источник = парсер.add_mutually_exclusive_group(required=True)
+    источник.add_argument("--sample", type=Path, help="черновик выборки с колонкой crop_path")
+    источник.add_argument("--party-ledger", type=Path, help="ledger полной независимой партии")
+    парсер.add_argument("--party-number", type=int, default=None)
     парсер.add_argument("--crops-root", type=Path, default=None)
     парсер.add_argument("--out-dir", type=Path, default=None)
     парсер.add_argument("--long-side", type=int, default=DEFAULT_LONG_SIDE)
@@ -78,9 +100,119 @@ def build_parser() -> argparse.ArgumentParser:
     return парсер
 
 
+def _load_font(path: Path) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    if str(path) == "default":
+        return ImageFont.load_default()
+    return ImageFont.truetype(str(path), CAPTION_FONT_SIZE)
+
+
+def _cell(row: object, name: str, default: str = "") -> str:
+    value = getattr(row, name, default)
+    return default if pd.isna(value) else str(value)
+
+
+def _number(row: object, name: str) -> int:
+    value = getattr(row, name, 0)
+    return 0 if pd.isna(value) else int(value)
+
+
+def _status_tile(detail: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> Image.Image:
+    image = Image.new("RGB", STATUS_TILE_SIZE, "#eeeeee")
+    draw = ImageDraw.Draw(image)
+    draw.text((40, 100), detail, fill="#8b0000", font=font)
+    return image
+
+
+def _party_file_name(party_number: int, frame_number: int, photo_id: str) -> str:
+    safe_prefix = "".join(character for character in photo_id[:12] if character.isalnum())
+    return f"{party_number:03d}-{frame_number:03d}-{safe_prefix}.jpg"
+
+
+def _stage_party(arguments: argparse.Namespace) -> int:
+    if arguments.party_number is None or arguments.party_number < 1:
+        raise ValueError("party mode требует положительный --party-number")
+    ledger = pd.read_csv(arguments.party_ledger, keep_default_na=False)
+    required = {"photo_id", "pipeline_outcome", "reject_reason"}
+    missing = sorted(required - set(ledger.columns))
+    if missing:
+        raise ValueError(f"в party ledger нет колонок: {missing}")
+    duplicates = ledger[ledger["photo_id"].duplicated()]["photo_id"].tolist()
+    if duplicates:
+        raise ValueError(f"дубликат photo_id в party ledger: {duplicates[:5]}")
+    crops_root = arguments.crops_root or harvest_dir() / "crops"
+    out_dir = arguments.out_dir or data_root() / "audit" / "independent_plate_leak_views"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    font = _load_font(arguments.font)
+    records: list[dict[str, object]] = []
+    for frame_number, row in enumerate(ledger.itertuples(index=False), start=1):
+        photo_id = _cell(row, "photo_id")
+        outcome = _cell(row, "pipeline_outcome")
+        reason = _cell(row, "reject_reason")
+        crop_path = _cell(row, "crop_path")
+        class_id = _cell(row, "class_id")
+        plates = _number(row, "plates")
+        faces = _number(row, "faces")
+        source = crops_root / crop_path
+        if outcome == "accepted" and crop_path and source.is_file():
+            image = Image.open(source).convert("RGB")
+            width, height = image.size
+            view_status = "image"
+            detail = ""
+        elif outcome == "rejected":
+            image = Image.new("RGB", STATUS_TILE_SIZE, "#eeeeee")
+            width, height = image.size
+            view_status = "rejected_tile"
+            detail = f"REJECTED: {reason}"
+        else:
+            outcome = "operational_error"
+            reason = "missing_crop"
+            image = Image.new("RGB", STATUS_TILE_SIZE, "#eeeeee")
+            width, height = image.size
+            view_status = "operational_error"
+            detail = f"OPERATIONAL ERROR: missing accepted crop {source}"
+        caption = party_caption_text(
+            party_number=arguments.party_number,
+            frame_number=frame_number,
+            photo_id=photo_id,
+            class_id=class_id,
+            pipeline_outcome=outcome,
+            plates=plates,
+            faces=faces,
+            width=width,
+            height=height,
+        )
+        if view_status == "image":
+            view = render_view(image, caption, long_side=None, font=font)
+        else:
+            tile = _status_tile(detail, font)
+            view = render_view(tile, caption, long_side=None, font=font)
+        file_name = _party_file_name(arguments.party_number, frame_number, photo_id)
+        view.save(out_dir / file_name, quality=92, subsampling=1)
+        records.append(
+            {
+                "party_number": arguments.party_number,
+                "frame_number": frame_number,
+                "photo_id": photo_id,
+                "class_id": class_id,
+                "pipeline_outcome": outcome,
+                "reject_reason": reason,
+                "plates": plates,
+                "faces": faces,
+                "view_status": view_status,
+                "caption": caption,
+                "file": file_name,
+            }
+        )
+    pd.DataFrame(records).to_csv(out_dir / "views.csv", index=False, encoding="utf-8")
+    print(f"подготовлено party-видов: {len(records)} -> {out_dir}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Собрать вид на каждый кадр выборки, записать сводный `views.csv`."""
     аргументы = build_parser().parse_args(argv)
+    if аргументы.party_ledger is not None:
+        return _stage_party(аргументы)
 
     выборка = pd.read_csv(аргументы.sample)
     if "crop_path" not in выборка.columns:
@@ -91,7 +223,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     crops_root = аргументы.crops_root or harvest_dir() / "crops"
     out_dir = аргументы.out_dir or (data_root() / "audit" / "plate_leak_views")
     out_dir.mkdir(parents=True, exist_ok=True)
-    шрифт = ImageFont.truetype(str(аргументы.font), CAPTION_FONT_SIZE)
+    шрифт = _load_font(аргументы.font)
 
     записи: list[dict[str, object]] = []
     пропущено = 0

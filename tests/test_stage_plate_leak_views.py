@@ -8,7 +8,13 @@ import pandas as pd
 import pytest
 from PIL import Image, ImageFont
 
-from scripts.stage_plate_leak_views import build_parser, caption_text, main, render_view
+from scripts.stage_plate_leak_views import (
+    build_parser,
+    caption_text,
+    main,
+    party_caption_text,
+    render_view,
+)
 
 
 def test_подпись_несёт_номер_класс_числа_и_размер() -> None:
@@ -72,3 +78,144 @@ def test_разбор_флагов_даёт_значения_по_умолчан
     assert аргументы.long_side == 1600
     assert аргументы.crops_root is None
     assert аргументы.out_dir is None
+
+
+def test_party_caption_burns_required_identity_and_detector_fields() -> None:
+    caption = party_caption_text(
+        party_number=2,
+        frame_number=7,
+        photo_id="abcdef0123456789",
+        class_id="lada__vesta",
+        pipeline_outcome="accepted",
+        plates=3,
+        faces=1,
+        width=2400,
+        height=1600,
+    )
+
+    for expected in (
+        "party=002",
+        "frame=007",
+        "photo=abcdef012345",
+        "lada__vesta",
+        "outcome=accepted",
+        "plates=3",
+        "faces=1",
+        "2400x1600",
+    ):
+        assert expected in caption
+
+
+def _write_party_ledger(path: Path) -> None:
+    pd.DataFrame(
+        [
+            {
+                "photo_id": "accepted-photo-id",
+                "pipeline_outcome": "accepted",
+                "reject_reason": "",
+                "review_status": "pending",
+                "plate_verdict": "",
+                "note": "",
+                "crop_path": "accepted.jpg",
+                "class_id": "class-a",
+                "plates": 1,
+                "faces": 0,
+            },
+            {
+                "photo_id": "rejected-photo-id",
+                "pipeline_outcome": "rejected",
+                "reject_reason": "over_redacted",
+                "review_status": "resolved",
+                "plate_verdict": "",
+                "note": "",
+                "crop_path": "",
+                "class_id": "class-b",
+                "plates": 0,
+                "faces": 2,
+            },
+            {
+                "photo_id": "missing-photo-id",
+                "pipeline_outcome": "accepted",
+                "reject_reason": "",
+                "review_status": "pending",
+                "plate_verdict": "",
+                "note": "",
+                "crop_path": "missing.jpg",
+                "class_id": "class-c",
+                "plates": 2,
+                "faces": 0,
+            },
+        ]
+    ).to_csv(path, index=False)
+
+
+def test_party_mode_stages_full_resolution_views_and_status_tiles(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.csv"
+    crops = tmp_path / "crops"
+    output = tmp_path / "views"
+    crops.mkdir()
+    _write_party_ledger(ledger)
+    Image.new("RGB", (3200, 2000), "red").save(crops / "accepted.jpg")
+
+    assert (
+        main(
+            [
+                "--party-ledger",
+                str(ledger),
+                "--party-number",
+                "2",
+                "--crops-root",
+                str(crops),
+                "--out-dir",
+                str(output),
+                "--font",
+                "default",
+            ]
+        )
+        == 0
+    )
+
+    records = pd.read_csv(output / "views.csv", keep_default_na=False)
+    assert records[["frame_number", "photo_id", "view_status"]].to_dict("records") == [
+        {"frame_number": 1, "photo_id": "accepted-photo-id", "view_status": "image"},
+        {"frame_number": 2, "photo_id": "rejected-photo-id", "view_status": "rejected_tile"},
+        {
+            "frame_number": 3,
+            "photo_id": "missing-photo-id",
+            "view_status": "operational_error",
+        },
+    ]
+    accepted = Image.open(output / str(records.loc[0, "file"]))
+    assert accepted.size == (3200, 2000 + 46)
+    rejected = Image.open(output / str(records.loc[1, "file"]))
+    missing = Image.open(output / str(records.loc[2, "file"]))
+    assert rejected.size == missing.size
+    assert rejected.size == (1600, 900 + 46)
+    assert records.loc[2, "pipeline_outcome"] == "operational_error"
+    assert records.loc[2, "reject_reason"] == "missing_crop"
+
+
+def test_party_mode_rejects_ledger_with_duplicate_photo_ids(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.csv"
+    pd.DataFrame(
+        [
+            {"photo_id": "same", "pipeline_outcome": "rejected", "reject_reason": "x"},
+            {"photo_id": "same", "pipeline_outcome": "rejected", "reject_reason": "x"},
+        ]
+    ).to_csv(ledger, index=False)
+
+    with pytest.raises(ValueError, match="дубликат"):
+        main(
+            [
+                "--party-ledger",
+                str(ledger),
+                "--party-number",
+                "1",
+                "--crops-root",
+                str(tmp_path),
+                "--out-dir",
+                str(tmp_path / "views"),
+                "--font",
+                "default",
+            ]
+        )
