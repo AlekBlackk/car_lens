@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
+from PIL import Image
 
 from pipeline.plate_leak import LEAK_DEFINITIONS, clopper_pearson
 from pipeline.redaction_calibration.privacy import (
@@ -18,7 +20,8 @@ from pipeline.redaction_calibration.privacy import (
     validate_independent_ledger,
 )
 from pipeline.redaction_calibration.state import CalibrationStateError
-from scripts.measure_independent_plate_leak import main
+from scripts.measure_independent_plate_leak import STAGING_FIELDS, main
+from scripts.stage_plate_leak_views import main as stage_party_views
 
 VERDICTS = (
     "leak",
@@ -195,10 +198,11 @@ def _write_json(path: Path, document: object) -> None:
 
 
 def _write_pipeline(path: Path, outcomes: tuple[tuple[str, str, str], ...]) -> None:
+    """Pipeline CSV несёт и колонки аудита: именно их ledger отдаёт party-видам."""
     with path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(
             stream,
-            fieldnames=("photo_id", "pipeline_outcome", "reject_reason"),
+            fieldnames=("photo_id", "pipeline_outcome", "reject_reason", *STAGING_FIELDS),
         )
         writer.writeheader()
         for photo_id, outcome, reason in outcomes:
@@ -207,6 +211,10 @@ def _write_pipeline(path: Path, outcomes: tuple[tuple[str, str, str], ...]) -> N
                     "photo_id": photo_id,
                     "pipeline_outcome": outcome,
                     "reject_reason": reason,
+                    "crop_path": f"{photo_id}.jpg" if outcome == "accepted" else "",
+                    "class_id": "class-a",
+                    "plates": 1,
+                    "faces": 0,
                 }
             )
 
@@ -542,3 +550,139 @@ def test_cli_completed_failure_is_terminal_and_keeps_exact_report(tmp_path: Path
     )
     with pytest.raises(CalibrationStateError, match="недопустимый переход"):
         main(arguments)
+
+
+def _resolved_arguments(tmp_path: Path, **overrides: Path) -> list[str]:
+    paths = {
+        "--batches": tmp_path / "batches.json",
+        "--profile": tmp_path / "profile.json",
+        "--pipeline": tmp_path / "pipeline.csv",
+        "--reviews": tmp_path / "reviews.csv",
+        "--ledger": tmp_path / "ledger.csv",
+        "--report": tmp_path / "report.json",
+    }
+    paths.update(overrides)
+    arguments: list[str] = []
+    for flag, path in paths.items():
+        arguments.extend((flag, str(path)))
+    arguments.extend(("--post-profile-pool-size", "2"))
+    return arguments
+
+
+def _resolved_batch_fixture(tmp_path: Path) -> None:
+    _write_json(tmp_path / "batches.json", _batch_document())
+    _write_json(tmp_path / "profile.json", _profile_document())
+    _write_pipeline(tmp_path / "pipeline.csv", (("id-a", "accepted", ""), ("id-b", "accepted", "")))
+    (tmp_path / "reviews.csv").write_text(
+        "photo_id,review_status,plate_verdict,note\n"
+        "id-a,resolved,clean_filled,\n"
+        "id-b,resolved,clean_no_plate,\n",
+        encoding="utf-8",
+    )
+
+
+def test_ledger_carries_staging_columns_for_party_views(tmp_path: Path) -> None:
+    _resolved_batch_fixture(tmp_path)
+
+    # Партия фикстуры меньше обязательных 300 кадров, поэтому отчёт закономерно не
+    # проходит; проверяется состав записанного ledger, а не вердикт.
+    assert main(_resolved_arguments(tmp_path)) == 1
+
+    with (tmp_path / "ledger.csv").open(encoding="utf-8", newline="") as stream:
+        rows = tuple(csv.DictReader(stream))
+    assert set(STAGING_FIELDS) <= set(rows[0])
+    assert [row["crop_path"] for row in rows] == ["id-a.jpg", "id-b.jpg"]
+    assert rows[0]["class_id"] == "class-a"
+    assert rows[0]["plates"] == "1"
+
+
+def test_cli_requires_pipeline_columns_needed_by_party_views(tmp_path: Path) -> None:
+    _resolved_batch_fixture(tmp_path)
+    (tmp_path / "pipeline.csv").write_text(
+        "photo_id,pipeline_outcome,reject_reason\nid-a,accepted,\nid-b,accepted,\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="crop_path"):
+        main(_resolved_arguments(tmp_path))
+
+    persisted = json.loads((tmp_path / "batches.json").read_text(encoding="utf-8"))
+    assert persisted["batches"][0]["state"] == "sealed"
+
+
+@pytest.mark.parametrize("output_flag", ["--ledger", "--report"])
+def test_cli_refuses_output_path_that_would_overwrite_an_input(
+    tmp_path: Path, output_flag: str
+) -> None:
+    _resolved_batch_fixture(tmp_path)
+    reviews_before = (tmp_path / "reviews.csv").read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match=output_flag):
+        main(_resolved_arguments(tmp_path, **{output_flag: tmp_path / "reviews.csv"}))
+
+    assert (tmp_path / "reviews.csv").read_text(encoding="utf-8") == reviews_before
+    persisted = json.loads((tmp_path / "batches.json").read_text(encoding="utf-8"))
+    assert persisted["batches"][0]["state"] == "sealed"
+
+
+def test_cli_validates_pipeline_before_opening_sealed_batch(tmp_path: Path) -> None:
+    _resolved_batch_fixture(tmp_path)
+    _write_pipeline(tmp_path / "pipeline.csv", (("id-a", "accepted", ""), ("id-x", "accepted", "")))
+
+    with pytest.raises(ValueError, match="чужие"):
+        main(_resolved_arguments(tmp_path))
+
+    persisted = json.loads((tmp_path / "batches.json").read_text(encoding="utf-8"))["batches"][0]
+    assert persisted["state"] == "sealed"
+    assert persisted.get("open_result_sha256") is None
+    assert not (tmp_path / "ledger.csv").exists()
+
+
+def test_report_witnesses_ledger_and_final_reviews(tmp_path: Path) -> None:
+    _resolved_batch_fixture(tmp_path)
+
+    assert main(_resolved_arguments(tmp_path)) == 1
+
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert (
+        report["ledger_sha256"]
+        == hashlib.sha256((tmp_path / "ledger.csv").read_bytes()).hexdigest()
+    )
+    assert (
+        report["reviews_sha256"]
+        == hashlib.sha256((tmp_path / "reviews.csv").read_bytes()).hexdigest()
+    )
+
+
+def test_written_ledger_composes_with_party_staging(tmp_path: Path) -> None:
+    _resolved_batch_fixture(tmp_path)
+    crops = tmp_path / "crops"
+    crops.mkdir()
+    for photo_id in ("id-a", "id-b"):
+        Image.new("RGB", (400, 300), "red").save(crops / f"{photo_id}.jpg")
+    views = tmp_path / "views"
+
+    assert main(_resolved_arguments(tmp_path)) == 1
+    assert (
+        stage_party_views(
+            [
+                "--party-ledger",
+                str(tmp_path / "ledger.csv"),
+                "--party-number",
+                "1",
+                "--crops-root",
+                str(crops),
+                "--out-dir",
+                str(views),
+                "--font",
+                "default",
+            ]
+        )
+        == 0
+    )
+
+    with (views / "views.csv").open(encoding="utf-8", newline="") as stream:
+        staged = tuple(csv.DictReader(stream))
+    assert [row["view_status"] for row in staged] == ["image", "image"]
+    assert [row["class_id"] for row in staged] == ["class-a", "class-a"]
+    assert [row["plates"] for row in staged] == ["1", "1"]

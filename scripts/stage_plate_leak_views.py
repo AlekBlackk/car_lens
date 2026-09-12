@@ -26,8 +26,21 @@ from pipeline.paths import data_root, harvest_dir
 DEFAULT_LONG_SIDE = 1600
 CAPTION_HEIGHT = 46
 CAPTION_FONT_SIZE = 30
+CAPTION_MARGIN = 10
 STATUS_TILE_SIZE = (1600, 900)
+STATUS_TILE_MARGIN = 40
+STATUS_TILE_TOP = 100
+STATUS_TILE_LINE_SPACING = 10
 DEFAULT_FONT = Path(r"C:\Windows\Fonts\arialbd.ttf")
+PARTY_LEDGER_COLUMNS = (
+    "photo_id",
+    "pipeline_outcome",
+    "reject_reason",
+    "crop_path",
+    "class_id",
+    "plates",
+    "faces",
+)
 
 
 def caption_text(
@@ -57,17 +70,48 @@ def party_caption_text(
     )
 
 
+def fit_text_lines(
+    text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont, max_width: int
+) -> list[str]:
+    """Разложить текст по строкам не шире `max_width`, ничего не теряя.
+
+    Переносим по символам, а не по словам: не влезают обычно абсолютный путь к
+    отсутствующему кропу и длинная причина отказа, а путь целиком одно «слово».
+    Обрезанный хвост делает и подпись, и плитку бесполезными: опознать кадр и файл
+    по ним и есть их назначение.
+    """
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1))).textlength
+    lines: list[str] = []
+    current = ""
+    for character in text:
+        candidate = current + character
+        if current and measure(candidate, font=font) > max_width:
+            lines.append(current)
+            current = character
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
 def render_view(
     image: Image.Image,
     caption: str,
     *,
     long_side: int | None = DEFAULT_LONG_SIDE,
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    wrap_caption: bool = False,
 ) -> Image.Image:
     """Уменьшить (если нужно) до `long_side`, дописать белую полосу с подписью сверху.
 
     Полоса — не наложение поверх кадра: номер обязан читаться, даже если фон машины
     белый или подпись легла на светлый участок кузова.
+
+    `wrap_caption` переносит не влезшую по ширине подпись, растя полосу: он нужен
+    party-видам, где подпись длиннее, а плитка статуса узкая — 1600 px, и хвост с
+    размером кадра иначе обрезается. Остальные вызовы рисуют подпись одной строкой,
+    как раньше.
     """
     ш, в = image.size
     if long_side is None:
@@ -79,9 +123,17 @@ def render_view(
             if к >= 1.0
             else image.resize((round(ш * к), round(в * к)), Image.Resampling.LANCZOS)
         )
-    полотно = Image.new("RGB", (вид.size[0], вид.size[1] + CAPTION_HEIGHT), "white")
-    полотно.paste(вид, (0, CAPTION_HEIGHT))
-    ImageDraw.Draw(полотно).text((10, 8), caption, fill="black", font=font)
+    строки = (
+        fit_text_lines(caption, font, вид.size[0] - 2 * CAPTION_MARGIN)
+        if wrap_caption
+        else [caption]
+    )
+    высота_полосы = CAPTION_HEIGHT * len(строки)
+    полотно = Image.new("RGB", (вид.size[0], вид.size[1] + высота_полосы), "white")
+    полотно.paste(вид, (0, высота_полосы))
+    рисунок = ImageDraw.Draw(полотно)
+    for индекс, строка in enumerate(строки):
+        рисунок.text((CAPTION_MARGIN, 8 + индекс * CAPTION_HEIGHT), строка, fill="black", font=font)
     return полотно
 
 
@@ -113,14 +165,38 @@ def _cell(row: object, name: str, default: str = "") -> str:
 
 def _number(row: object, name: str) -> int:
     value = getattr(row, name, 0)
-    return 0 if pd.isna(value) else int(value)
+    if pd.isna(value) or (isinstance(value, str) and not value.strip()):
+        return 0
+    return int(value)
 
 
 def _status_tile(detail: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> Image.Image:
     image = Image.new("RGB", STATUS_TILE_SIZE, "#eeeeee")
     draw = ImageDraw.Draw(image)
-    draw.text((40, 100), detail, fill="#8b0000", font=font)
+    lines = fit_text_lines(detail, font, STATUS_TILE_SIZE[0] - 2 * STATUS_TILE_MARGIN)
+    draw.multiline_text(
+        (STATUS_TILE_MARGIN, STATUS_TILE_TOP),
+        "\n".join(lines),
+        fill="#8b0000",
+        font=font,
+        spacing=STATUS_TILE_LINE_SPACING,
+    )
     return image
+
+
+def _resolve_crop(crops_root: Path, crop_path: str) -> Path:
+    """Не дать строке ledger вывести staging за пределы каталога кропов.
+
+    Абсолютное значение подменило бы `--crops-root` целиком, а `..` вывел бы из него, и
+    в privacy-аудит попали бы картинки откуда угодно с диска.
+    """
+    candidate = Path(crop_path)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError(f"crop_path ведёт за пределы --crops-root: {crop_path}")
+    source = (crops_root / candidate).resolve()
+    if not source.is_relative_to(crops_root.resolve()):
+        raise ValueError(f"crop_path ведёт за пределы --crops-root: {crop_path}")
+    return source
 
 
 def _party_file_name(party_number: int, frame_number: int, photo_id: str) -> str:
@@ -132,8 +208,7 @@ def _stage_party(arguments: argparse.Namespace) -> int:
     if arguments.party_number is None or arguments.party_number < 1:
         raise ValueError("party mode требует положительный --party-number")
     ledger = pd.read_csv(arguments.party_ledger, keep_default_na=False)
-    required = {"photo_id", "pipeline_outcome", "reject_reason"}
-    missing = sorted(required - set(ledger.columns))
+    missing = sorted(set(PARTY_LEDGER_COLUMNS) - set(ledger.columns))
     if missing:
         raise ValueError(f"в party ledger нет колонок: {missing}")
     duplicates = ledger[ledger["photo_id"].duplicated()]["photo_id"].tolist()
@@ -152,8 +227,8 @@ def _stage_party(arguments: argparse.Namespace) -> int:
         class_id = _cell(row, "class_id")
         plates = _number(row, "plates")
         faces = _number(row, "faces")
-        source = crops_root / crop_path
-        if outcome == "accepted" and crop_path and source.is_file():
+        source = _resolve_crop(crops_root, crop_path) if crop_path else None
+        if outcome == "accepted" and source is not None and source.is_file():
             image = Image.open(source).convert("RGB")
             width, height = image.size
             view_status = "image"
@@ -163,13 +238,21 @@ def _stage_party(arguments: argparse.Namespace) -> int:
             width, height = image.size
             view_status = "rejected_tile"
             detail = f"REJECTED: {reason}"
-        else:
+        elif outcome == "accepted":
             outcome = "operational_error"
             reason = "missing_crop"
             image = Image.new("RGB", STATUS_TILE_SIZE, "#eeeeee")
             width, height = image.size
             view_status = "operational_error"
-            detail = f"OPERATIONAL ERROR: missing accepted crop {source}"
+            detail = f"OPERATIONAL ERROR: missing accepted crop {source or 'crop_path пуст'}"
+        elif outcome == "operational_error":
+            # Свою причину ledger сообщает сам; аудиторский артефакт не переписывает факты.
+            image = Image.new("RGB", STATUS_TILE_SIZE, "#eeeeee")
+            width, height = image.size
+            view_status = "operational_error"
+            detail = f"OPERATIONAL ERROR: {reason}"
+        else:
+            raise ValueError(f"{photo_id}: неизвестный pipeline_outcome {outcome!r}")
         caption = party_caption_text(
             party_number=arguments.party_number,
             frame_number=frame_number,
@@ -182,10 +265,10 @@ def _stage_party(arguments: argparse.Namespace) -> int:
             height=height,
         )
         if view_status == "image":
-            view = render_view(image, caption, long_side=None, font=font)
+            view = render_view(image, caption, long_side=None, font=font, wrap_caption=True)
         else:
             tile = _status_tile(detail, font)
-            view = render_view(tile, caption, long_side=None, font=font)
+            view = render_view(tile, caption, long_side=None, font=font, wrap_caption=True)
         file_name = _party_file_name(arguments.party_number, frame_number, photo_id)
         view.save(out_dir / file_name, quality=92, subsampling=1)
         records.append(
@@ -200,6 +283,7 @@ def _stage_party(arguments: argparse.Namespace) -> int:
                 "faces": faces,
                 "view_status": view_status,
                 "caption": caption,
+                "detail": detail,
                 "file": file_name,
             }
         )
