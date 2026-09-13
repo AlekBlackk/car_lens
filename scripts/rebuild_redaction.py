@@ -24,7 +24,7 @@ import json
 import subprocess
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import MISSING, asdict, dataclass, replace
 from dataclasses import fields as dataclass_fields
 from datetime import UTC, date, datetime
 from pathlib import Path, PureWindowsPath
@@ -46,7 +46,7 @@ from pipeline.harvest.manifest import (
     write_manifest,
 )
 from pipeline.harvest.redact import PlateDetectionTrace, RawPlateObservation, redact_frame
-from pipeline.harvest.redaction_profile import RedactionProfile, profile_id
+from pipeline.harvest.redaction_profile import DetectorProfile, RedactionProfile, profile_id
 from pipeline.harvest.run import is_crop_over_redacted
 from pipeline.paths import harvest_dir
 from pipeline.redaction_calibration.measure import (
@@ -278,6 +278,54 @@ def preflight(rows: Sequence[HarvestRow], root: Path) -> list[str]:
         if not cache_path(root, строка.source, строка.sha256, "jpg").exists():
             пропало.append(строка.sha256)
     return пропало
+
+
+def _detector_profile(значения: Any, ключ: str) -> DetectorProfile:
+    """Собрать параметры одного детектора, не повторяя проверку диапазонов.
+
+    Границы знает `DetectorProfile.__post_init__`, и вторая их копия здесь расходилась бы
+    с первой молча. Задача разбора — назвать неизвестные и недостающие ключи, а отказ
+    валидации только переупаковать в сообщение с именем детектора.
+    """
+    if not isinstance(значения, dict):
+        raise RebuildError(f"профиль {ключ}: ожидался объект, получено {type(значения).__name__}")
+    поля = {поле.name: поле for поле in dataclass_fields(DetectorProfile)}
+    лишние = sorted(set(значения) - set(поля))
+    if лишние:
+        raise RebuildError(f"профиль {ключ}: неизвестные ключи {лишние}")
+    нехватка = sorted(
+        имя for имя, поле in поля.items() if поле.default is MISSING and имя not in значения
+    )
+    if нехватка:
+        raise RebuildError(f"профиль {ключ}: нет обязательных ключей {нехватка}")
+    try:
+        return DetectorProfile(**значения)
+    except (TypeError, ValueError) as ошибка:
+        raise RebuildError(f"профиль {ключ}: {ошибка}") from ошибка
+
+
+def load_profile_document(path: Path) -> RedactionProfile:
+    """Прочитать кандидатный профиль редакции из JSON формы `asdict(RedactionProfile)`.
+
+    Это ровно та форма, что лежит в ключе `profile` паспорта любого workspace, поэтому
+    кандидат описывается копией уже существующего паспорта с правкой чисел.
+    """
+    try:
+        документ = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as ошибка:
+        raise RebuildError(f"профиль не читается: {path}") from ошибка
+    except json.JSONDecodeError as ошибка:
+        raise RebuildError(f"профиль не разбирается как JSON: {path}: {ошибка}") from ошибка
+    if not isinstance(документ, dict):
+        raise RebuildError(f"профиль {path}: ожидался объект верхнего уровня")
+    детекторы = [поле.name for поле in dataclass_fields(RedactionProfile)]
+    лишние = sorted(set(документ) - set(детекторы))
+    if лишние:
+        raise RebuildError(f"профиль {path}: неизвестные ключи {лишние}")
+    нехватка = sorted(имя for имя in детекторы if имя not in документ)
+    if нехватка:
+        raise RebuildError(f"профиль {path}: нет обязательных детекторов {нехватка}")
+    return RedactionProfile(**{имя: _detector_profile(документ[имя], имя) for имя in детекторы})
 
 
 def _decode_old_crop(row: HarvestRow, input_root: Path) -> np.ndarray | None:
@@ -548,6 +596,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="~/carlens-data/harvest",
     )
     парсер.add_argument(
+        "--profile",
+        type=Path,
+        default=None,
+        help="JSON кандидатного профиля редакции (по умолчанию CURRENT_REDACTION_PROFILE)",
+    )
+    парсер.add_argument(
         "--reset-audit",
         action="store_true",
         help="сбросить все вердикты аудита, включая неизменившиеся пиксели",
@@ -720,6 +774,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Всё, что способно упасть, срабатывает до создания workspace. Порядок не косметика:
     # workspace обязан быть новым и пустым, поэтому прогон, оборвавшийся уже после
     # `mkdir`, оставил бы каталог, который блокирует собственный повтор.
+    профиль = (
+        CURRENT_REDACTION_PROFILE
+        if аргументы.profile is None
+        else load_profile_document(аргументы.profile)
+    )
     input_root, output_root = validate_workspace_roots(аргументы.out_root, аргументы.data_root)
     целевой_манифест = resolve_manifest_target(output_root, аргументы.out)
     манифест = аргументы.manifest.resolve(strict=True)
@@ -735,16 +794,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     пины = load_detectors_manifest(DEFAULT_DETECTORS_MANIFEST)
     verify_weights(пины, аргументы.models)
     паспорт = _profile_document(
-        profile=CURRENT_REDACTION_PROFILE,
+        profile=профиль,
         pins=пины,
         git_sha=current_git_sha(),
         stage_sha256=detector_stage_sha256(),
         input_manifest=манифест,
         input_root=input_root,
     )
-    plate_detectors = build_plate_detectors(
-        CURRENT_REDACTION_PROFILE, models_dir=аргументы.models, pins=пины
-    )
+    plate_detectors = build_plate_detectors(профиль, models_dir=аргументы.models, pins=пины)
     vehicle_detector = YoloDetector()
     face_detector = YuNetFaceDetector(аргументы.models / "face.onnx")
 

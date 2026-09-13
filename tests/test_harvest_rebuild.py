@@ -20,7 +20,11 @@ from pipeline.harvest.detectors import DetectorPin
 from pipeline.harvest.jpeg import encode_jpeg, write_jpeg_atomic
 from pipeline.harvest.manifest import HarvestRow, append_row, load_manifest
 from pipeline.harvest.redact import PlateDetectionTrace, RawPlateObservation, RedactionResult
-from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE
+from pipeline.harvest.redaction_profile import (
+    CURRENT_REDACTION_PROFILE,
+    DetectorProfile,
+    RedactionProfile,
+)
 from pipeline.harvest.tiling import TileObservation
 from pipeline.redaction_calibration.model import FrameProfileResult
 from scripts.rebuild_redaction import (
@@ -30,6 +34,7 @@ from scripts.rebuild_redaction import (
     RebuildResult,
     _observation_records,
     build_parser,
+    load_profile_document,
     main,
     preflight,
     prepare_workspace,
@@ -1395,3 +1400,166 @@ def test_main_берёт_детекторы_номера_из_единой_фа�
     assert код == 0
     assert фабрика.call_args.args == (CURRENT_REDACTION_PROFILE,)
     assert фабрика.call_args.kwargs == {"models_dir": модели, "pins": пины}
+
+
+def _кандидат() -> RedactionProfile:
+    return RedactionProfile(
+        plate=DetectorProfile(confidence=0.35, tile=960, overlap=0.3, iou_merge=0.5),
+        plate_hires=DetectorProfile(confidence=0.2, tile=1600, overlap=0.25),
+    )
+
+
+def _файл_профиля(path: Path, документ: object) -> Path:
+    path.write_text(json.dumps(документ, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_load_profile_document_принимает_паспорт_текущего_профиля(tmp_path: Path) -> None:
+    """Кандидат описывается копией ключа `profile` из profile.json любого workspace."""
+    путь = _файл_профиля(tmp_path / "profile.json", asdict(CURRENT_REDACTION_PROFILE))
+
+    assert load_profile_document(путь) == CURRENT_REDACTION_PROFILE
+
+
+def test_load_profile_document_берёт_умолчание_iou_merge(tmp_path: Path) -> None:
+    документ = asdict(_кандидат())
+    del документ["plate_hires"]["iou_merge"]
+    путь = _файл_профиля(tmp_path / "profile.json", документ)
+
+    assert load_profile_document(путь) == _кандидат()
+
+
+def test_load_profile_document_отвергает_неизвестный_ключ(tmp_path: Path) -> None:
+    документ = asdict(_кандидат())
+    документ["plate_lowres"] = документ["plate"]
+    путь = _файл_профиля(tmp_path / "profile.json", документ)
+
+    with pytest.raises(ValueError, match="plate_lowres"):
+        load_profile_document(путь)
+
+
+def test_load_profile_document_отвергает_неизвестный_ключ_детектора(tmp_path: Path) -> None:
+    документ = asdict(_кандидат())
+    документ["plate"]["conf"] = 0.4
+    путь = _файл_профиля(tmp_path / "profile.json", документ)
+
+    with pytest.raises(ValueError, match="conf"):
+        load_profile_document(путь)
+
+
+def test_load_profile_document_отвергает_отсутствующий_детектор(tmp_path: Path) -> None:
+    документ = asdict(_кандидат())
+    del документ["plate_hires"]
+    путь = _файл_профиля(tmp_path / "profile.json", документ)
+
+    with pytest.raises(ValueError, match="plate_hires"):
+        load_profile_document(путь)
+
+
+def test_load_profile_document_отвергает_отсутствующий_параметр(tmp_path: Path) -> None:
+    документ = asdict(_кандидат())
+    del документ["plate"]["tile"]
+    путь = _файл_профиля(tmp_path / "profile.json", документ)
+
+    with pytest.raises(ValueError, match="tile"):
+        load_profile_document(путь)
+
+
+def test_load_profile_document_отвергает_значение_вне_диапазона(tmp_path: Path) -> None:
+    документ = asdict(_кандидат())
+    документ["plate"]["confidence"] = 1.5
+    путь = _файл_профиля(tmp_path / "profile.json", документ)
+
+    with pytest.raises(ValueError, match="confidence"):
+        load_profile_document(путь)
+
+
+def test_main_собирает_детекторы_кандидатным_профилем(tmp_path: Path) -> None:
+    """Калибровке нужен способ превратить кандидатный профиль в пиксели, а не только зашитый."""
+    манифест = tmp_path / "manifest.csv"
+    sha = "a" * 64
+    append_row(манифест, _строка(sha))
+    _оригинал(tmp_path / "data", sha)
+    модели = tmp_path / "models"
+    модели.mkdir(parents=True, exist_ok=True)
+    пины = _pins()
+    кандидат = _кандидат()
+    профиль = _файл_профиля(tmp_path / "candidate.json", asdict(кандидат))
+    workspace = tmp_path / "workspace"
+
+    with (
+        patch("pipeline.harvest.detectors.verify_weights"),
+        patch("pipeline.harvest.detectors.load_detectors_manifest", return_value=пины),
+        patch("pipeline.harvest.redaction_profile.detector_stage_sha256", return_value="4" * 64),
+        patch("pipeline.harvest.redaction_profile.build_plate_detectors") as фабрика,
+        patch("pipeline.detectors.yolo.YoloDetector"),
+        patch("pipeline.harvest.backends.YuNetFaceDetector"),
+        patch("scripts.rebuild_redaction.current_git_sha", return_value="5" * 40),
+        patch("scripts.rebuild_redaction.current_timestamp", return_value="2026-09-07T12:00:00Z"),
+        patch(
+            "scripts.rebuild_redaction.rebuild_row",
+            return_value=RebuildResult(
+                "accepted",
+                _строка(sha),
+                FrameProfileResult(
+                    photo_id=sha,
+                    class_id="lada__granta",
+                    outcome="accepted",
+                    reject_reason=None,
+                    old_black_frac=0.0,
+                    new_black_frac=0.0,
+                    delta_black=0.0,
+                    pixels_equal=True,
+                    audit_preserved=True,
+                ),
+            ),
+        ),
+    ):
+        код = main(
+            [
+                "--manifest",
+                str(манифест),
+                "--models",
+                str(модели),
+                "--data-root",
+                str(tmp_path / "data"),
+                "--out-root",
+                str(workspace),
+                "--profile",
+                str(профиль),
+            ]
+        )
+
+    assert код == 0
+    assert фабрика.call_args.args == (кандидат,)
+    паспорт = json.loads((workspace / "profile.json").read_text(encoding="utf-8"))
+    assert паспорт["profile"] == asdict(кандидат)
+
+
+def test_main_отвергает_битый_профиль_до_создания_workspace(tmp_path: Path) -> None:
+    манифест = tmp_path / "manifest.csv"
+    append_row(манифест, _строка("a" * 64))
+    input_root = tmp_path / "input"
+    _оригинал(input_root, "a" * 64)
+    output_root = tmp_path / "workspace"
+    документ = asdict(_кандидат())
+    документ["plate"]["overlap"] = 1.0
+    профиль = _файл_профиля(tmp_path / "candidate.json", документ)
+
+    with pytest.raises(ValueError, match="overlap"):
+        main(
+            [
+                "--manifest",
+                str(манифест),
+                "--models",
+                str(tmp_path / "models"),
+                "--data-root",
+                str(input_root),
+                "--out-root",
+                str(output_root),
+                "--profile",
+                str(профиль),
+            ]
+        )
+
+    assert not output_root.exists()
