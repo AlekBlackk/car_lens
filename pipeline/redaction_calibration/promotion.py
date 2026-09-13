@@ -50,6 +50,10 @@ from pipeline.redaction_calibration.state import (
 )
 
 Operation: TypeAlias = Literal["promote", "rollback"]
+#: Значение свидетеля — строка, кроме `git_clean`: чистота дерева обязана быть
+#: настоящим булевым, как в `baseline.create_baseline_passport`, а не строкой
+#: "false", которую легко перепутать с истиной при небрежном чтении.
+Witnesses: TypeAlias = Mapping[str, str | bool]
 
 #: Порядок установки. Манифест первым: он — авторитет строк, и назначение, где кропы уже
 #: новые, а манифест ещё старый, читается как «манифест ссылается на пропавшие кропы».
@@ -95,7 +99,7 @@ class SnapshotManifest:
     root: Path
     artifacts: tuple[str, ...]
     hashes: dict[str, str]
-    input_witnesses: dict[str, str]
+    input_witnesses: dict[str, str | bool]
 
     @property
     def result_sha256(self) -> str:
@@ -148,7 +152,7 @@ class PreviousSnapshotRequest:
 
     root: Path
     snapshot_id: str
-    witnesses: Mapping[str, str]
+    witnesses: Witnesses
     created_at: str
 
 
@@ -277,16 +281,18 @@ def _check_index_provenance(index_files: Mapping[str, Path], pool_sha256: str) -
         )
 
 
-def _validate_witnesses(witnesses: Mapping[str, str], *, complete: bool) -> dict[str, str]:
+def _validate_witnesses(witnesses: Witnesses, *, complete: bool) -> dict[str, str | bool]:
     """Потребовать полный набор свидетелей: профиль, геометрия и версия кода (§13 спеки).
 
-    `git_sha` стоит наравне с хешем профиля намеренно: производный результат без версии
-    кода спека запрещает, а тот же снимок, собранный другим коммитом, — другой результат.
-    Формат тот же, что у `baseline.create_baseline_passport`: полные 40 шестнадцатеричных.
+    Версия кода — это пара, а не один SHA. `git_sha` без `git_clean` называет коммит,
+    которым собранное могло и не быть собрано: грязное дерево запускает не тот код, что
+    лежит в коммите. Обе величины и обе их проверки взяты у
+    `baseline.create_baseline_passport`: полные 40 шестнадцатеричных и настоящий bool.
     """
     required = [
         "canonical_sha256",
         "geometry_witness_sha256",
+        "git_clean",
         "git_sha",
         "profile_id",
         "profile_sha256",
@@ -297,10 +303,14 @@ def _validate_witnesses(witnesses: Mapping[str, str], *, complete: bool) -> dict
     if missing:
         raise PromotionError(f"нет свидетелей входа: {missing}")
     for name in ("profile_sha256", "geometry_witness_sha256", "canonical_sha256"):
-        if _SHA256_PATTERN.fullmatch(witnesses[name]) is None:
+        value = witnesses[name]
+        if not isinstance(value, str) or _SHA256_PATTERN.fullmatch(value) is None:
             raise PromotionError(f"{name}: нужен полный шестнадцатеричный SHA256")
-    if _GIT_SHA_PATTERN.fullmatch(witnesses["git_sha"]) is None:
+    git_sha = witnesses["git_sha"]
+    if not isinstance(git_sha, str) or _GIT_SHA_PATTERN.fullmatch(git_sha) is None:
         raise PromotionError("git_sha: нужен полный Git SHA из 40 шестнадцатеричных символов")
+    if not isinstance(witnesses["git_clean"], bool):
+        raise PromotionError("git_clean: нужен настоящий булев флаг чистоты дерева")
     return dict(witnesses)
 
 
@@ -312,7 +322,7 @@ def build_snapshot(
     crops_root: Path,
     splits_root: Path | None = None,
     index_root: Path | None = None,
-    witnesses: Mapping[str, str],
+    witnesses: Witnesses,
     created_at: str,
 ) -> SnapshotManifest:
     """Скопировать входы в новый каталог снимка, захешировать всё и записать опись.
@@ -369,7 +379,7 @@ def _copy_inputs(
     crops_root: Path,
     splits_root: Path | None,
     index_root: Path | None,
-    witnesses: Mapping[str, str],
+    witnesses: Witnesses,
 ) -> list[str]:
     """Разложить входы по раскладке снимка §13 и проверить обязательный состав групп."""
     if not manifest_path.is_file():
@@ -396,10 +406,10 @@ def _copy_inputs(
 
     if index_root is not None and splits_root is not None:
         pool_sha256 = _sha256(staging / "splits" / "pool.parquet")
-        if witnesses["index_pool_sha256"] != pool_sha256:
+        declared_pool = witnesses["index_pool_sha256"]
+        if declared_pool != pool_sha256:
             raise PromotionError(
-                f"index_pool_sha256 = {witnesses['index_pool_sha256']}, "
-                f"а pool.parquet снимка даёт {pool_sha256}"
+                f"index_pool_sha256 = {declared_pool}, а pool.parquet снимка даёт {pool_sha256}"
             )
         _check_index_provenance(
             {name: staging / "index" / name for name in INDEX_FILES}, pool_sha256
@@ -423,7 +433,8 @@ def load_snapshot(snapshot_root: Path) -> SnapshotManifest:
         artifacts=tuple(str(name) for name in document["artifacts"]),
         hashes={str(name): str(value) for name, value in document["hashes"].items()},
         input_witnesses={
-            str(name): str(value) for name, value in document["input_witnesses"].items()
+            str(name): value if isinstance(value, bool) else str(value)
+            for name, value in document["input_witnesses"].items()
         },
     )
 
@@ -520,6 +531,7 @@ def promote(
             "snapshot_result_sha256 записи не совпадает с описью продвигаемого снимка"
         )
     _require_same_profile(record, snapshot)
+    _require_clean_tree(snapshot)
     _require_token(snapshot, operation="promote", confirmation_token_value=confirmation_token)
     validate_snapshot(snapshot, destinations)
 
@@ -535,6 +547,24 @@ def promote(
         previous_snapshot_id=retained.snapshot_id,
         previous_snapshot_result_sha256=retained.result_sha256,
     )
+
+
+def _require_clean_tree(snapshot: SnapshotManifest) -> None:
+    """Не ставить на боевые данные результат, собранный незакоммиченным кодом.
+
+    Отказ, а не предупреждение, и по тому же правилу, по которому
+    `baseline.create_baseline_passport` отвергает грязное дерево до предрегистрации:
+    установленные данные обязаны быть воспроизводимы, а результат грязного дерева
+    воспроизвести нечем — коммита с этим кодом не существует. Снимок при этом собрать
+    можно: во время перебора профилей грязное дерево нормально, боевыми данными оно
+    становиться не должно.
+    """
+    if snapshot.input_witnesses.get("git_clean") is not True:
+        raise PromotionError(
+            f"снимок {snapshot.snapshot_id} собран грязным деревом "
+            f"(git_sha {snapshot.input_witnesses.get('git_sha')}): продвигать нельзя, "
+            "закоммитьте код и пересоберите снимок"
+        )
 
 
 def _require_same_profile(record: PromotionRecord, snapshot: SnapshotManifest) -> None:
@@ -570,7 +600,7 @@ def capture_destinations(
     derived = _has_derived_artifacts(destinations)
     splits_root = destinations.splits if derived else None
     index_root = destinations.index if derived else None
-    witnesses = dict(previous.witnesses)
+    witnesses: dict[str, str | bool] = dict(previous.witnesses)
     if splits_root is not None:
         witnesses["index_pool_sha256"] = _sha256(splits_root / "pool.parquet")
     return build_snapshot(

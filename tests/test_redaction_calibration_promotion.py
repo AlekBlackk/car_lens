@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -30,7 +32,12 @@ from pipeline.redaction_calibration.state import (
     PromotionRecord,
     PromotionState,
 )
-from scripts.promote_redaction_profile import main, write_record
+from scripts.promote_redaction_profile import (
+    _witnesses_from_arguments,
+    is_git_clean,
+    main,
+    write_record,
+)
 
 CREATED_AT = "2026-09-13T00:00:00Z"
 PROFILE_SHA = "a" * 64
@@ -78,13 +85,14 @@ def _make_sources(root: Path, marker: bytes = b"new") -> dict[str, Path]:
     return {"manifest": manifest, "crops": crops, "splits": splits, "index": index}
 
 
-def _witnesses(sources: dict[str, Path]) -> dict[str, str]:
+def _witnesses(sources: dict[str, Path]) -> dict[str, str | bool]:
     return {
         "profile_id": "profile-x",
         "profile_sha256": PROFILE_SHA,
         "geometry_witness_sha256": GEOMETRY_SHA,
         "canonical_sha256": CANONICAL_SHA,
         "git_sha": GIT_SHA,
+        "git_clean": True,
         "index_pool_sha256": _sha256(sources["splits"] / "pool.parquet"),
     }
 
@@ -95,7 +103,7 @@ def _build(
     snapshot_id: str = "snap-new",
     marker: bytes = b"new",
     complete: bool = True,
-    witnesses: dict[str, str] | None = None,
+    witnesses: dict[str, str | bool] | None = None,
 ) -> tuple[Path, dict[str, Path]]:
     sources = _make_sources(tmp_path / f"sources-{snapshot_id}", marker)
     snapshot_root = tmp_path / "snapshots" / snapshot_id
@@ -159,6 +167,7 @@ def _previous_request(tmp_path: Path, name: str = "snap-displaced") -> PreviousS
             "geometry_witness_sha256": "f" * 64,
             "canonical_sha256": CANONICAL_SHA,
             "git_sha": GIT_SHA,
+            "git_clean": True,
         },
         created_at=CREATED_AT,
     )
@@ -713,7 +722,12 @@ def test_snapshot_carries_the_code_version_into_provenance(tmp_path: Path) -> No
     document = json.loads((snapshot_root / "provenance.json").read_text(encoding="utf-8"))
 
     assert document["input_witnesses"]["git_sha"] == GIT_SHA
-    assert load_snapshot(snapshot_root).input_witnesses["git_sha"] == GIT_SHA
+    # Именно булев `true`, а не строка: в JSON эти два значения различимы, и описи
+    # положено нести то же, что несёт паспорт базиса.
+    assert document["input_witnesses"]["git_clean"] is True
+    restored = load_snapshot(snapshot_root)
+    assert restored.input_witnesses["git_sha"] == GIT_SHA
+    assert restored.input_witnesses["git_clean"] is True
 
 
 # --- сохранённый снимок вытесняемых данных --------------------------------------------
@@ -979,6 +993,7 @@ def _previous_witnesses_file(tmp_path: Path) -> Path:
                 "geometry_witness_sha256": "f" * 64,
                 "canonical_sha256": CANONICAL_SHA,
                 "git_sha": GIT_SHA,
+                "git_clean": True,
             }
         ),
         encoding="utf-8",
@@ -1001,3 +1016,184 @@ def _cli_promote_full_argv(
         "--confirm",
         confirmation_token(snapshot, operation="promote"),
     ]
+
+
+# --- чистота дерева как вторая половина свидетеля версии кода -------------------------
+
+
+def test_build_snapshot_requires_the_clean_tree_witness(tmp_path: Path) -> None:
+    sources = _make_sources(tmp_path / "sources")
+    witnesses = {name: value for name, value in _witnesses(sources).items() if name != "git_clean"}
+    with pytest.raises(PromotionError, match="git_clean"):
+        build_snapshot(
+            tmp_path / "snap",
+            snapshot_id="snap",
+            manifest_path=sources["manifest"],
+            crops_root=sources["crops"],
+            splits_root=sources["splits"],
+            index_root=sources["index"],
+            witnesses=witnesses,
+            created_at=CREATED_AT,
+        )
+
+
+def test_build_snapshot_rejects_a_stringly_typed_clean_flag(tmp_path: Path) -> None:
+    """`"false"` — непустая строка, то есть истина при небрежном чтении. Нужен bool."""
+    sources = _make_sources(tmp_path / "sources")
+    witnesses = _witnesses(sources) | {"git_clean": "false"}
+    with pytest.raises(PromotionError, match="git_clean"):
+        build_snapshot(
+            tmp_path / "snap",
+            snapshot_id="snap",
+            manifest_path=sources["manifest"],
+            crops_root=sources["crops"],
+            splits_root=sources["splits"],
+            index_root=sources["index"],
+            witnesses=witnesses,
+            created_at=CREATED_AT,
+        )
+
+
+def test_a_dirty_tree_snapshot_records_the_flag_and_survives_the_round_trip(
+    tmp_path: Path,
+) -> None:
+    """Собрать снимок грязным деревом можно: перебор профилей идёт до коммита."""
+    sources = _make_sources(tmp_path / "sources")
+    snapshot_root = tmp_path / "snapshots" / "snap-dirty"
+    snapshot_root.parent.mkdir(parents=True, exist_ok=True)
+    build_snapshot(
+        snapshot_root,
+        snapshot_id="snap-dirty",
+        manifest_path=sources["manifest"],
+        crops_root=sources["crops"],
+        splits_root=sources["splits"],
+        index_root=sources["index"],
+        witnesses=_witnesses(sources) | {"git_clean": False},
+        created_at=CREATED_AT,
+    )
+
+    document = json.loads((snapshot_root / "provenance.json").read_text(encoding="utf-8"))
+    assert document["input_witnesses"]["git_clean"] is False
+    assert load_snapshot(snapshot_root).input_witnesses["git_clean"] is False
+
+
+def test_promote_refuses_a_snapshot_built_from_a_dirty_tree(tmp_path: Path) -> None:
+    """А вот боевыми данными результат грязного дерева не становится: воспроизвести нечем."""
+    sources = _make_sources(tmp_path / "sources-dirty")
+    snapshot_root = tmp_path / "snapshots" / "snap-dirty"
+    snapshot_root.parent.mkdir(parents=True, exist_ok=True)
+    build_snapshot(
+        snapshot_root,
+        snapshot_id="snap-dirty",
+        manifest_path=sources["manifest"],
+        crops_root=sources["crops"],
+        splits_root=sources["splits"],
+        index_root=sources["index"],
+        witnesses=_witnesses(sources) | {"git_clean": False},
+        created_at=CREATED_AT,
+    )
+    destinations, _ = _destinations(tmp_path)
+    snapshot = load_snapshot(snapshot_root)
+    before = _live_state(destinations)
+
+    with pytest.raises(PromotionError, match="грязным деревом"):
+        _promote(snapshot, destinations, tmp_path)
+
+    assert _live_state(destinations) == before
+    assert _sidecars(destinations) == []
+    assert not (tmp_path / "snapshots" / "snap-displaced").exists()
+
+
+def test_the_dirty_tree_refusal_reaches_the_cli_as_an_exit_code(tmp_path: Path) -> None:
+    sources = _make_sources(tmp_path / "sources-dirty")
+    snapshot_root = tmp_path / "snapshots" / "snap-dirty"
+    snapshot_root.parent.mkdir(parents=True, exist_ok=True)
+    build_snapshot(
+        snapshot_root,
+        snapshot_id="snap-dirty",
+        manifest_path=sources["manifest"],
+        crops_root=sources["crops"],
+        splits_root=sources["splits"],
+        index_root=sources["index"],
+        witnesses=_witnesses(sources) | {"git_clean": False},
+        created_at=CREATED_AT,
+    )
+    destinations, _ = _destinations(tmp_path)
+    record_path = tmp_path / "promotion.json"
+    write_record(record_path, _promotable(load_snapshot(snapshot_root).result_sha256))
+    before = _live_state(destinations)
+
+    assert main(_cli_promote_full_argv(snapshot_root, destinations, tmp_path, record_path)) == 2
+    assert _live_state(destinations) == before
+
+
+# --- CLI определяет обе половины свидетеля сам ----------------------------------------
+
+
+def _fake_git(clean: bool) -> Callable[..., Any]:
+    """Подставной git: `rev-parse` даёт SHA, `status --porcelain` — чистоту дерева."""
+    real_run = subprocess.run
+
+    def run(command: Any, *args: Any, **kwargs: Any) -> Any:
+        if isinstance(command, list) and command[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(command, 0, stdout=f"{GIT_SHA}\n", stderr="")
+        if isinstance(command, list) and command[:2] == ["git", "status"]:
+            output = "" if clean else " M pipeline/redaction_calibration/promotion.py\n"
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+        return real_run(command, *args, **kwargs)
+
+    return run
+
+
+@pytest.mark.parametrize("clean", [True, False])
+def test_cli_derives_both_halves_of_the_code_version_witness(
+    monkeypatch: pytest.MonkeyPatch, clean: bool
+) -> None:
+    """Свидетель считается командой; опции, которой его можно объявить, не существует."""
+    monkeypatch.setattr(subprocess, "run", _fake_git(clean))
+    arguments = argparse.Namespace(
+        profile_id="profile-x",
+        profile_sha256=PROFILE_SHA,
+        geometry_witness_sha256=GEOMETRY_SHA,
+        canonical_sha256=CANONICAL_SHA,
+        index_pool_sha256=None,
+    )
+
+    witnesses = _witnesses_from_arguments(arguments)
+
+    assert witnesses["git_sha"] == GIT_SHA
+    assert witnesses["git_clean"] is clean
+    assert is_git_clean() is clean
+
+
+def test_the_snapshot_command_has_no_option_to_declare_the_code_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sources = _make_sources(tmp_path / "sources")
+    monkeypatch.setattr(subprocess, "run", _fake_git(False))
+    argv = [
+        "snapshot",
+        "--snapshot",
+        str(tmp_path / "snapshots" / "snap-cli"),
+        "--manifest",
+        str(sources["manifest"]),
+        "--crops",
+        str(sources["crops"]),
+        "--profile-id",
+        "profile-x",
+        "--profile-sha256",
+        PROFILE_SHA,
+        "--geometry-witness-sha256",
+        GEOMETRY_SHA,
+        "--canonical-sha256",
+        CANONICAL_SHA,
+    ]
+
+    with pytest.raises(SystemExit):
+        main([*argv, "--git-sha", "0" * 40])
+
+    (tmp_path / "snapshots").mkdir(parents=True, exist_ok=True)
+    assert main(argv) == 0
+    written = load_snapshot(tmp_path / "snapshots" / "snap-cli")
+    assert written.input_witnesses["git_sha"] == GIT_SHA
+    assert written.input_witnesses["git_clean"] is False

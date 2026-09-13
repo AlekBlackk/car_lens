@@ -53,7 +53,6 @@ WITNESS_OPTIONS = (
     "profile-sha256",
     "geometry-witness-sha256",
     "canonical-sha256",
-    "git-sha",
     "index-pool-sha256",
 )
 
@@ -69,15 +68,30 @@ ROLLBACK_NOTICE = (
 )
 
 
-def current_git_sha() -> str:
-    """Полный SHA текущего HEAD — свидетель версии кода для §13."""
+def _git(*arguments: str) -> str:
+    """Вывод git в корне репозитория; ошибка git — ошибка команды, а не пустая строка."""
     return subprocess.run(
-        ["git", "rev-parse", "HEAD"],
+        ["git", *arguments],
         capture_output=True,
         text=True,
         check=True,
         cwd=Path(__file__).resolve().parent.parent,
     ).stdout.strip()
+
+
+def current_git_sha() -> str:
+    """Полный SHA текущего HEAD — половина свидетеля версии кода для §13."""
+    return _git("rev-parse", "HEAD")
+
+
+def is_git_clean() -> bool:
+    """Вторая половина: чист ли рабочий каталог.
+
+    Без неё `git_sha` называет коммит, которым собранное могло и не быть собрано.
+    Значение считается здесь и не принимается опцией: свидетель, который вызывающий
+    вправе объявить сам, ничего не свидетельствует.
+    """
+    return not _git("status", "--porcelain")
 
 
 def default_journal() -> Path:
@@ -190,14 +204,15 @@ def write_record(path: Path, record: PromotionRecord) -> None:
     )
 
 
-def _witnesses_from_arguments(arguments: argparse.Namespace) -> dict[str, str]:
-    """Свидетели из опций; версия кода по умолчанию — HEAD текущего дерева."""
-    witnesses = {
+def _witnesses_from_arguments(arguments: argparse.Namespace) -> dict[str, str | bool]:
+    """Свидетели из опций; версию кода команда определяет сама, а не берёт из опции."""
+    witnesses: dict[str, str | bool] = {
         option.replace("-", "_"): value
         for option in WITNESS_OPTIONS
         if (value := getattr(arguments, option.replace("-", "_"))) is not None
     }
-    witnesses.setdefault("git_sha", current_git_sha())
+    witnesses["git_sha"] = current_git_sha()
+    witnesses["git_clean"] = is_git_clean()
     return witnesses
 
 
@@ -215,6 +230,9 @@ def _run_snapshot(arguments: argparse.Namespace) -> int:
     )
     print(json.dumps(snapshot_document(snapshot), ensure_ascii=False, indent=2, sort_keys=True))
     print(f"снимок {snapshot.snapshot_id} ({snapshot.tier.value}): {snapshot.result_sha256}")
+    if witnesses["git_clean"] is not True:
+        print("ВНИМАНИЕ: дерево грязное — этот снимок продвинуть нельзя (§13).")
+        print("Закоммитьте код и пересоберите снимок.")
     return 0
 
 
@@ -258,7 +276,7 @@ def _run_promote(arguments: argparse.Namespace) -> int:
         root=arguments.previous_root,
         snapshot_id=arguments.previous_root.name,
         witnesses={
-            str(key): str(value)
+            str(key): value if isinstance(value, bool) else str(value)
             for key, value in _load_json_document(
                 arguments.previous_witnesses, label="свидетели вытесняемого профиля"
             ).items()
