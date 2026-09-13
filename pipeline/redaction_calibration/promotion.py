@@ -7,6 +7,11 @@
 2. `validate_snapshot` сверяет хеши и чистоту назначения, ничего не записывая;
 3. `promote`/`rollback` ставят снимок на место по журналируемому протоколу.
 
+`promote` перед первым же изменением снимает вытесняемые боевые данные вторым снимком
+(`PreviousSnapshotRequest`) — тем же `build_snapshot`. Без этого целью отката оставался бы
+только снимок, который кто-то не забыл собрать заранее, а §12 требует отката целым
+согласованным снимком.
+
 Назначения живут на двух файловых системах: манифест — файл репозитория на диске Windows,
 кропы, сплиты и индекс — каталоги данных в WSL. Одного общего атомарного переименования
 между ними не существует, и переносить данные через границу переименованием запрещено.
@@ -64,6 +69,7 @@ INDEX_FILES: Final = (
 
 _SNAPSHOT_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _SHA256_PATTERN: Final = re.compile(r"[0-9a-fA-F]{64}")
+_GIT_SHA_PATTERN: Final = re.compile(r"[0-9a-fA-F]{40}")
 _TOKEN_LENGTH: Final = 16
 _SCHEMA_VERSION: Final = 1
 
@@ -130,6 +136,23 @@ class PromotionDestinations:
 
 
 @dataclass(frozen=True, slots=True)
+class PreviousSnapshotRequest:
+    """Куда продвижение обязано сложить вытесняемые боевые данные, прежде чем их вытеснить.
+
+    Спека §12 требует, чтобы после начала производных шагов откат выполнялся целым
+    согласованным снимком. Значит снимок вытесняемого состояния обязано делать само
+    продвижение: иначе единственной целью отката остаётся снимок, который кто-то не забыл
+    собрать заранее. Свидетели описывают *продвигаемый прочь* профиль — тот, что сейчас
+    стоит на боевых данных, — и их знает вызывающий, а не этот модуль.
+    """
+
+    root: Path
+    snapshot_id: str
+    witnesses: Mapping[str, str]
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class PromotionResult:
     """Что именно было установлено; его SHA256 — свидетель для автомата продвижения."""
 
@@ -138,6 +161,8 @@ class PromotionResult:
     tier: SnapshotTier
     switched: tuple[str, ...]
     snapshot_result_sha256: str
+    previous_snapshot_id: str | None = None
+    previous_snapshot_result_sha256: str | None = None
 
     @property
     def result_sha256(self) -> str:
@@ -166,6 +191,8 @@ def promotion_result_document(result: PromotionResult) -> dict[str, Any]:
         "tier": result.tier.value,
         "switched": list(result.switched),
         "snapshot_result_sha256": result.snapshot_result_sha256,
+        "previous_snapshot_id": result.previous_snapshot_id,
+        "previous_snapshot_result_sha256": result.previous_snapshot_result_sha256,
     }
 
 
@@ -251,7 +278,19 @@ def _check_index_provenance(index_files: Mapping[str, Path], pool_sha256: str) -
 
 
 def _validate_witnesses(witnesses: Mapping[str, str], *, complete: bool) -> dict[str, str]:
-    required = ["profile_id", "profile_sha256", "geometry_witness_sha256", "canonical_sha256"]
+    """Потребовать полный набор свидетелей: профиль, геометрия и версия кода (§13 спеки).
+
+    `git_sha` стоит наравне с хешем профиля намеренно: производный результат без версии
+    кода спека запрещает, а тот же снимок, собранный другим коммитом, — другой результат.
+    Формат тот же, что у `baseline.create_baseline_passport`: полные 40 шестнадцатеричных.
+    """
+    required = [
+        "canonical_sha256",
+        "geometry_witness_sha256",
+        "git_sha",
+        "profile_id",
+        "profile_sha256",
+    ]
     if complete:
         required.append("index_pool_sha256")
     missing = sorted(set(required) - set(witnesses))
@@ -260,6 +299,8 @@ def _validate_witnesses(witnesses: Mapping[str, str], *, complete: bool) -> dict
     for name in ("profile_sha256", "geometry_witness_sha256", "canonical_sha256"):
         if _SHA256_PATTERN.fullmatch(witnesses[name]) is None:
             raise PromotionError(f"{name}: нужен полный шестнадцатеричный SHA256")
+    if _GIT_SHA_PATTERN.fullmatch(witnesses["git_sha"]) is None:
+        raise PromotionError("git_sha: нужен полный Git SHA из 40 шестнадцатеричных символов")
     return dict(witnesses)
 
 
@@ -461,9 +502,10 @@ def promote(
     *,
     record: PromotionRecord,
     confirmation_token: str,
+    previous: PreviousSnapshotRequest,
     checkpoint: Callable[[str], None] | None = None,
 ) -> PromotionResult:
-    """Установить снимок поверх боевых данных, подтвердив это токеном и состоянием.
+    """Снять вытесняемые данные снимком, затем установить новый снимок поверх боевых.
 
     Автомат продвижения здесь только проверяется, но не двигается: перевод записи в
     `promoted` остаётся за вызывающим, который свидетельствует его `result_sha256`.
@@ -477,12 +519,69 @@ def promote(
         raise CalibrationStateError(
             "snapshot_result_sha256 записи не совпадает с описью продвигаемого снимка"
         )
+    _require_same_profile(record, snapshot)
+    _require_token(snapshot, operation="promote", confirmation_token_value=confirmation_token)
+    validate_snapshot(snapshot, destinations)
+
+    # Снимок вытесняемых данных снимается до единого изменения назначения: если его нельзя
+    # собрать, продвигать нечего — откатываться будет некуда.
+    retained = capture_destinations(destinations, previous)
     return _install(
         snapshot,
         destinations,
         operation="promote",
         confirmation_token_value=confirmation_token,
         checkpoint=checkpoint,
+        previous_snapshot_id=retained.snapshot_id,
+        previous_snapshot_result_sha256=retained.result_sha256,
+    )
+
+
+def _require_same_profile(record: PromotionRecord, snapshot: SnapshotManifest) -> None:
+    """Не дать записи, годной для профиля A, продвинуть снимок, названный профилем B."""
+    witnesses = snapshot.input_witnesses
+    for field, witness in (
+        ("profile_id", "profile_id"),
+        ("profile_sha256", "profile_sha256"),
+        ("geometry_witness_sha256", "geometry_witness_sha256"),
+    ):
+        expected = witnesses.get(witness)
+        actual = getattr(record, field)
+        if actual != expected:
+            raise CalibrationStateError(
+                f"{field} записи ({actual}) не совпадает со свидетелем снимка ({expected})"
+            )
+
+
+def capture_destinations(
+    destinations: PromotionDestinations, previous: PreviousSnapshotRequest
+) -> SnapshotManifest:
+    """Снять текущее содержимое назначения снимком — целью будущего отката.
+
+    Уровень снимка выводится из назначения: есть производные — `complete`, нет — `base`.
+    Ровно это и требуется, чтобы откат после производных шагов был целым (§12), а откат
+    до них оставался разрешённым.
+
+    `index_pool_sha256` для снимка *уже установленных* данных считается по их же
+    `pool.parquet`, а не приносится снаружи: пара «индекс и pool» здесь не заявляется, а
+    фиксируется как есть. Внутренние связи индекса (`index_sha256`, `meta_sha256`) при
+    этом сверяются полностью, как и для любого другого снимка.
+    """
+    derived = _has_derived_artifacts(destinations)
+    splits_root = destinations.splits if derived else None
+    index_root = destinations.index if derived else None
+    witnesses = dict(previous.witnesses)
+    if splits_root is not None:
+        witnesses["index_pool_sha256"] = _sha256(splits_root / "pool.parquet")
+    return build_snapshot(
+        previous.root,
+        snapshot_id=previous.snapshot_id,
+        manifest_path=destinations.manifest,
+        crops_root=destinations.crops,
+        splits_root=splits_root,
+        index_root=index_root,
+        witnesses=witnesses,
+        created_at=previous.created_at,
     )
 
 
@@ -520,8 +619,14 @@ def _install(
     operation: Operation,
     confirmation_token_value: str,
     checkpoint: Callable[[str], None] | None,
+    previous_snapshot_id: str | None = None,
+    previous_snapshot_result_sha256: str | None = None,
 ) -> PromotionResult:
-    """Журналируемая установка: подготовка, журнал, переключения, уборка."""
+    """Журналируемая установка: подготовка, журнал, переключения, уборка.
+
+    Токен и снимок проверяются повторно и здесь: `rollback` заходит сюда напрямую, а
+    `promote` — после снятия вытесняемых данных, и обе двери обязаны быть заперты.
+    """
     _require_token(snapshot, operation=operation, confirmation_token_value=confirmation_token_value)
     validate_snapshot(snapshot, destinations)
     step = checkpoint if checkpoint is not None else _no_checkpoint
@@ -557,7 +662,7 @@ def _install(
     try:
         for group in groups:
             step(f"before_switch:{group}")
-            _switch_group(snapshot, destinations, group, operation=operation)
+            _switch_group(snapshot, destinations, group, operation=operation, step=step)
             switched.append(group)
             step(f"after_switch:{group}")
     except BaseException:
@@ -584,6 +689,8 @@ def _install(
         tier=snapshot.tier,
         switched=tuple(switched),
         snapshot_result_sha256=snapshot.result_sha256,
+        previous_snapshot_id=previous_snapshot_id,
+        previous_snapshot_result_sha256=previous_snapshot_result_sha256,
     )
 
 
@@ -627,8 +734,16 @@ def _switch_group(
     group: str,
     *,
     operation: Operation,
+    step: Callable[[str], None],
 ) -> None:
-    """Одно атомарное переключение назначения внутри его собственной файловой системы."""
+    """Переключить одно назначение внутри его собственной файловой системы.
+
+    Переименований здесь два, и между ними назначение не существует: старое уже уехало в
+    `.previous`, новое ещё не встало. Это единственное окно во всём протоколе, где отказ
+    операционной системы способен уничтожить назначение, поэтому окно закрывается прямо
+    здесь — своим же обратным переименованием, — а не общим `_restore` снаружи: снаружи
+    группа ещё не числится переключённой, и восстанавливать её было бы некому.
+    """
     destination = _required_destination(destinations, group)
     staging = _sidecar(
         destination, snapshot_id=snapshot.snapshot_id, operation=operation, kind="staging"
@@ -636,9 +751,17 @@ def _switch_group(
     previous = _sidecar(
         destination, snapshot_id=snapshot.snapshot_id, operation=operation, kind="previous"
     )
+    moved_aside = False
     if destination.exists():
         os.replace(destination, previous)
-    os.replace(staging, destination)
+        moved_aside = True
+    try:
+        step(f"switching:{group}")
+        os.replace(staging, destination)
+    except BaseException:
+        if moved_aside:
+            os.replace(previous, destination)
+        raise
 
 
 def _restore(

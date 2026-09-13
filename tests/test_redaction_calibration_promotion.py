@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from pipeline.redaction_calibration.promotion import (
     INDEX_FILES,
     SPLIT_FILES,
+    PreviousSnapshotRequest,
     PromotionDestinations,
     PromotionError,
     SnapshotTier,
@@ -27,12 +30,13 @@ from pipeline.redaction_calibration.state import (
     PromotionRecord,
     PromotionState,
 )
-from scripts.promote_redaction_profile import main
+from scripts.promote_redaction_profile import main, write_record
 
 CREATED_AT = "2026-09-13T00:00:00Z"
 PROFILE_SHA = "a" * 64
 GEOMETRY_SHA = "b" * 64
 CANONICAL_SHA = "c" * 64
+GIT_SHA = "9" * 40
 
 
 def _sha256(path: Path) -> str:
@@ -80,6 +84,7 @@ def _witnesses(sources: dict[str, Path]) -> dict[str, str]:
         "profile_sha256": PROFILE_SHA,
         "geometry_witness_sha256": GEOMETRY_SHA,
         "canonical_sha256": CANONICAL_SHA,
+        "git_sha": GIT_SHA,
         "index_pool_sha256": _sha256(sources["splits"] / "pool.parquet"),
     }
 
@@ -141,6 +146,35 @@ def _promotable(snapshot_result_sha256: str) -> PromotionRecord:
         geometry_witness_sha256=GEOMETRY_SHA,
         snapshot_result_sha256=snapshot_result_sha256,
     )
+
+
+def _previous_request(tmp_path: Path, name: str = "snap-displaced") -> PreviousSnapshotRequest:
+    """Куда продвижение обязано сложить вытесняемые боевые данные."""
+    return PreviousSnapshotRequest(
+        root=tmp_path / "snapshots" / name,
+        snapshot_id=name,
+        witnesses={
+            "profile_id": "profile-displaced",
+            "profile_sha256": "e" * 64,
+            "geometry_witness_sha256": "f" * 64,
+            "canonical_sha256": CANONICAL_SHA,
+            "git_sha": GIT_SHA,
+        },
+        created_at=CREATED_AT,
+    )
+
+
+def _promote(
+    snapshot: Any,
+    destinations: PromotionDestinations,
+    tmp_path: Path,
+    **kwargs: Any,
+) -> Any:
+    """Продвижение с обязательным снимком вытесняемых данных и верным токеном."""
+    kwargs.setdefault("record", _promotable(snapshot.result_sha256))
+    kwargs.setdefault("confirmation_token", confirmation_token(snapshot, operation="promote"))
+    kwargs.setdefault("previous", _previous_request(tmp_path))
+    return promote(snapshot, destinations, **kwargs)
 
 
 def _live_state(destinations: PromotionDestinations) -> dict[str, bytes]:
@@ -354,10 +388,10 @@ def test_promote_requires_snapshot_specific_token(tmp_path: Path) -> None:
     before = _live_state(destinations)
 
     with pytest.raises(PromotionError, match="подтверждени"):
-        promote(
+        _promote(
             snapshot,
             destinations,
-            record=_promotable(snapshot.result_sha256),
+            tmp_path,
             confirmation_token=confirmation_token(snapshot, operation="rollback"),
         )
 
@@ -372,12 +406,7 @@ def test_promote_requires_promotable_record(tmp_path: Path) -> None:
     record = PromotionRecord(state=PromotionState.NOT_SELECTED)
 
     with pytest.raises(CalibrationStateError, match="promotable"):
-        promote(
-            snapshot,
-            destinations,
-            record=record,
-            confirmation_token=confirmation_token(snapshot, operation="promote"),
-        )
+        _promote(snapshot, destinations, tmp_path, record=record)
 
     assert _sidecars(destinations) == []
 
@@ -388,12 +417,7 @@ def test_promote_requires_record_bound_to_this_snapshot(tmp_path: Path) -> None:
     snapshot = load_snapshot(snapshot_root)
 
     with pytest.raises(CalibrationStateError, match="snapshot_result_sha256"):
-        promote(
-            snapshot,
-            destinations,
-            record=_promotable("f" * 64),
-            confirmation_token=confirmation_token(snapshot, operation="promote"),
-        )
+        _promote(snapshot, destinations, tmp_path, record=_promotable("f" * 64))
 
 
 # --- установка ------------------------------------------------------------------------
@@ -404,12 +428,7 @@ def test_promote_installs_every_group_of_a_complete_snapshot(tmp_path: Path) -> 
     destinations, _ = _destinations(tmp_path)
     snapshot = load_snapshot(snapshot_root)
 
-    result = promote(
-        snapshot,
-        destinations,
-        record=_promotable(snapshot.result_sha256),
-        confirmation_token=confirmation_token(snapshot, operation="promote"),
-    )
+    result = _promote(snapshot, destinations, tmp_path)
 
     assert result.switched == ("manifest", "crops", "splits", "index")
     assert len(result.result_sha256) == 64
@@ -426,12 +445,7 @@ def test_promote_of_base_snapshot_leaves_derived_destinations_untouched(tmp_path
     destinations, _ = _destinations(tmp_path)
     snapshot = load_snapshot(snapshot_root)
 
-    result = promote(
-        snapshot,
-        destinations,
-        record=_promotable(snapshot.result_sha256),
-        confirmation_token=confirmation_token(snapshot, operation="promote"),
-    )
+    result = _promote(snapshot, destinations, tmp_path)
 
     assert result.switched == ("manifest", "crops")
     live = _live_state(destinations)
@@ -448,12 +462,7 @@ def test_rollback_restores_manifest_crops_splits_and_index_together(tmp_path: Pa
     snapshot_root, _ = _build(tmp_path)
     destinations, _ = _destinations(tmp_path, marker=b"live")
     new = load_snapshot(snapshot_root)
-    promote(
-        new,
-        destinations,
-        record=_promotable(new.result_sha256),
-        confirmation_token=confirmation_token(new, operation="promote"),
-    )
+    _promote(new, destinations, tmp_path)
 
     previous = load_snapshot(previous_root)
     result = rollback(
@@ -515,12 +524,16 @@ STAGE_FAULTS = [
 ]
 
 SWITCH_FAULTS = [
+    "switching:manifest",
     "after_switch:manifest",
     "before_switch:crops",
+    "switching:crops",
     "after_switch:crops",
     "before_switch:splits",
+    "switching:splits",
     "after_switch:splits",
     "before_switch:index",
+    "switching:index",
     "after_switch:index",
 ]
 
@@ -533,13 +546,7 @@ def test_promote_leaves_destination_wholly_old_or_wholly_new(tmp_path: Path, ste
     before = _live_state(destinations)
 
     with pytest.raises(RuntimeError, match="инъекция отказа"):
-        promote(
-            snapshot,
-            destinations,
-            record=_promotable(snapshot.result_sha256),
-            confirmation_token=confirmation_token(snapshot, operation="promote"),
-            checkpoint=_fault(step),
-        )
+        _promote(snapshot, destinations, tmp_path, checkpoint=_fault(step))
 
     after = _live_state(destinations)
     assert after == before, f"назначение смешалось после отказа на {step}"
@@ -552,13 +559,7 @@ def test_promote_removes_staging_on_pre_switch_failure(tmp_path: Path, step: str
     snapshot = load_snapshot(snapshot_root)
 
     with pytest.raises(RuntimeError):
-        promote(
-            snapshot,
-            destinations,
-            record=_promotable(snapshot.result_sha256),
-            confirmation_token=confirmation_token(snapshot, operation="promote"),
-            checkpoint=_fault(step),
-        )
+        _promote(snapshot, destinations, tmp_path, checkpoint=_fault(step))
 
     assert not any(".staging" in name for name in _sidecars(destinations))
 
@@ -570,13 +571,7 @@ def test_promote_keeps_the_journal_when_a_switch_fails(tmp_path: Path) -> None:
     snapshot = load_snapshot(snapshot_root)
 
     with pytest.raises(RuntimeError):
-        promote(
-            snapshot,
-            destinations,
-            record=_promotable(snapshot.result_sha256),
-            confirmation_token=confirmation_token(snapshot, operation="promote"),
-            checkpoint=_fault("after_switch:crops"),
-        )
+        _promote(snapshot, destinations, tmp_path, checkpoint=_fault("after_switch:crops"))
 
     assert destinations.journal.is_file()
     journal = json.loads(destinations.journal.read_text(encoding="utf-8"))
@@ -626,6 +621,10 @@ def test_cli_promotes_only_with_the_printed_token(tmp_path: Path) -> None:
         *_cli_promote_argv(snapshot_root, destinations),
         "--record",
         str(record_path),
+        "--previous-root",
+        str(tmp_path / "snapshots" / "snap-displaced"),
+        "--previous-witnesses",
+        str(_previous_witnesses_file(tmp_path)),
         "--confirm",
         confirmation_token(snapshot, operation="promote"),
     ]
@@ -648,13 +647,10 @@ def test_cli_rejects_a_wrong_token(tmp_path: Path) -> None:
     assert _live_state(destinations) == before
 
 
-def _cli_promote_argv(snapshot_root: Path, destinations: PromotionDestinations) -> list[str]:
+def _cli_destination_argv(destinations: PromotionDestinations) -> list[str]:
     assert destinations.splits is not None
     assert destinations.index is not None
     return [
-        "promote",
-        "--snapshot",
-        str(snapshot_root),
         "--manifest-dest",
         str(destinations.manifest),
         "--crops-dest",
@@ -665,4 +661,343 @@ def _cli_promote_argv(snapshot_root: Path, destinations: PromotionDestinations) 
         str(destinations.index),
         "--journal",
         str(destinations.journal),
+    ]
+
+
+def _cli_promote_argv(snapshot_root: Path, destinations: PromotionDestinations) -> list[str]:
+    return [
+        "promote",
+        "--snapshot",
+        str(snapshot_root),
+        *_cli_destination_argv(destinations),
+    ]
+
+
+# --- свидетель версии кода (§13) ------------------------------------------------------
+
+
+def test_build_snapshot_requires_a_code_version_witness(tmp_path: Path) -> None:
+    sources = _make_sources(tmp_path / "sources")
+    witnesses = {name: value for name, value in _witnesses(sources).items() if name != "git_sha"}
+    with pytest.raises(PromotionError, match="git_sha"):
+        build_snapshot(
+            tmp_path / "snap",
+            snapshot_id="snap",
+            manifest_path=sources["manifest"],
+            crops_root=sources["crops"],
+            splits_root=sources["splits"],
+            index_root=sources["index"],
+            witnesses=witnesses,
+            created_at=CREATED_AT,
+        )
+
+
+def test_build_snapshot_rejects_a_short_git_sha(tmp_path: Path) -> None:
+    sources = _make_sources(tmp_path / "sources")
+    witnesses = _witnesses(sources) | {"git_sha": "9" * 7}
+    with pytest.raises(PromotionError, match="git_sha"):
+        build_snapshot(
+            tmp_path / "snap",
+            snapshot_id="snap",
+            manifest_path=sources["manifest"],
+            crops_root=sources["crops"],
+            splits_root=sources["splits"],
+            index_root=sources["index"],
+            witnesses=witnesses,
+            created_at=CREATED_AT,
+        )
+
+
+def test_snapshot_carries_the_code_version_into_provenance(tmp_path: Path) -> None:
+    snapshot_root, _ = _build(tmp_path)
+    document = json.loads((snapshot_root / "provenance.json").read_text(encoding="utf-8"))
+
+    assert document["input_witnesses"]["git_sha"] == GIT_SHA
+    assert load_snapshot(snapshot_root).input_witnesses["git_sha"] == GIT_SHA
+
+
+# --- сохранённый снимок вытесняемых данных --------------------------------------------
+
+
+def test_promote_retains_the_displaced_data_as_a_complete_snapshot(tmp_path: Path) -> None:
+    """После продвижения откатываться есть куда, даже если снимок «до» никто не собирал."""
+    snapshot_root, _ = _build(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    snapshot = load_snapshot(snapshot_root)
+    before = _live_state(destinations)
+
+    result = _promote(snapshot, destinations, tmp_path)
+
+    assert result.previous_snapshot_id == "snap-displaced"
+    retained = load_snapshot(tmp_path / "snapshots" / "snap-displaced")
+    assert retained.tier is SnapshotTier.COMPLETE
+    assert retained.result_sha256 == result.previous_snapshot_result_sha256
+    # Хеши сохранённого снимка описывают именно те байты, что стояли до продвижения.
+    for name, data in before.items():
+        assert retained.hashes[name] == hashlib.sha256(data).hexdigest()
+
+
+def test_rollback_on_the_retained_snapshot_restores_the_pre_promotion_bytes(
+    tmp_path: Path,
+) -> None:
+    snapshot_root, _ = _build(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    snapshot = load_snapshot(snapshot_root)
+    before = _live_state(destinations)
+
+    _promote(snapshot, destinations, tmp_path)
+    assert _live_state(destinations) != before
+
+    retained = load_snapshot(tmp_path / "snapshots" / "snap-displaced")
+    rollback(
+        retained,
+        destinations,
+        confirmation_token=confirmation_token(retained, operation="rollback"),
+    )
+
+    assert _live_state(destinations) == before
+    assert _sidecars(destinations) == []
+
+
+def test_promote_retains_a_base_snapshot_when_the_destination_has_no_derived_data(
+    tmp_path: Path,
+) -> None:
+    snapshot_root, _ = _build(tmp_path, complete=False)
+    destinations, _ = _destinations(tmp_path, derived=False)
+    snapshot = load_snapshot(snapshot_root)
+
+    _promote(snapshot, destinations, tmp_path)
+
+    assert load_snapshot(tmp_path / "snapshots" / "snap-displaced").tier is SnapshotTier.BASE
+
+
+def test_promote_refuses_when_the_displaced_data_cannot_be_captured(tmp_path: Path) -> None:
+    """Не собрать снимок «до» — значит откатываться будет некуда: продвигать нельзя."""
+    snapshot_root, _ = _build(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    snapshot = load_snapshot(snapshot_root)
+    before = _live_state(destinations)
+    occupied = tmp_path / "snapshots" / "snap-displaced"
+    occupied.mkdir(parents=True)
+
+    with pytest.raises(PromotionError, match="уже существует"):
+        _promote(snapshot, destinations, tmp_path)
+
+    assert _live_state(destinations) == before
+    assert _sidecars(destinations) == []
+
+
+# --- профиль записи против свидетеля снимка -------------------------------------------
+
+
+def test_promote_refuses_a_record_promotable_for_another_profile(tmp_path: Path) -> None:
+    snapshot_root, _ = _build(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    snapshot = load_snapshot(snapshot_root)
+    foreign = PromotionRecord(
+        state=PromotionState.PROMOTABLE,
+        profile_id="profile-y",
+        profile_sha256=PROFILE_SHA,
+        geometry_witness_sha256=GEOMETRY_SHA,
+        snapshot_result_sha256=snapshot.result_sha256,
+    )
+
+    with pytest.raises(CalibrationStateError, match="profile_id"):
+        _promote(snapshot, destinations, tmp_path, record=foreign)
+
+    assert _sidecars(destinations) == []
+
+
+def test_promote_refuses_a_record_with_a_stale_geometry_witness(tmp_path: Path) -> None:
+    snapshot_root, _ = _build(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    snapshot = load_snapshot(snapshot_root)
+    stale = PromotionRecord(
+        state=PromotionState.PROMOTABLE,
+        profile_id="profile-x",
+        profile_sha256=PROFILE_SHA,
+        geometry_witness_sha256="1" * 64,
+        snapshot_result_sha256=snapshot.result_sha256,
+    )
+
+    with pytest.raises(CalibrationStateError, match="geometry_witness_sha256"):
+        _promote(snapshot, destinations, tmp_path, record=stale)
+
+
+# --- окно между двумя переименованиями ------------------------------------------------
+
+
+def test_a_failing_second_rename_leaves_the_destination_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Отказ ОС на втором переименовании не имеет права стереть назначение.
+
+    Между двумя `os.replace` назначения не существует: старое уже в `.previous`, новое
+    ещё в `.staging`. Именно здесь настоящая ошибка ОС (EACCES на открытом дереве кропов,
+    ENOSPC на манифесте) способна уничтожить группу, и наружный `_restore` её не спасёт —
+    группа ещё не числится переключённой.
+    """
+    snapshot_root, _ = _build(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    snapshot = load_snapshot(snapshot_root)
+    before = _live_state(destinations)
+    real_replace = os.replace
+
+    def failing_replace(source: Any, target: Any) -> None:
+        if Path(target) == destinations.crops and ".staging" in str(source):
+            raise OSError(13, "инъекция отказа ОС на втором переименовании")
+        real_replace(source, target)
+
+    monkeypatch.setattr(os, "replace", failing_replace)
+
+    with pytest.raises(OSError, match="инъекция отказа ОС"):
+        _promote(snapshot, destinations, tmp_path)
+
+    monkeypatch.undo()
+    assert destinations.crops.is_dir(), "дерево кропов исчезло вместе с отказом"
+    assert _live_state(destinations) == before
+    assert not any(".staging" in name for name in _sidecars(destinations))
+    assert not any(".previous" in name for name in _sidecars(destinations))
+
+
+# --- CLI: устойчивость и предупреждение отката ----------------------------------------
+
+
+def test_cli_reports_a_state_machine_refusal_as_an_exit_code(tmp_path: Path) -> None:
+    """Самая вероятная ошибка оператора не должна выглядеть падением интерпретатора."""
+    snapshot_root, _ = _build(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    record_path = tmp_path / "promotion.json"
+    record_path.write_text(json.dumps({"state": "not_selected"}), encoding="utf-8")
+    before = _live_state(destinations)
+
+    assert main(_cli_promote_full_argv(snapshot_root, destinations, tmp_path, record_path)) == 2
+    assert _live_state(destinations) == before
+
+
+def test_cli_reports_a_corrupt_record_as_an_exit_code(tmp_path: Path) -> None:
+    snapshot_root, _ = _build(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    record_path = tmp_path / "promotion.json"
+    record_path.write_text("{не json", encoding="utf-8")
+
+    assert main(_cli_promote_full_argv(snapshot_root, destinations, tmp_path, record_path)) == 2
+
+
+def test_cli_promote_refuses_without_a_place_for_the_displaced_data(tmp_path: Path) -> None:
+    snapshot_root, _ = _build(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    snapshot = load_snapshot(snapshot_root)
+    before = _live_state(destinations)
+    argv = [
+        *_cli_promote_argv(snapshot_root, destinations),
+        "--confirm",
+        confirmation_token(snapshot, operation="promote"),
+    ]
+
+    assert main(argv) == 2
+    assert _live_state(destinations) == before
+
+
+def test_cli_rollback_names_the_stale_record_and_the_new_campaign_rule(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    snapshot_root, _ = _build(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    snapshot = load_snapshot(snapshot_root)
+    record_path = tmp_path / "promotion.json"
+    _promote(snapshot, destinations, tmp_path)
+    retained = load_snapshot(tmp_path / "snapshots" / "snap-displaced")
+    write_record(
+        record_path,
+        PromotionRecord(
+            state=PromotionState.PROMOTED,
+            profile_id="profile-x",
+            profile_sha256=PROFILE_SHA,
+            geometry_witness_sha256=GEOMETRY_SHA,
+            snapshot_result_sha256=snapshot.result_sha256,
+            promotion_result_sha256="7" * 64,
+        ),
+    )
+    capsys.readouterr()
+
+    code = main(
+        [
+            "rollback",
+            "--snapshot",
+            str(tmp_path / "snapshots" / "snap-displaced"),
+            *_cli_destination_argv(destinations),
+            "--record",
+            str(record_path),
+            "--confirm",
+            confirmation_token(retained, operation="rollback"),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "ВНИМАНИЕ" in out
+    assert "НОВОЙ КАМПАНИЕЙ" in out
+    assert str(record_path) in out
+    assert "promoted" in out
+    # Откат данные вернул, но запись автомата не тронул: обратного ребра у §11.3 нет.
+    assert json.loads(record_path.read_text(encoding="utf-8"))["state"] == "promoted"
+
+
+def test_cli_rollback_warns_even_without_a_named_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    previous_root, _ = _build(tmp_path, snapshot_id="snap-old", marker=b"old")
+    destinations, _ = _destinations(tmp_path)
+    previous = load_snapshot(previous_root)
+    capsys.readouterr()
+
+    code = main(
+        [
+            "rollback",
+            "--snapshot",
+            str(previous_root),
+            *_cli_destination_argv(destinations),
+            "--confirm",
+            confirmation_token(previous, operation="rollback"),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "ВНИМАНИЕ" in out
+    assert "--record" in out
+
+
+def _previous_witnesses_file(tmp_path: Path) -> Path:
+    path = tmp_path / "previous-witnesses.json"
+    path.write_text(
+        json.dumps(
+            {
+                "profile_id": "profile-displaced",
+                "profile_sha256": "e" * 64,
+                "geometry_witness_sha256": "f" * 64,
+                "canonical_sha256": CANONICAL_SHA,
+                "git_sha": GIT_SHA,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _cli_promote_full_argv(
+    snapshot_root: Path, destinations: PromotionDestinations, tmp_path: Path, record: Path
+) -> list[str]:
+    snapshot = load_snapshot(snapshot_root)
+    return [
+        *_cli_promote_argv(snapshot_root, destinations),
+        "--record",
+        str(record),
+        "--previous-root",
+        str(tmp_path / "snapshots" / "snap-displaced"),
+        "--previous-witnesses",
+        str(_previous_witnesses_file(tmp_path)),
+        "--confirm",
+        confirmation_token(snapshot, operation="promote"),
     ]
