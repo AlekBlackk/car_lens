@@ -161,6 +161,33 @@ def test_из_рук_в_журнал_идут_только_удаления(ст
     assert [с.file for с in load_manifest(стенд["манифест"])] == ["b.jpg", "c.jpg"]
 
 
+def test_кадр_с_вердиктами_обоих_каналов_даёт_две_записи(
+    стенд: dict[str, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Единственное место, где каналы ещё встречаются в журнале, — и итог здесь намеренный.
+
+    Строку удалил человек (его `drop:plate` побеждает в слиянии), но запись дедупа всё равно
+    утверждает применение своего `drop:superseded`. Неточность унаследована от master и
+    сохранена сознательно: канал дедупа обязан писать ровно то же, что писал до этой задачи.
+    Схлопывать пару в одну строку нельзя ни в ту, ни в другую сторону — выбросив запись
+    дедупа, мы потеряли бы факт, что дедуп тоже приговорил кадр, а выбросив запись человека,
+    обнулили бы найденную грязь §12.1 (`drop:superseded` в грязь не идёт).
+    """
+    write_manifest(стенд["манифест"], [_строка("a.jpg"), _строка("b.jpg", audit="ok")])
+    стенд["вердикты"].write_text("file,verdict\na.jpg,drop:superseded\n", encoding="utf-8")
+    ручной = стенд["манифест"].parent / "verdicts.csv"
+    ручной.write_text("file,verdict\na.jpg,drop:plate\n", encoding="utf-8")
+
+    main(["--contact", "mail@example.com", "--report-only", "--audit", str(ручной)])
+
+    assert [(з.file, з.requested, з.verdict) for з in load_applied(стенд["журнал"])] == [
+        ("a.jpg", "drop:superseded", "drop:superseded"),
+        ("a.jpg", "drop:plate", "drop:plate"),
+    ]
+    assert [с.file for с in load_manifest(стенд["манифест"])] == ["b.jpg"]
+    assert "найдено 1, применено 1, осталось 0" in capsys.readouterr().out
+
+
 def test_история_грязных_переживает_следующий_прогон(
     стенд: dict[str, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
