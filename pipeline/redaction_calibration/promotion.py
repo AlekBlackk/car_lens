@@ -452,8 +452,29 @@ def _sidecar(destination: Path, *, snapshot_id: str, operation: str, kind: str) 
     return destination.parent / f".{destination.name}.{operation}-{snapshot_id}.{kind}"
 
 
-def validate_snapshot(snapshot: SnapshotManifest, destinations: PromotionDestinations) -> None:
-    """Сверить хеши снимка и чистоту назначения, не записав в назначение ни байта."""
+def validate_snapshot(
+    snapshot: SnapshotManifest,
+    destinations: PromotionDestinations,
+    *,
+    require_clean_tree: bool = True,
+) -> None:
+    """Сверить снимок и чистоту назначения, не записав в назначение ни байта.
+
+    Чистота дерева проверяется здесь, а не только в `promote`, и проверяется первой.
+    Иначе получается ловушка: снимок грязного дерева собран, кампания объявила запись
+    `promotable` по его `result_sha256`, и лишь установка отказала. Обратного ребра
+    `promotable → promotable` у §11.3 нет, а пересборка после коммита даёт другой
+    `result_sha256`, которому существующая запись уже не соответствует, — по §12
+    выходом остаётся только новая кампания, то есть выброшенные недели ревью. Здесь
+    отказ достаётся любому, кто вообще смотрит на снимок, — раньше всякого объявления.
+
+    `require_clean_tree=False` оставлен ровно откату. Продвижение ставит на боевые
+    данные новый результат, и его невоспроизводимость — причина отказать. Откат
+    возвращает то, что на этих данных уже стояло; отказаться восстанавливать
+    установленное было бы хуже той нечистоты, против которой правило написано.
+    """
+    if require_clean_tree:
+        _require_clean_tree(snapshot)
     for name in snapshot.artifacts:
         path = snapshot.root / name
         if not path.is_file():
@@ -531,7 +552,6 @@ def promote(
             "snapshot_result_sha256 записи не совпадает с описью продвигаемого снимка"
         )
     _require_same_profile(record, snapshot)
-    _require_clean_tree(snapshot)
     _require_token(snapshot, operation="promote", confirmation_token_value=confirmation_token)
     validate_snapshot(snapshot, destinations)
 
@@ -562,9 +582,17 @@ def _require_clean_tree(snapshot: SnapshotManifest) -> None:
     if snapshot.input_witnesses.get("git_clean") is not True:
         raise PromotionError(
             f"снимок {snapshot.snapshot_id} собран грязным деревом "
-            f"(git_sha {snapshot.input_witnesses.get('git_sha')}): продвигать нельзя, "
-            "закоммитьте код и пересоберите снимок"
+            f"(git_sha {snapshot.input_witnesses.get('git_sha')}): продвигать нельзя. "
+            "Такой снимок нельзя объявлять promotable: у автомата §11.3 нет ребра "
+            "promotable → promotable, а пересборка после коммита даст другой "
+            "result_sha256, и запись к нему уже не подойдёт. Закоммитьте код и "
+            "пересоберите снимок ДО объявления его promotable"
         )
+
+
+def requires_clean_tree(operation: Operation) -> bool:
+    """Чистого дерева требует продвижение; откат восстанавливает уже стоявшее."""
+    return operation == "promote"
 
 
 def _require_same_profile(record: PromotionRecord, snapshot: SnapshotManifest) -> None:
@@ -658,7 +686,7 @@ def _install(
     `promote` — после снятия вытесняемых данных, и обе двери обязаны быть заперты.
     """
     _require_token(snapshot, operation=operation, confirmation_token_value=confirmation_token_value)
-    validate_snapshot(snapshot, destinations)
+    validate_snapshot(snapshot, destinations, require_clean_tree=requires_clean_tree(operation))
     step = checkpoint if checkpoint is not None else _no_checkpoint
     groups = snapshot.groups
 

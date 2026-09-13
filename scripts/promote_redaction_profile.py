@@ -36,6 +36,7 @@ from pipeline.redaction_calibration.promotion import (
     load_snapshot,
     promote,
     promotion_result_document,
+    requires_clean_tree,
     rollback,
     snapshot_document,
     validate_snapshot,
@@ -139,7 +140,11 @@ def build_parser() -> argparse.ArgumentParser:
                 "--previous-witnesses",
                 type=Path,
                 default=None,
-                help="JSON со свидетелями профиля, стоящего сейчас на боевых данных",
+                help=(
+                    "JSON со свидетелями профиля, стоящего сейчас на боевых данных: "
+                    "profile_id, profile_sha256, geometry_witness_sha256, "
+                    "canonical_sha256, git_sha и git_clean"
+                ),
             )
     return парсер
 
@@ -232,14 +237,18 @@ def _run_snapshot(arguments: argparse.Namespace) -> int:
     print(f"снимок {snapshot.snapshot_id} ({snapshot.tier.value}): {snapshot.result_sha256}")
     if witnesses["git_clean"] is not True:
         print("ВНИМАНИЕ: дерево грязное — этот снимок продвинуть нельзя (§13).")
-        print("Закоммитьте код и пересоберите снимок.")
+        print("НЕ ОБЪЯВЛЯЙТЕ его promotable: у автомата §11.3 нет ребра")
+        print("promotable → promotable, а пересборка после коммита даст другой")
+        print("result_sha256, и объявленная запись к нему уже не подойдёт —")
+        print("по §12 выходом останется только новая кампания.")
+        print("Закоммитьте код и пересоберите снимок до любого объявления.")
     return 0
 
 
 def _dry_run(
     snapshot: SnapshotManifest, destinations: PromotionDestinations, operation: Operation
 ) -> int:
-    validate_snapshot(snapshot, destinations)
+    validate_snapshot(snapshot, destinations, require_clean_tree=requires_clean_tree(operation))
     print(f"снимок {snapshot.snapshot_id} ({snapshot.tier.value}) проверен, назначение чисто")
     for group in snapshot.groups:
         print(f"  {group} → {destinations.path(group)}")

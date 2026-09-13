@@ -29,8 +29,11 @@ from pipeline.redaction_calibration.promotion import (
 )
 from pipeline.redaction_calibration.state import (
     CalibrationStateError,
+    ProfileRecord,
+    ProfileState,
     PromotionRecord,
     PromotionState,
+    transition_promotion,
 )
 from scripts.promote_redaction_profile import (
     _witnesses_from_arguments,
@@ -1197,3 +1200,164 @@ def test_the_snapshot_command_has_no_option_to_declare_the_code_version(
     written = load_snapshot(tmp_path / "snapshots" / "snap-cli")
     assert written.input_witnesses["git_sha"] == GIT_SHA
     assert written.input_witnesses["git_clean"] is False
+
+
+# --- гейт чистоты срабатывает ДО объявления promotable --------------------------------
+
+
+def _dirty_snapshot(tmp_path: Path, snapshot_id: str = "snap-dirty") -> Path:
+    """Снимок, собранный грязным деревом: сборку это не запрещает."""
+    sources = _make_sources(tmp_path / f"sources-{snapshot_id}")
+    snapshot_root = tmp_path / "snapshots" / snapshot_id
+    snapshot_root.parent.mkdir(parents=True, exist_ok=True)
+    build_snapshot(
+        snapshot_root,
+        snapshot_id=snapshot_id,
+        manifest_path=sources["manifest"],
+        crops_root=sources["crops"],
+        splits_root=sources["splits"],
+        index_root=sources["index"],
+        witnesses=_witnesses(sources) | {"git_clean": False},
+        created_at=CREATED_AT,
+    )
+    return snapshot_root
+
+
+def test_validation_refuses_a_dirty_snapshot_before_it_can_be_declared_promotable(
+    tmp_path: Path,
+) -> None:
+    """Ловушка закрыта: отказ достаётся до перехода записи в `promotable`, а не после.
+
+    Порядок в кампании такой: посмотреть на снимок → объявить запись `promotable` по его
+    `result_sha256` → продвинуть. Отказ на последнем шаге был бы необратим: ребра
+    `promotable → promotable` у §11.3 нет, а пересобранный после коммита снимок получает
+    другой `result_sha256`, которому объявленная запись уже не соответствует.
+    """
+    snapshot = load_snapshot(_dirty_snapshot(tmp_path))
+    destinations, _ = _destinations(tmp_path)
+    record = PromotionRecord(state=PromotionState.NOT_SELECTED)
+
+    # Самая ранняя проверка, какую вообще запускает любой вызывающий, уже отказывает.
+    with pytest.raises(PromotionError, match="грязным деревом"):
+        validate_snapshot(snapshot, destinations)
+
+    # И только поэтому запись остаётся там, откуда есть выход: перехода не случилось.
+    assert record.state is PromotionState.NOT_SELECTED
+    profile = ProfileRecord(
+        profile_id="profile-x",
+        state=ProfileState.INDEPENDENT_PRIVACY_PASSED,
+        profile_sha256=PROFILE_SHA,
+        canonical_sha256=CANONICAL_SHA,
+        geometry_witness_sha256=GEOMETRY_SHA,
+        w_max=64,
+        h_max=64,
+    )
+    # Автомат сам грязное дерево не видит — он принимает только SHA описи. Ровно поэтому
+    # гейт обязан стоять раньше него, а не после.
+    declared = transition_promotion(
+        record,
+        PromotionState.PROMOTABLE,
+        profile=profile,
+        current_canonical_sha256=CANONICAL_SHA,
+        current_geometry_witness_sha256=GEOMETRY_SHA,
+        current_w_max=64,
+        current_h_max=64,
+        snapshot_result_sha256=snapshot.result_sha256,
+    )
+    assert declared.state is PromotionState.PROMOTABLE
+
+
+def test_cli_dry_run_refuses_a_dirty_snapshot_before_printing_any_token(tmp_path: Path) -> None:
+    """Сухой прогон — первое, что делает оператор, и он же первым говорит «нельзя»."""
+    snapshot_root = _dirty_snapshot(tmp_path)
+    destinations, _ = _destinations(tmp_path)
+    before = _live_state(destinations)
+
+    code = main(_cli_promote_argv(snapshot_root, destinations))
+
+    assert code == 2
+    assert _live_state(destinations) == before
+
+
+def test_the_dirty_refusal_names_the_promotable_trap(tmp_path: Path) -> None:
+    snapshot = load_snapshot(_dirty_snapshot(tmp_path))
+    destinations, _ = _destinations(tmp_path)
+
+    with pytest.raises(PromotionError) as отказ:
+        validate_snapshot(snapshot, destinations)
+
+    message = str(отказ.value)
+    assert "promotable" in message
+    assert "result_sha256" in message
+
+
+def test_rollback_still_restores_a_snapshot_whose_tree_was_dirty(tmp_path: Path) -> None:
+    """Обратной ловушки нет: откат возвращает то, что на данных уже стояло.
+
+    Отказаться восстанавливать установленное было бы хуже той нечистоты, против которой
+    правило написано, — особенно на первом продвижении, где свидетели вытесняемых данных
+    описывают эпоху до этого инструмента.
+    """
+    previous_root = _dirty_snapshot(tmp_path, snapshot_id="snap-dirty-old")
+    destinations, _ = _destinations(tmp_path, marker=b"live")
+    previous = load_snapshot(previous_root)
+
+    result = rollback(
+        previous,
+        destinations,
+        confirmation_token=confirmation_token(previous, operation="rollback"),
+    )
+
+    assert result.switched == ("manifest", "crops", "splits", "index")
+    assert _live_state(destinations)["crops/lada__vesta/one.jpg"] == b"crop-one-new"
+    assert _sidecars(destinations) == []
+
+
+def test_rollback_dry_run_does_not_refuse_a_dirty_snapshot(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    previous_root = _dirty_snapshot(tmp_path, snapshot_id="snap-dirty-old")
+    destinations, _ = _destinations(tmp_path)
+    previous = load_snapshot(previous_root)
+    capsys.readouterr()
+
+    code = main(
+        ["rollback", "--snapshot", str(previous_root), *_cli_destination_argv(destinations)]
+    )
+
+    assert code == 0
+    assert confirmation_token(previous, operation="rollback") in capsys.readouterr().out
+
+
+def test_the_snapshot_command_spells_out_the_promotable_trap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sources = _make_sources(tmp_path / "sources")
+    monkeypatch.setattr(subprocess, "run", _fake_git(False))
+    (tmp_path / "snapshots").mkdir(parents=True, exist_ok=True)
+    capsys.readouterr()
+
+    code = main(
+        [
+            "snapshot",
+            "--snapshot",
+            str(tmp_path / "snapshots" / "snap-cli-dirty"),
+            "--manifest",
+            str(sources["manifest"]),
+            "--crops",
+            str(sources["crops"]),
+            "--profile-id",
+            "profile-x",
+            "--profile-sha256",
+            PROFILE_SHA,
+            "--geometry-witness-sha256",
+            GEOMETRY_SHA,
+            "--canonical-sha256",
+            CANONICAL_SHA,
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "НЕ ОБЪЯВЛЯЙТЕ его promotable" in out
+    assert "новая кампания" in out
