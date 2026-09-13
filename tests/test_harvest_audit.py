@@ -7,11 +7,10 @@ from pipeline.harvest.audit import (
     APPLIED_COLUMNS,
     AppliedVerdict,
     AuditError,
+    AuditSummary,
     append_applied,
     apply_audit,
-    audit_counts,
     audit_gap,
-    counts_with_verdicts,
     demote_over_human,
     describe_applied,
     load_applied,
@@ -19,6 +18,7 @@ from pipeline.harvest.audit import (
     load_audit_events,
     merge_verdicts,
     required_audit_files,
+    summarize_audit,
     suppress_applied,
 )
 from pipeline.harvest.manifest import HarvestRow
@@ -116,7 +116,17 @@ def test_apply_проставляет_отметку_и_выкидывает_dir
     assert файлы["c.jpg"] == ""
 
 
-def test_счётчики_h3_считают_dirty_до_удаления() -> None:
+def _сводка(
+    строки: list[HarvestRow],
+    вердикты: dict[str, str] | None = None,
+    журнал: list[AppliedVerdict] | None = None,
+) -> AuditSummary:
+    """Сводка штатного пути: те же вердикты применены к тем же строкам, что и в прогоне."""
+    решения = вердикты or {}
+    return summarize_audit(строки, решения, apply_audit(строки, решения), журнал or [])
+
+
+def test_сводка_считает_решённые_вердикты_и_грязные_до_удаления() -> None:
     строки = [
         _строка("a.jpg", audit="ok"),
         _строка("b.jpg", audit="drop:plate"),
@@ -124,9 +134,13 @@ def test_счётчики_h3_считают_dirty_до_удаления() -> Non
         _строка("d.jpg", audit="drop:wrong_model"),
         _строка("e.jpg", audit=""),
     ]
-    total, dirty = audit_counts(строки)
-    assert total == 4
-    assert dirty == 2, "drop:wrong_model — не нарушение приватности, в dirty не идёт"
+
+    сводка = _сводка(строки)
+
+    assert сводка.resolved_total == 4
+    assert сводка.dirty_found == ("b.jpg", "c.jpg"), (
+        "drop:wrong_model — не нарушение приватности, в dirty не идёт"
+    )
 
 
 def test_спор_не_считается_проверенным() -> None:
@@ -139,7 +153,10 @@ def test_спор_не_считается_проверенным() -> None:
         _строка("d.jpg", audit=""),
     ]
 
-    assert audit_counts(строки) == (2, 0)
+    сводка = _сводка(строки)
+
+    assert сводка.resolved_total == 2
+    assert сводка.dirty_found == ()
 
 
 def test_числа_аудита_считаются_и_без_новых_вердиктов() -> None:
@@ -147,31 +164,99 @@ def test_числа_аудита_считаются_и_без_новых_вер�
     после усечения очереди, и оно не повод отчитаться нулём."""
     строки = [_строка("a.jpg", audit="ok"), _строка("b.jpg", audit="drop:plate")]
 
-    assert counts_with_verdicts(строки, {}) == (2, 1)
+    сводка = _сводка(строки)
+
+    assert сводка.resolved_total == 2
+    assert сводка.dirty_found == ("b.jpg",)
 
 
 def test_новые_вердикты_накладываются_поверх_манифеста() -> None:
     строки = [_строка("a.jpg", audit=""), _строка("b.jpg", audit="ok")]
 
-    assert counts_with_verdicts(строки, {"a.jpg": "drop:face"}) == (2, 1)
+    сводка = _сводка(строки, {"a.jpg": "drop:face"})
+
+    assert сводка.resolved_total == 2
+    assert сводка.dirty_found == ("a.jpg",)
 
 
-def test_грязные_считаются_до_удаления() -> None:
-    """`apply_audit` выкидывает `drop:*`, поэтому считать надо раньше него — иначе
-    `audited_dirty` всегда ноль, и гейт H3 не сработает никогда."""
-    строки = [_строка("a.jpg", audit="")]
+def test_найденный_и_удалённый_dirty_это_выполненная_работа() -> None:
+    """§12.1: кадр найден вердиктом и выброшен из манифеста — это закрытая работа.
 
-    всего, грязных = counts_with_verdicts(строки, {"a.jpg": "drop:plate"})
+    Прежний счёт блокировал гейт ровно на таком кадре, то есть требовал обнулить историю
+    ради зелёного цвета.
+    """
+    строки = [_строка("a.jpg", plates=1, audit="ok"), _строка("b.jpg", plates=1)]
 
-    assert (всего, грязных) == (1, 1)
+    сводка = _сводка(строки, {"b.jpg": "drop:plate"})
+
+    assert сводка.dirty_found == ("b.jpg",)
+    assert сводка.dirty_applied == ("b.jpg",)
+    assert сводка.dirty_remaining == ()
 
 
-def test_спор_новым_вердиктом_отменяет_прежнюю_проверку() -> None:
-    """Человек пересмотрел `ok` на `conflict` — счёт обязан это увидеть через наложение,
-    а не остаться при прежней отметке манифеста."""
+def test_не_применённый_dirty_остаётся_в_остатке() -> None:
+    """Тот же вердикт, но строка из манифеста не ушла: это и есть незакрытый дефект."""
+    строки = [_строка("a.jpg", plates=1, audit="drop:plate")]
+
+    сводка = summarize_audit(строки, {}, строки, [])
+
+    assert сводка.dirty_found == ("a.jpg",)
+    assert сводка.dirty_applied == ()
+    assert сводка.dirty_remaining == ("a.jpg",)
+
+
+def test_история_журнала_видна_после_удаления_строки() -> None:
+    """Найдено/применено обязано пережить уход строки из манифеста (§12.1).
+
+    Иначе следующий же прогон отчитывается «найдено 0»: строки с `drop:plate` в манифесте
+    больше нет, а вердикт человека нигде, кроме журнала, не живёт.
+    """
     строки = [_строка("a.jpg", audit="ok")]
+    журнал = [_применённый(file="b.jpg", verdict="drop:plate", requested="drop:plate")]
 
-    assert counts_with_verdicts(строки, {"a.jpg": "conflict"}) == (0, 0)
+    сводка = _сводка(строки, {}, журнал)
+
+    assert сводка.dirty_found == ("b.jpg",)
+    assert сводка.dirty_applied == ("b.jpg",)
+    assert сводка.dirty_remaining == ()
+
+
+def test_журнал_не_делает_грязным_безобидный_автовердикт() -> None:
+    """`drop:superseded` и `conflict` дедупа приватности не касаются."""
+    журнал = [
+        _применённый(file="b.jpg", verdict="drop:superseded"),
+        _применённый(file="c.jpg", verdict="conflict"),
+    ]
+
+    assert _сводка([_строка("a.jpg", audit="ok")], {}, журнал).dirty_found == ()
+
+
+def test_спорные_строки_итогового_манифеста_названы_целиком() -> None:
+    """Спор блокирует независимо от того, попал кадр в обязательный охват §14 или нет."""
+    строки = [_строка("a.jpg", audit="ok"), _строка("b.jpg", audit="conflict")]
+
+    assert _сводка(строки).conflicts == ("b.jpg",)
+
+
+def test_недостача_считается_по_итоговому_манифесту() -> None:
+    """Удалённый вердиктом кадр недостачи не создаёт: его в пуле уже нет."""
+    строки = [_строка("p0.jpg", plates=1), _строка("p1.jpg", plates=1, audit="ok")]
+
+    assert _сводка(строки, {"p0.jpg": "drop:plate"}).gap == ()
+    assert _сводка(строки).gap == ("p0.jpg",)
+
+
+def test_арифметика_обязана_замыкаться() -> None:
+    """Найдено = применено + осталось. Расхождение — не отчёт, а ошибка счёта."""
+    with pytest.raises(AuditError, match=r"a\.jpg"):
+        AuditSummary(
+            resolved_total=1,
+            dirty_found=("a.jpg",),
+            dirty_applied=(),
+            dirty_remaining=(),
+            gap=(),
+            conflicts=(),
+        )
 
 
 def test_обязательный_охват_аудита() -> None:

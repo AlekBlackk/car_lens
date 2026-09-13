@@ -27,12 +27,12 @@ from pipeline.harvest.audit import (
     DEFAULT_APPLIED_PATH,
     append_applied,
     apply_audit,
-    counts_with_verdicts,
     demote_over_human,
     describe_applied,
     load_applied,
     load_audit,
     merge_verdicts,
+    summarize_audit,
     suppress_applied,
 )
 from pipeline.harvest.backends import (
@@ -367,16 +367,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     авто = demote_over_human(незалогированное, строки)
     ручные = [load_audit(Path(п)) for п in (аргументы.audit or [])]
     вердикты = merge_verdicts(авто, *ручные)
-    # Счёт — безусловно и до `apply_audit`: отметки `audit` живут в манифесте постоянно
-    # (не только на прогонах с новыми вердиктами), а `apply_audit` ниже выкидывает строки
-    # с `drop:*` из манифеста — счёт после него навсегда давал бы `audited_dirty == 0`.
-    audited_total, audited_dirty = counts_with_verdicts(строки, вердикты)
+    # Снимок манифеста до применения: по нему сводка аудита считает найденное, а после
+    # `apply_audit` строк с `drop:*` в манифесте уже нет, и найденное было бы всегда нулём.
+    до_применения = строки
     if вердикты:
+        # Запрошенное складывается тем же порядком, что и применённое: у файла, по которому
+        # человек перерешил, запросом был именно его вердикт, а не то, чего хотел дедуп.
+        запрошено_каналами = merge_verdicts(незалогированное, *ручные)
         # След применения — до `apply_audit`: после него строки с `drop:*` в манифесте уже
-        # нет, и записывать в журнал будет нечего, кроме имени файла.
+        # нет, и записывать в журнал будет нечего, кроме имени файла. Журналируются оба
+        # канала, а не один дедуп: `drop:plate`, поставленный рукой, иначе не оставляет следа
+        # нигде — строка ушла из манифеста, а очередь `--audit` отчёта не касается, и §12.1
+        # «найдено/применено» на следующем же прогоне отчиталось бы нулём.
         append_applied(
             DEFAULT_APPLIED_PATH,
-            describe_applied(незалогированное, авто, строки, date.today().isoformat()),
+            describe_applied(запрошено_каналами, вердикты, строки, date.today().isoformat()),
         )
         строки = apply_audit(строки, вердикты)
         write_manifest(DEFAULT_MANIFEST_PATH, строки)
@@ -392,15 +397,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     # применения остаётся в журнале выше.
     if запрошено:
         файл_дедупа.write_text("", encoding="utf-8")
-    гейт = check_gate(итоги, строки, audited_total, audited_dirty, allow_sa=аргументы.allow_sa)
+    # Журнал перечитывается уже после дописывания: он и есть память о найденном, и сводка
+    # обязана видеть в нём сегодняшние записи наравне со вчерашними (§12.1). Сшивать список в
+    # памяти значило бы держать вторую версию правды рядом с файлом, который только что
+    # дедуплицировал записи сам.
+    аудит = summarize_audit(до_применения, вердикты, строки, load_applied(DEFAULT_APPLIED_PATH))
+    гейт = check_gate(итоги, строки, аудит, allow_sa=аргументы.allow_sa)
     if итоги is None:
         # Отчёт прогона сборка не пишет: перезапись затирала бы git-отслеживаемую запись
         # прогона, а роль «свежие числа манифеста с честной шапкой» уже занята
         # `bench/harvest-c1.md` (`scripts/report_c1.py`). Один файл — одна роль.
         вердикт = "пройден" if гейт.passed else "НЕ ПРОЙДЕН"
         print(
-            f"сборка из манифеста: строк {len(строки)}, аудит закрыт вердиктом {audited_total} "
-            f"(с дефектами {audited_dirty}), вердикт гейта {вердикт}"
+            f"сборка из манифеста: строк {len(строки)}, аудит закрыт вердиктом "
+            f"{аудит.resolved_total}, дефектов приватности найдено {len(аудит.dirty_found)}, "
+            f"применено {len(аудит.dirty_applied)}, осталось {len(аудит.dirty_remaining)}, "
+            f"вердикт гейта {вердикт}"
         )
         for причина in (*гейт.blocking_failures, *гейт.advisory_failures):
             print(f"  {причина}")
@@ -416,8 +428,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 гейт,
                 sha,
                 date.today().isoformat(),
-                audited_total=audited_total,
-                audited_dirty=audited_dirty,
+                audit=аудит,
             ),
             encoding="utf-8",
         )

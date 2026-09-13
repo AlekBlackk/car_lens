@@ -1,6 +1,7 @@
 # tests/test_harvest_gate.py
 from dataclasses import replace
 
+from pipeline.harvest.audit import AuditSummary
 from pipeline.harvest.gate import H2_CORE_CLASSES, check_gate, render_report
 from pipeline.harvest.manifest import HarvestRow
 from pipeline.harvest.run import ClassOutcome
@@ -45,80 +46,107 @@ def _полный_прогон(добравших: int) -> list[ClassOutcome]:
     return итоги
 
 
-def test_прогон_проходит_гейт() -> None:
-    гейт = check_gate(
-        _полный_прогон(120), [_строка(1)], audited_total=100, audited_dirty=0, allow_sa=False
+def _аудит(
+    *,
+    resolved_total: int = 100,
+    dirty_found: tuple[str, ...] = (),
+    dirty_applied: tuple[str, ...] = (),
+    dirty_remaining: tuple[str, ...] = (),
+    gap: tuple[str, ...] = (),
+    conflicts: tuple[str, ...] = (),
+) -> AuditSummary:
+    """Сводка аудита для гейта; умолчание — закрытый и чистый протокол."""
+    return AuditSummary(
+        resolved_total=resolved_total,
+        dirty_found=dirty_found,
+        dirty_applied=dirty_applied,
+        dirty_remaining=dirty_remaining,
+        gap=gap,
+        conflicts=conflicts,
     )
+
+
+def test_прогон_проходит_гейт() -> None:
+    гейт = check_gate(_полный_прогон(120), [_строка(1)], _аудит(), allow_sa=False)
     assert гейт.passed
     assert гейт.blocking_failures == ()
 
 
-def test_читаемый_номер_в_аудите_блокирует() -> None:
+def test_найденный_и_применённый_dirty_не_блокирует() -> None:
+    """§12.1: найдено и применено — выполненная работа аудита, а не регресс редакции."""
+    гейт = check_gate(
+        _полный_прогон(120),
+        [_строка(1)],
+        _аудит(dirty_found=("b.jpg",), dirty_applied=("b.jpg",)),
+        allow_sa=False,
+    )
+
+    assert гейт.passed
+    assert гейт.blocking_failures == ()
+
+
+def test_оставшийся_в_манифесте_dirty_блокирует() -> None:
     """H3 блокирующий: это нарушение правила 1 Р-11, а не низкое покрытие."""
     гейт = check_gate(
-        _полный_прогон(120), [_строка(1)], audited_total=100, audited_dirty=1, allow_sa=False
+        _полный_прогон(120),
+        [_строка(1)],
+        _аудит(dirty_found=("b.jpg",), dirty_remaining=("b.jpg",)),
+        allow_sa=False,
     )
+
     assert not гейт.passed
-    assert any("H3" in причина for причина in гейт.blocking_failures)
+    причина = next(п for п in гейт.blocking_failures if "H3" in п)
+    assert "b.jpg" in причина
 
 
 def test_непроверенный_протокол_блокирует() -> None:
     """Гейт обязан различать «аудит чист» и «аудита не было»: 0 из 0 — не пройден."""
-    непроверенная = replace(_строка(1), audit="")
-    гейт = check_gate(
-        _полный_прогон(120), [непроверенная], audited_total=0, audited_dirty=0, allow_sa=False
-    )
-    assert not гейт.passed
-    assert any("H3" in причина for причина in гейт.blocking_failures)
-
-
-def test_частичный_аудит_блокирует() -> None:
-    """Кадр с `plates>0` без вердикта — незакрытый протокол §14."""
-    непроверенная = replace(_строка(2), audit="")
     гейт = check_gate(
         _полный_прогон(120),
-        [_строка(1), непроверенная],
-        audited_total=1,
-        audited_dirty=0,
+        [_строка(1)],
+        _аудит(resolved_total=0, gap=("1.jpg",)),
         allow_sa=False,
     )
     assert not гейт.passed
     assert any("H3" in причина for причина in гейт.blocking_failures)
+
+
+def test_недостача_названа_числом_и_примером() -> None:
+    """Кадр с `plates>0` без вердикта — незакрытый протокол §14."""
+    гейт = check_gate(
+        _полный_прогон(120), [_строка(1)], _аудит(gap=("2.jpg", "7.jpg")), allow_sa=False
+    )
+
+    assert not гейт.passed
+    причина = next(п for п in гейт.blocking_failures if "аудит не закрыт" in п)
+    assert "2 обязательных кадров без решённого вердикта" in причина
+    assert "2.jpg" in причина
 
 
 def test_спорный_кадр_блокирует_и_назван_спорным() -> None:
     """Кадр с `conflict` вердикт имеет, но вопрос по нему открыт: гейт блокирует, а
     сообщение не смеет называть его «без вердикта»."""
-    спорный = replace(_строка(2), audit="conflict")
     гейт = check_gate(
-        _полный_прогон(120),
-        [_строка(1), спорный],
-        audited_total=1,
-        audited_dirty=0,
-        allow_sa=False,
+        _полный_прогон(120), [_строка(1)], _аудит(conflicts=("2.jpg",)), allow_sa=False
     )
 
     assert not гейт.passed
-    причина = next(п for п in гейт.blocking_failures if "аудит не закрыт" in п)
-    assert "без решённого вердикта" in причина
-    assert "1 спорных `conflict`" in причина
+    причина = next(п for п in гейт.blocking_failures if "conflict" in п)
+    assert "без решённого вердикта" not in причина
+    assert "2.jpg" in причина
 
 
 def test_битый_манифест_блокирует() -> None:
     строка = _строка(1)
     порченая = replace(строка, page_url="")
-    гейт = check_gate(
-        _полный_прогон(120), [порченая], audited_total=100, audited_dirty=0, allow_sa=False
-    )
+    гейт = check_gate(_полный_прогон(120), [порченая], _аудит(), allow_sa=False)
     assert not гейт.passed
     assert any("H4" in причина for причина in гейт.blocking_failures)
 
 
 def test_низкое_покрытие_не_блокирует() -> None:
     """H1 — это измеренный дефицит, он открывает второй источник, а не чинит код."""
-    гейт = check_gate(
-        _полный_прогон(30), [_строка(1)], audited_total=100, audited_dirty=0, allow_sa=False
-    )
+    гейт = check_gate(_полный_прогон(30), [_строка(1)], _аудит(), allow_sa=False)
     assert гейт.passed
     assert any("H1" in причина for причина in гейт.advisory_failures)
 
@@ -127,7 +155,7 @@ def test_недобор_ядрового_класса_не_блокирует_н
     итоги = [_итог(f"класс_{n}", 15) for n in range(146)]
     итоги += [_итог(H2_CORE_CLASSES[0], 3)]
     итоги += [_итог(class_id, 15) for class_id in H2_CORE_CLASSES[1:]]
-    гейт = check_gate(итоги, [_строка(1)], audited_total=100, audited_dirty=0, allow_sa=False)
+    гейт = check_gate(итоги, [_строка(1)], _аудит(), allow_sa=False)
     assert гейт.passed
     assert any("H2" in причина for причина in гейт.advisory_failures)
 
@@ -136,7 +164,7 @@ def test_сборка_не_проверяет_h1_h2_и_говорит_об_эт�
     """Без чисел прогона H1 и H2 неизвестны, а молчание читалось бы как «дефицита нет»:
     сборка по накопительному манифесту насчитывала «классов, добравших 30: 134» там, где
     прогон не добрал ни одного."""
-    гейт = check_gate(None, [_строка(1)], audited_total=1, audited_dirty=0, allow_sa=False)
+    гейт = check_gate(None, [_строка(1)], _аудит(resolved_total=1), allow_sa=False)
 
     assert not any("H1:" in п or "H2:" in п for п in гейт.advisory_failures)
     assert any("не проверены" in п for п in гейт.advisory_failures)
@@ -144,10 +172,7 @@ def test_сборка_не_проверяет_h1_h2_и_говорит_об_эт�
 
 def test_сборка_не_мешает_блокирующим_порогам() -> None:
     """H3 и H4 считаются по строкам манифеста, а они в сборке настоящие."""
-    непроверенная = replace(_строка(2), audit="")
-    гейт = check_gate(
-        None, [_строка(1), непроверенная], audited_total=1, audited_dirty=0, allow_sa=False
-    )
+    гейт = check_gate(None, [_строка(1)], _аудит(resolved_total=1, gap=("2.jpg",)), allow_sa=False)
 
     assert not гейт.passed
     assert any("H3" in причина for причина in гейт.blocking_failures)
@@ -155,21 +180,39 @@ def test_сборка_не_мешает_блокирующим_порогам() 
 
 def test_отчёт_называет_дефицитные_классы() -> None:
     итоги = [_итог("lada__2107", 4), _итог("uaz__patriot", 15)]
+    аудит = _аудит()
     отчёт = render_report(
         итоги,
         [_строка(1)],
-        check_gate(итоги, [_строка(1)], 100, 0, allow_sa=False),
+        check_gate(итоги, [_строка(1)], аудит, allow_sa=False),
         git_sha="deadbee",
         ran_at="2026-08-28",
-        audited_total=100,
-        audited_dirty=0,
+        audit=аудит,
     )
     assert "lada__2107" in отчёт
     assert "deadbee" in отчёт
     assert "дефицит" in отчёт
-    assert "аудит H3: закрыто вердиктом 100, с дефектами 0" in отчёт, (
+    assert "закрыто вердиктом 100" in отчёт, (
         "«проверено» было тем самым словом, которое засчитывало открытый спор за проверку"
     )
+
+
+def test_отчёт_замыкает_арифметику_найдено_применено_осталось() -> None:
+    """§12.1: отчёт показывает найдено, применено, осталось и называет применённое
+    выполненной работой. Обнулять счётчик ради зелёного цвета запрещено."""
+    итоги = [_итог("lada__2107", 4)]
+    аудит = _аудит(dirty_found=("b.jpg", "c.jpg"), dirty_applied=("b.jpg", "c.jpg"))
+    отчёт = render_report(
+        итоги,
+        [_строка(1)],
+        check_gate(итоги, [_строка(1)], аудит, allow_sa=False),
+        git_sha="deadbee",
+        ran_at="2026-08-28",
+        audit=аудит,
+    )
+
+    assert "найдено 2, применено 2, осталось 0" in отчёт
+    assert "выполненная работа" in отчёт
 
 
 def test_отчёт_прогона_называет_свои_числа_снимком() -> None:
@@ -177,14 +220,14 @@ def test_отчёт_прогона_называет_свои_числа_сним
     что он снимок, а не текущее состояние: иначе 4324 строки в отчёте против 4317 в манифесте
     читаются как ошибка одного из двух."""
     итоги = [_итог("lada__2107", 4)]
+    аудит = _аудит()
     отчёт = render_report(
         итоги,
         [_строка(1)],
-        check_gate(итоги, [_строка(1)], 100, 0, allow_sa=False),
+        check_gate(итоги, [_строка(1)], аудит, allow_sa=False),
         git_sha="deadbee",
         ran_at="2026-08-28",
-        audited_total=100,
-        audited_dirty=0,
+        audit=аудит,
     )
 
     assert "снимок" in отчёт
@@ -198,14 +241,14 @@ def test_отчёт_печатает_разбор_причин_отказа() ->
         replace(_итог("lada__2107", 4), rejects={"over_redacted": 7, "alias_mismatch": 2}),
         replace(_итог("uaz__patriot", 15), rejects={"over_redacted": 1}),
     ]
+    аудит = _аудит()
     отчёт = render_report(
         итоги,
         [_строка(1)],
-        check_gate(итоги, [_строка(1)], 100, 0, allow_sa=False),
+        check_gate(итоги, [_строка(1)], аудит, allow_sa=False),
         git_sha="deadbee",
         ran_at="2026-08-28",
-        audited_total=100,
-        audited_dirty=0,
+        audit=аудит,
     )
     assert "## Причины отказа" in отчёт
     assert "| `over_redacted` | 8 |" in отчёт, "числа складываются по всем классам"

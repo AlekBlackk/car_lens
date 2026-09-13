@@ -137,6 +137,39 @@ def test_применённый_автовердикт_попадает_в_жу�
     assert стенд["вердикты"].read_text(encoding="utf-8") == ""
 
 
+def test_вердикт_человека_тоже_попадает_в_журнал(стенд: dict[str, Path]) -> None:
+    """§12.1: без записи `drop:plate` человека найденный дефект исчезает на следующем прогоне.
+
+    Журнал вёлся только по каналу дедупа, и строка, выброшенная рукой, не оставляла следа
+    нигде: в манифесте её больше нет, очередь `--audit` не усекается, но и не читается
+    отчётом. «Найдено/применено» §12.1 держится именно на этой записи.
+    """
+    write_manifest(стенд["манифест"], [_строка("a.jpg"), _строка("b.jpg")])
+    ручной = стенд["манифест"].parent / "verdicts.csv"
+    ручной.write_text("file,verdict\na.jpg,drop:plate\n", encoding="utf-8")
+
+    main(["--contact", "mail@example.com", "--report-only", "--audit", str(ручной)])
+
+    журнал = {з.file: (з.requested, з.verdict) for з in load_applied(стенд["журнал"])}
+    assert журнал == {"a.jpg": ("drop:plate", "drop:plate")}
+    assert [с.file for с in load_manifest(стенд["манифест"])] == ["b.jpg"]
+
+
+def test_история_грязных_переживает_следующий_прогон(
+    стенд: dict[str, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Следующий прогон строки уже не видит, а «найдено 1, применено 1» обязано остаться."""
+    write_manifest(стенд["манифест"], [_строка("a.jpg"), _строка("b.jpg", audit="ok")])
+    ручной = стенд["манифест"].parent / "verdicts.csv"
+    ручной.write_text("file,verdict\na.jpg,drop:plate\n", encoding="utf-8")
+    main(["--contact", "mail@example.com", "--report-only", "--audit", str(ручной)])
+    capsys.readouterr()
+
+    main(["--contact", "mail@example.com", "--report-only"])
+
+    assert "найдено 1, применено 1, осталось 0" in capsys.readouterr().out
+
+
 def test_второй_прогон_не_сносит_принятый_заново_кадр(стенд: dict[str, Path]) -> None:
     """Цикл потери: прополка возвращает кадр в кандидаты, а старый вердикт ждёт его снова."""
     write_manifest(стенд["манифест"], [_строка("a.jpg"), _строка("b.jpg")])
