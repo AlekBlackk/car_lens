@@ -131,28 +131,34 @@ def test_применённый_автовердикт_попадает_в_жу�
 
     main(["--contact", "mail@example.com", "--report-only"])
 
-    журнал = {з.file: (з.class_id, з.verdict) for з in load_applied(стенд["журнал"])}
-    assert журнал["a.jpg"] == ("mitsubishi__pajero", "drop:superseded")
-    assert журнал["b.jpg"][1] == "conflict", "в журнал идёт применённый вердикт, а не исходный"
+    журнал = {з.file: (з.class_id, з.requested, з.verdict) for з in load_applied(стенд["журнал"])}
+    assert журнал["a.jpg"] == ("mitsubishi__pajero", "drop:superseded", "drop:superseded")
+    assert журнал["b.jpg"][2] == "conflict", "в журнал идёт применённый вердикт, а не исходный"
+    assert журнал["b.jpg"][1] == "drop:superseded", "а запрошенный не теряется понижением"
     assert стенд["вердикты"].read_text(encoding="utf-8") == ""
 
 
-def test_вердикт_человека_тоже_попадает_в_журнал(стенд: dict[str, Path]) -> None:
-    """§12.1: без записи `drop:plate` человека найденный дефект исчезает на следующем прогоне.
+def test_из_рук_в_журнал_идут_только_удаления(стенд: dict[str, Path]) -> None:
+    """Журнал — провенанс удалённых строк, и ручной канал попадает в него ровно `drop:*`.
 
-    Журнал вёлся только по каналу дедупа, и строка, выброшенная рукой, не оставляла следа
-    нигде: в манифесте её больше нет, очередь `--audit` не усекается, но и не читается
-    отчётом. «Найдено/применено» §12.1 держится именно на этой записи.
+    `drop:plate` человека записать обязаны (§12.1): строки в манифесте больше нет, очередь
+    `--audit` отчётом не читается, и без записи «найдено/применено» на следующем же прогоне
+    обнулилось бы. Ручные `ok` и `conflict`, наоборот, оставляют строку в манифесте, и свою
+    историю она несёт колонкой `audit`; в журнале они соврали бы дважды — выдали бы ручной
+    спор за спор дедупа в счёте §9 (`scripts/report_c1.py`) и дали бы `suppress_applied`
+    ключ, которого человек не запрашивал.
     """
-    write_manifest(стенд["манифест"], [_строка("a.jpg"), _строка("b.jpg")])
+    write_manifest(стенд["манифест"], [_строка("a.jpg"), _строка("b.jpg"), _строка("c.jpg")])
     ручной = стенд["манифест"].parent / "verdicts.csv"
-    ручной.write_text("file,verdict\na.jpg,drop:plate\n", encoding="utf-8")
+    ручной.write_text(
+        "file,verdict\na.jpg,drop:plate\nb.jpg,ok\nc.jpg,conflict\n", encoding="utf-8"
+    )
 
     main(["--contact", "mail@example.com", "--report-only", "--audit", str(ручной)])
 
     журнал = {з.file: (з.requested, з.verdict) for з in load_applied(стенд["журнал"])}
     assert журнал == {"a.jpg": ("drop:plate", "drop:plate")}
-    assert [с.file for с in load_manifest(стенд["манифест"])] == ["b.jpg"]
+    assert [с.file for с in load_manifest(стенд["манифест"])] == ["b.jpg", "c.jpg"]
 
 
 def test_история_грязных_переживает_следующий_прогон(
