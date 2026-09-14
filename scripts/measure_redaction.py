@@ -25,9 +25,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from pipeline.crop import VEHICLE_CLASSES, Detection, Detector
+from pipeline.crop import VEHICLE_CLASSES, Detection
 from pipeline.harvest.cache import cache_path, decode_image
-from pipeline.harvest.redact import fill_overlap, plate_aspect, redact_plates
+from pipeline.harvest.redact import (
+    PlateDetectorInput,
+    fill_overlap,
+    plate_aspect,
+    redact_plates,
+)
 from pipeline.paths import harvest_dir
 
 ЯЧЕЙКА_W = 160
@@ -79,7 +84,7 @@ def корзина(остаток: Остаток, aspect_min: float, overlap_mi
 def измерить_кадр(
     image: np.ndarray,
     vehicle_boxes: Sequence[Detection],
-    plate_detectors: Sequence[Detector],
+    plate_detectors: Sequence[PlateDetectorInput],
     source_item_id: str,
     class_id: str,
     sha256: str,

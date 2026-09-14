@@ -3,7 +3,7 @@
 Профиль проверяется на трёх свойствах, ради которых он и заводится: он называет все
 параметры, реально влияющие на детекцию (иначе «тот же профиль» ничего не значит), его
 идентификатор меняется от любого свидетеля прогона, и его сериализация не зависит от
-порядка полей в памяти.
+порядка записей в памяти.
 
 Фабрика проверяется на подставных классах детекторов: настоящие требуют весов и
 `ultralytics`, которых в базовом окружении нет, а доказывать здесь нужно ровно одно —
@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +21,7 @@ from pipeline.harvest.detectors import DetectorPin
 from pipeline.harvest.redaction_profile import (
     CURRENT_REDACTION_PROFILE,
     DETECTOR_STAGE_SOURCES,
+    DetectorEntry,
     DetectorProfile,
     RedactionProfile,
     build_plate_detectors,
@@ -54,11 +54,91 @@ def _pins(*, plate_sha: str = "1" * 64) -> dict[str, DetectorPin]:
 
 
 def test_current_profile_names_every_effective_parameter() -> None:
-    assert CURRENT_REDACTION_PROFILE.plate == DetectorProfile(0.5, 1280, 0.25)
-    assert CURRENT_REDACTION_PROFILE.plate_hires == DetectorProfile(0.25, 1280, 0.25)
+    assert len(CURRENT_REDACTION_PROFILE.detectors) == 2
+    plate = CURRENT_REDACTION_PROFILE.detectors[0]
+    plate_hires = CURRENT_REDACTION_PROFILE.detectors[1]
+    assert plate.instance == "plate"
+    assert plate.weights == "plate"
+    assert plate.params == DetectorProfile(0.5, 1280, 0.25)
+
+    assert plate_hires.instance == "plate_hires"
+    assert plate_hires.weights == "plate_hires"
+    assert plate_hires.params == DetectorProfile(0.25, 1280, 0.25)
 
 
-def test_profile_id_changes_with_parameters_code_weights_and_git() -> None:
+def test_профиль_из_одного_двух_и_трёх_детекторов() -> None:
+    p1 = DetectorProfile(0.5, 1280, 0.25)
+    p2 = DetectorProfile(0.25, 1280, 0.25)
+    p3 = DetectorProfile(0.3, 640, 0.25)
+
+    prof1 = RedactionProfile((DetectorEntry("plate", "plate", p1),))
+    assert len(prof1.detectors) == 1
+    assert prof1.detectors[0].instance == "plate"
+
+    prof2 = RedactionProfile(
+        (
+            DetectorEntry("plate", "plate", p1),
+            DetectorEntry("plate_hires", "plate_hires", p2),
+        )
+    )
+    assert len(prof2.detectors) == 2
+
+    prof3 = RedactionProfile(
+        (
+            DetectorEntry("plate", "plate", p1),
+            DetectorEntry("plate_hires_1280", "plate_hires", p2),
+            DetectorEntry("plate_hires_640", "plate_hires", p3),
+        )
+    )
+    assert len(prof3.detectors) == 3
+    assert [d.instance for d in prof3.detectors] == [
+        "plate",
+        "plate_hires_1280",
+        "plate_hires_640",
+    ]
+
+
+def test_запрет_пустого_набора_детекторов() -> None:
+    with pytest.raises(ValueError, match="не может быть пустым"):
+        RedactionProfile(())
+
+
+def test_запрет_повторяющихся_имён_детекторов() -> None:
+    p = DetectorProfile(0.5, 1280, 0.25)
+    with pytest.raises(ValueError, match="повторяющиеся"):
+        RedactionProfile(
+            (
+                DetectorEntry("plate", "plate", p),
+                DetectorEntry("plate", "plate", p),
+            )
+        )
+
+
+def test_недопустимое_имя_экземпляра() -> None:
+    p = DetectorProfile(0.5, 1280, 0.25)
+    with pytest.raises(ValueError, match="недопустимое имя экземпляра"):
+        DetectorEntry("Plate-1", "plate", p)
+    with pytest.raises(ValueError, match="недопустимое имя экземпляра"):
+        DetectorEntry("", "plate", p)
+
+
+def test_канонический_порядок_и_стабильность_json() -> None:
+    p1 = DetectorProfile(0.5, 1280, 0.25)
+    p2 = DetectorProfile(0.25, 1280, 0.25)
+    e1 = DetectorEntry("plate", "plate", p1)
+    e2 = DetectorEntry("plate_hires", "plate_hires", p2)
+
+    prof_forward = RedactionProfile((e1, e2))
+    prof_backward = RedactionProfile((e2, e1))
+
+    assert prof_forward.detectors == prof_backward.detectors
+    json_forward = canonical_profile_json(prof_forward)
+    json_backward = canonical_profile_json(prof_backward)
+    assert json_forward == json_backward
+    assert json_forward.endswith(b"\n")
+
+
+def test_profile_id_меняется_при_перестановке_имён_и_смене_параметров() -> None:
     pins = _pins(plate_sha="a" * 64)
     base = profile_id(
         CURRENT_REDACTION_PROFILE,
@@ -66,19 +146,51 @@ def test_profile_id_changes_with_parameters_code_weights_and_git() -> None:
         git_sha="a" * 40,
         stage_sha256="b" * 64,
     )
-    changed = replace(
-        CURRENT_REDACTION_PROFILE,
-        plate=DetectorProfile(0.4, 1280, 0.25),
+
+    p_swap = RedactionProfile(
+        (
+            DetectorEntry(
+                "plate",
+                "plate",
+                DetectorProfile(0.25, 1280, 0.25),
+            ),
+            DetectorEntry(
+                "plate_hires",
+                "plate_hires",
+                DetectorProfile(0.5, 1280, 0.25),
+            ),
+        )
     )
     assert (
         profile_id(
-            changed,
+            p_swap,
             pins=pins,
             git_sha="a" * 40,
             stage_sha256="b" * 64,
         )
         != base
     )
+
+    p_param = RedactionProfile(
+        (
+            DetectorEntry(
+                "plate",
+                "plate",
+                DetectorProfile(0.4, 1280, 0.25),
+            ),
+            CURRENT_REDACTION_PROFILE.detectors[1],
+        )
+    )
+    assert (
+        profile_id(
+            p_param,
+            pins=pins,
+            git_sha="a" * 40,
+            stage_sha256="b" * 64,
+        )
+        != base
+    )
+
     assert (
         profile_id(
             CURRENT_REDACTION_PROFILE,
@@ -108,11 +220,18 @@ def test_profile_id_changes_with_parameters_code_weights_and_git() -> None:
     )
 
 
-def test_canonical_json_is_order_stable() -> None:
-    first = canonical_profile_json(CURRENT_REDACTION_PROFILE)
-    second = canonical_profile_json(CURRENT_REDACTION_PROFILE)
-    assert first == second
-    assert first.endswith(b"\n")
+def test_profile_id_не_удваивает_свидетель_при_разделении_весов() -> None:
+    pins = _pins()
+    p1 = DetectorProfile(0.5, 1280, 0.25)
+    p2 = DetectorProfile(0.25, 640, 0.25)
+    prof = RedactionProfile(
+        (
+            DetectorEntry("plate_hires_1280", "plate_hires", p1),
+            DetectorEntry("plate_hires_640", "plate_hires", p2),
+        )
+    )
+    pid = profile_id(prof, pins=pins, git_sha="a" * 40, stage_sha256="b" * 64)
+    assert len(pid) == 64
 
 
 def test_идентификатор_профиля_воспроизводится_на_равных_свидетелях() -> None:
@@ -168,19 +287,22 @@ def test_хеш_стадии_меняется_с_байтами_исходник
     assert до != после
 
 
-def test_фабрика_передаёт_параметры_профиля_обоим_детекторам() -> None:
+def test_фабрика_передаёт_параметры_профиля_детекторам() -> None:
     """Параметры берутся из профиля, а не из умолчаний классов детекторов."""
     профиль = RedactionProfile(
-        plate=DetectorProfile(0.4, 640, 0.2, 0.4),
-        plate_hires=DetectorProfile(0.3, 512, 0.1, 0.6),
+        (
+            DetectorEntry("plate", "plate", DetectorProfile(0.4, 640, 0.2, 0.4)),
+            DetectorEntry("plate_hires", "plate_hires", DetectorProfile(0.3, 512, 0.1, 0.6)),
+        )
     )
     with (
         patch("pipeline.harvest.backends.OnnxBoxDetector") as ssd,
         patch("pipeline.detectors.yolo.YoloDetector") as yolo,
         patch("pipeline.harvest.tiling.TiledDetector") as нарезка,
     ):
-        build_plate_detectors(профиль, models_dir=Path("models"), pins=_pins())
+        детекторы = build_plate_detectors(профиль, models_dir=Path("models"), pins=_pins())
 
+    assert len(детекторы) == 2
     assert ssd.call_args.args[0] == Path("models") / "plate.onnx"
     assert ssd.call_args.kwargs == {"conf": 0.4}
     assert yolo.call_args.kwargs == {
@@ -193,14 +315,20 @@ def test_фабрика_передаёт_параметры_профиля_об�
     ]
 
 
-def test_фабрика_текущего_профиля_повторяет_прежние_умолчания() -> None:
-    """Шаг 0 не меняет поведение: явные параметры совпадают с прежними умолчаниями."""
+def test_текущий_профиль_повторяет_прежний_набор_детекторов_и_умолчания() -> None:
+    """Шаг 0 не меняет поведение: текущий профиль повторяет прежнюю пару детекторов."""
     with (
         patch("pipeline.harvest.backends.OnnxBoxDetector") as ssd,
         patch("pipeline.detectors.yolo.YoloDetector") as yolo,
         patch("pipeline.harvest.tiling.TiledDetector") as нарезка,
     ):
-        build_plate_detectors(CURRENT_REDACTION_PROFILE, models_dir=Path("models"), pins=_pins())
+        детекторы = build_plate_detectors(
+            CURRENT_REDACTION_PROFILE, models_dir=Path("models"), pins=_pins()
+        )
+
+    assert len(детекторы) == 2
+    assert [имя for имя, _ in детекторы] == ["plate", "plate_hires"]
+    assert all(hasattr(детектор, "detect") for _, детектор in детекторы)
 
     assert ssd.call_args.kwargs == {"conf": 0.5}
     assert yolo.call_args.kwargs["conf"] == 0.25
@@ -210,14 +338,30 @@ def test_фабрика_текущего_профиля_повторяет_пр�
     ]
 
 
-def test_фабрика_возвращает_пару_нарезанных_детекторов() -> None:
+def test_фабрика_строит_произвольное_число_детекторов() -> None:
+    p1 = DetectorProfile(0.5, 1280, 0.25)
+    p2 = DetectorProfile(0.25, 1280, 0.25)
+    p3 = DetectorProfile(0.25, 640, 0.25)
+    профиль = RedactionProfile(
+        (
+            DetectorEntry("plate", "plate", p1),
+            DetectorEntry("plate_hires_1280", "plate_hires", p2),
+            DetectorEntry("plate_hires_640", "plate_hires", p3),
+        )
+    )
     with (
         patch("pipeline.harvest.backends.OnnxBoxDetector"),
         patch("pipeline.detectors.yolo.YoloDetector"),
+        patch("pipeline.harvest.tiling.TiledDetector"),
     ):
-        детекторы = build_plate_detectors(
-            CURRENT_REDACTION_PROFILE, models_dir=Path("models"), pins=_pins()
-        )
+        детекторы = build_plate_detectors(профиль, models_dir=Path("models"), pins=_pins())
 
-    assert len(детекторы) == 2
-    assert all(hasattr(детектор, "detect") for детектор in детекторы)
+    assert len(детекторы) == 3
+    assert [имя for имя, _ in детекторы] == ["plate", "plate_hires_1280", "plate_hires_640"]
+
+
+def test_фабрика_требует_пин_на_каждое_имя_весов() -> None:
+    p = DetectorProfile(0.5, 1280, 0.25)
+    профиль = RedactionProfile((DetectorEntry("custom", "missing_weights", p),))
+    with pytest.raises(ValueError, match="нет пина для весов"):
+        build_plate_detectors(профиль, models_dir=Path("models"), pins=_pins())

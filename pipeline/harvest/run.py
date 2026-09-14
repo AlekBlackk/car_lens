@@ -38,7 +38,7 @@ from pipeline.harvest.jpeg import encode_jpeg, write_jpeg_atomic
 from pipeline.harvest.licenses import canonical_name, is_allowed, tier_of
 from pipeline.harvest.manifest import HarvestRow, append_row, strip_html
 from pipeline.harvest.queries import ClassQueries
-from pipeline.harvest.redact import redact_frame
+from pipeline.harvest.redact import PlateDetectorInput, redact_frame
 from pipeline.harvest.rejects import Reject, append_reject_row
 from pipeline.harvest.sources import (
     SEARCH_BASIS_PREFIX,
@@ -86,7 +86,7 @@ class HarvestDeps:
 
     source: HarvestSource
     vehicle_detector: Detector
-    plate_detectors: tuple[Detector, ...]
+    plate_detectors: tuple[PlateDetectorInput, ...]
     face_detector: Detector
     encoder: ImageEncoder
     class_matrix: np.ndarray

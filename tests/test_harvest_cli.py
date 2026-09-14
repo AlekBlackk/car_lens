@@ -32,7 +32,11 @@ from pipeline.harvest.detectors import DetectorPin
 from pipeline.harvest.flickr import requested_licenses
 from pipeline.harvest.manifest import HarvestRow, load_manifest, write_manifest
 from pipeline.harvest.queries import DEFAULT_QUERIES_PATH, ClassQueries, load_queries
-from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE, RedactionProfile
+from pipeline.harvest.redaction_profile import (
+    CURRENT_REDACTION_PROFILE,
+    NamedDetector,
+    RedactionProfile,
+)
 from pipeline.harvest.run import CategoryExpander
 from pipeline.harvest.sources import HarvestSource, SourceQuery
 from scripts.harvest import (
@@ -395,12 +399,15 @@ def test_build_deps_берёт_детекторы_номера_из_единой
     monkeypatch.setattr("scripts.harvest.build_text_matrix", lambda *_: np.zeros((1, 2)))
     monkeypatch.setattr("scripts.harvest.YoloDetector", lambda *_, **__: object())
     monkeypatch.setattr("scripts.harvest.YuNetFaceDetector", lambda *_, **__: object())
-    номера = (cast(Detector, object()), cast(Detector, object()))
+    номера: tuple[NamedDetector, ...] = (
+        ("plate", cast(Detector, object())),
+        ("plate_hires", cast(Detector, object())),
+    )
     вызовы: list[tuple[RedactionProfile, Path, Mapping[str, DetectorPin]]] = []
 
     def фабрика(
         profile: RedactionProfile, *, models_dir: Path, pins: Mapping[str, DetectorPin]
-    ) -> tuple[Detector, Detector]:
+    ) -> tuple[NamedDetector, ...]:
         вызовы.append((profile, models_dir, pins))
         return номера
 

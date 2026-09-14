@@ -45,8 +45,18 @@ from pipeline.harvest.manifest import (
     load_manifest,
     write_manifest,
 )
-from pipeline.harvest.redact import PlateDetectionTrace, RawPlateObservation, redact_frame
-from pipeline.harvest.redaction_profile import DetectorProfile, RedactionProfile, profile_id
+from pipeline.harvest.redact import (
+    PlateDetectionTrace,
+    PlateDetectorInput,
+    RawPlateObservation,
+    redact_frame,
+)
+from pipeline.harvest.redaction_profile import (
+    DetectorEntry,
+    DetectorProfile,
+    RedactionProfile,
+    profile_id,
+)
 from pipeline.harvest.run import is_crop_over_redacted
 from pipeline.paths import harvest_dir
 from pipeline.redaction_calibration.measure import (
@@ -140,7 +150,7 @@ class RebuildDeps:
     """Внешние зависимости и раздельные корни чтения/записи переderivации."""
 
     vehicle_detector: Detector
-    plate_detectors: tuple[Detector, ...]
+    plate_detectors: tuple[PlateDetectorInput, ...]
     face_detector: Detector
     input_root: Path
     output_root: Path
@@ -305,10 +315,10 @@ def _detector_profile(значения: Any, ключ: str) -> DetectorProfile:
 
 
 def load_profile_document(path: Path) -> RedactionProfile:
-    """Прочитать кандидатный профиль редакции из JSON формы `asdict(RedactionProfile)`.
+    """Прочитать кандидатный профиль редакции из JSON.
 
-    Это ровно та форма, что лежит в ключе `profile` паспорта любого workspace, поэтому
-    кандидат описывается копией уже существующего паспорта с правкой чисел.
+    Поддерживает как новую форму (объект с ключом 'detectors'), так и старую пару
+    'plate' / 'plate_hires' паспортов прошлой кампании (§3.5 дизайна).
     """
     try:
         документ = json.loads(path.read_text(encoding="utf-8"))
@@ -318,14 +328,76 @@ def load_profile_document(path: Path) -> RedactionProfile:
         raise RebuildError(f"профиль не разбирается как JSON: {path}: {ошибка}") from ошибка
     if not isinstance(документ, dict):
         raise RebuildError(f"профиль {path}: ожидался объект верхнего уровня")
-    детекторы = [поле.name for поле in dataclass_fields(RedactionProfile)]
-    лишние = sorted(set(документ) - set(детекторы))
+
+    if "profile" in документ and isinstance(документ["profile"], dict):
+        документ = документ["profile"]
+
+    # Новая форма: {"detectors": [...]}
+    if "detectors" in документ:
+        лишние = sorted(set(документ) - {"detectors"})
+        if лишние:
+            raise RebuildError(f"профиль {path}: неизвестные ключи {лишние}")
+        список = документ["detectors"]
+        if not isinstance(список, list):
+            raise RebuildError(f"профиль {path}: detectors должен быть списком")
+        if not список:
+            raise RebuildError(f"профиль {path}: список детекторов пуст")
+        записи: list[DetectorEntry] = []
+        for номер, пункт in enumerate(список):
+            if not isinstance(пункт, dict):
+                raise RebuildError(f"профиль {path}: запись {номер} должна быть объектом")
+            лишние_п = sorted(set(пункт) - {"instance", "weights", "params"})
+            if лишние_п:
+                raise RebuildError(f"профиль {path}: запись {номер}: неизвестные ключи {лишние_п}")
+            raw_instance = пункт.get("instance")
+            if not isinstance(raw_instance, str) or not raw_instance:
+                raise RebuildError(
+                    f"профиль {path}: запись {номер}: нет обязательного ключа 'instance'"
+                )
+            instance = raw_instance
+            raw_weights = пункт.get("weights", instance)
+            if not isinstance(raw_weights, str) or not raw_weights:
+                raise RebuildError(
+                    f"профиль {path}: запись {номер}: ключ 'weights' должен быть непустой строкой"
+                )
+            weights = raw_weights
+            if "params" not in пункт:
+                raise RebuildError(
+                    f"профиль {path}: запись {номер}: нет обязательного ключа 'params'"
+                )
+            params = _detector_profile(пункт["params"], instance)
+            try:
+                записи.append(DetectorEntry(instance=instance, weights=weights, params=params))
+            except ValueError as err:
+                raise RebuildError(f"профиль {path}: {err}") from err
+        try:
+            return RedactionProfile(записи)
+        except ValueError as err:
+            raise RebuildError(f"профиль {path}: {err}") from err
+
+    # Старая форма: {"plate": {...}, "plate_hires": {...}}
+    старые_детекторы = ["plate", "plate_hires"]
+    лишние = sorted(set(документ) - set(старые_детекторы))
     if лишние:
         raise RebuildError(f"профиль {path}: неизвестные ключи {лишние}")
-    нехватка = sorted(имя for имя in детекторы if имя not in документ)
+    нехватка = sorted(имя for имя in старые_детекторы if имя not in документ)
     if нехватка:
         raise RebuildError(f"профиль {path}: нет обязательных детекторов {нехватка}")
-    return RedactionProfile(**{имя: _detector_profile(документ[имя], имя) for имя in детекторы})
+
+    return RedactionProfile(
+        (
+            DetectorEntry(
+                instance="plate",
+                weights="plate",
+                params=_detector_profile(документ["plate"], "plate"),
+            ),
+            DetectorEntry(
+                instance="plate_hires",
+                weights="plate_hires",
+                params=_detector_profile(документ["plate_hires"], "plate_hires"),
+            ),
+        )
+    )
 
 
 def _decode_old_crop(row: HarvestRow, input_root: Path) -> np.ndarray | None:

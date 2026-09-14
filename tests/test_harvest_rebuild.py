@@ -6,7 +6,7 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import cv2
@@ -780,7 +780,16 @@ def test_main_writes_closed_workspace_artifacts_without_success_claim(
         "input_root": str(input_root.resolve()),
         "numpy_version": np.__version__,
         "opencv_version": cv2.__version__,
-        "profile": asdict(CURRENT_REDACTION_PROFILE),
+        "profile": {
+            "detectors": [
+                {
+                    "instance": d.instance,
+                    "params": asdict(d.params),
+                    "weights": d.weights,
+                }
+                for d in CURRENT_REDACTION_PROFILE.detectors
+            ]
+        },
         "profile_id": profile["profile_id"],
         "stage_sha256": "4" * 64,
         "timestamp": "2026-09-07T12:00:00Z",
@@ -1414,6 +1423,23 @@ def _файл_профиля(path: Path, документ: object) -> Path:
     return path
 
 
+def _старый_документ() -> dict[str, Any]:
+    return {
+        "plate": {
+            "confidence": 0.35,
+            "tile": 960,
+            "overlap": 0.3,
+            "iou_merge": 0.5,
+        },
+        "plate_hires": {
+            "confidence": 0.2,
+            "tile": 1600,
+            "overlap": 0.25,
+            "iou_merge": 0.45,
+        },
+    }
+
+
 def test_load_profile_document_принимает_паспорт_текущего_профиля(tmp_path: Path) -> None:
     """Кандидат описывается копией ключа `profile` из profile.json любого workspace."""
     путь = _файл_профиля(tmp_path / "profile.json", asdict(CURRENT_REDACTION_PROFILE))
@@ -1421,16 +1447,30 @@ def test_load_profile_document_принимает_паспорт_текущег�
     assert load_profile_document(путь) == CURRENT_REDACTION_PROFILE
 
 
+def test_load_profile_document_принимает_старый_паспорт(tmp_path: Path) -> None:
+    путь = _файл_профиля(tmp_path / "profile.json", _старый_документ())
+
+    assert load_profile_document(путь) == _кандидат()
+
+
 def test_load_profile_document_берёт_умолчание_iou_merge(tmp_path: Path) -> None:
-    документ = asdict(_кандидат())
+    документ = _старый_документ()
     del документ["plate_hires"]["iou_merge"]
     путь = _файл_профиля(tmp_path / "profile.json", документ)
 
     assert load_profile_document(путь) == _кандидат()
 
 
-def test_load_profile_document_отвергает_неизвестный_ключ(tmp_path: Path) -> None:
+def test_load_profile_document_берёт_умолчание_iou_merge_в_новой_форме(tmp_path: Path) -> None:
     документ = asdict(_кандидат())
+    del документ["detectors"][1]["params"]["iou_merge"]
+    путь = _файл_профиля(tmp_path / "profile.json", документ)
+
+    assert load_profile_document(путь) == _кандидат()
+
+
+def test_load_profile_document_отвергает_неизвестный_ключ(tmp_path: Path) -> None:
+    документ = _старый_документ()
     документ["plate_lowres"] = документ["plate"]
     путь = _файл_профиля(tmp_path / "profile.json", документ)
 
@@ -1438,8 +1478,17 @@ def test_load_profile_document_отвергает_неизвестный_клю�
         load_profile_document(путь)
 
 
-def test_load_profile_document_отвергает_неизвестный_ключ_детектора(tmp_path: Path) -> None:
+def test_load_profile_document_отвергает_неизвестный_ключ_новой_формы(tmp_path: Path) -> None:
     документ = asdict(_кандидат())
+    документ["extra"] = 123
+    путь = _файл_профиля(tmp_path / "profile.json", документ)
+
+    with pytest.raises(ValueError, match="extra"):
+        load_profile_document(путь)
+
+
+def test_load_profile_document_отвергает_неизвестный_ключ_детектора(tmp_path: Path) -> None:
+    документ = _старый_документ()
     документ["plate"]["conf"] = 0.4
     путь = _файл_профиля(tmp_path / "profile.json", документ)
 
@@ -1448,7 +1497,7 @@ def test_load_profile_document_отвергает_неизвестный_клю�
 
 
 def test_load_profile_document_отвергает_отсутствующий_детектор(tmp_path: Path) -> None:
-    документ = asdict(_кандидат())
+    документ = _старый_документ()
     del документ["plate_hires"]
     путь = _файл_профиля(tmp_path / "profile.json", документ)
 
@@ -1456,8 +1505,15 @@ def test_load_profile_document_отвергает_отсутствующий_д�
         load_profile_document(путь)
 
 
+def test_load_profile_document_отвергает_пустой_список_детекторов(tmp_path: Path) -> None:
+    путь = _файл_профиля(tmp_path / "profile.json", {"detectors": []})
+
+    with pytest.raises(ValueError, match="пуст"):
+        load_profile_document(путь)
+
+
 def test_load_profile_document_отвергает_отсутствующий_параметр(tmp_path: Path) -> None:
-    документ = asdict(_кандидат())
+    документ = _старый_документ()
     del документ["plate"]["tile"]
     путь = _файл_профиля(tmp_path / "profile.json", документ)
 
@@ -1466,7 +1522,7 @@ def test_load_profile_document_отвергает_отсутствующий_п�
 
 
 def test_load_profile_document_отвергает_значение_вне_диапазона(tmp_path: Path) -> None:
-    документ = asdict(_кандидат())
+    документ = _старый_документ()
     документ["plate"]["confidence"] = 1.5
     путь = _файл_профиля(tmp_path / "profile.json", документ)
 
@@ -1533,7 +1589,16 @@ def test_main_собирает_детекторы_кандидатным_про�
     assert код == 0
     assert фабрика.call_args.args == (кандидат,)
     паспорт = json.loads((workspace / "profile.json").read_text(encoding="utf-8"))
-    assert паспорт["profile"] == asdict(кандидат)
+    assert паспорт["profile"] == {
+        "detectors": [
+            {
+                "instance": d.instance,
+                "params": asdict(d.params),
+                "weights": d.weights,
+            }
+            for d in кандидат.detectors
+        ]
+    }
 
 
 def test_main_отвергает_битый_профиль_до_создания_workspace(tmp_path: Path) -> None:
@@ -1543,7 +1608,7 @@ def test_main_отвергает_битый_профиль_до_создания
     _оригинал(input_root, "a" * 64)
     output_root = tmp_path / "workspace"
     документ = asdict(_кандидат())
-    документ["plate"]["overlap"] = 1.0
+    документ["detectors"][0]["params"]["overlap"] = 1.0
     профиль = _файл_профиля(tmp_path / "candidate.json", документ)
 
     with pytest.raises(ValueError, match="overlap"):
