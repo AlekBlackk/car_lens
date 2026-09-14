@@ -227,6 +227,12 @@ def _gate_report(document: Mapping[str, Any]) -> ProfileGateReport:
         ),
         w_max=int(document["w_max"]) if document.get("w_max") is not None else None,
         h_max=int(document["h_max"]) if document.get("h_max") is not None else None,
+        oversized_blind_zone_count=int(document.get("oversized_blind_zone_count", 0)),
+        geometry_preflight_reason=(
+            str(document["geometry_preflight_reason"])
+            if document.get("geometry_preflight_reason") is not None
+            else None
+        ),
     )
 
 

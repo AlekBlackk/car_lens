@@ -13,18 +13,23 @@ from typing import cast
 import cv2
 import numpy as np
 
+from pipeline.harvest.redaction_profile import RedactionProfile
 from pipeline.harvest.run import BLACK_PIXEL_THRESHOLD, MAX_BLACK_PIXEL_FRAC
 from pipeline.redaction_calibration.geometry import (
+    Box,
     CanonicalPlate,
     DetectorObservation,
     GeometryWitness,
     box_fits_actual_tile,
+    fills_cover,
+    partition_canonical_plates,
     tile_guarantee,
 )
 from pipeline.redaction_calibration.model import (
     ConfidenceMargin,
     FrameOutcome,
     FrameProfileResult,
+    GeometryGateVerdict,
     HardGate,
     ProfileGateReport,
     ProfileMetrics,
@@ -205,25 +210,112 @@ def geometry_fixpoint_converged(
 
 
 def geometry_preflight(
-    tile: int,
-    overlap: float,
-    witness: GeometryWitness,
-    canonical: Sequence[CanonicalPlate],
-    frame_sizes: Mapping[str, tuple[int, int]],
-) -> bool:
-    """Проверить структурную границу и фактические origins каждого истинного номера."""
-    if overlap != 0.25:
-        return False
-    if tile_guarantee(tile, overlap) < max(witness.w_max, witness.h_max):
-        return False
-    true_plates = [plate for plate in canonical if plate.verdict == "true_plate"]
-    try:
-        return bool(true_plates) and all(
-            box_fits_actual_tile(frame_sizes[plate.sha256], plate, tile, overlap)
-            for plate in true_plates
+    tile_or_profile: int | Sequence[int] | RedactionProfile,
+    overlap: float = 0.25,
+    witness: GeometryWitness | None = None,
+    canonical: Sequence[CanonicalPlate] = (),
+    frame_sizes: Mapping[str, tuple[int, int]] | None = None,
+    fills: Mapping[str, Sequence[Box]] | Sequence[Box] | None = None,
+) -> GeometryGateVerdict:
+    """Проверить вмещение подтайловых номеров и покрытие надтайловых номеров заливками.
+
+    Для многокадровых выборок заливки `fills` передаются как словарь `sha256 -> Sequence[Box]`.
+    Плоский `Sequence[Box]` допускается для однокадровых выборок или фикстур.
+    """
+    scales: list[tuple[int, float]]
+    if isinstance(tile_or_profile, RedactionProfile):
+        scales = [(d.params.tile, d.params.overlap) for d in tile_or_profile.detectors]
+    elif isinstance(tile_or_profile, int):
+        scales = [(tile_or_profile, overlap)]
+    elif isinstance(tile_or_profile, (Sequence, tuple, list)) and not isinstance(
+        tile_or_profile, (str, bytes)
+    ):
+        scales = [(t, overlap) for t in tile_or_profile]
+    else:
+        raise TypeError(f"недопустимый tile_or_profile: {type(tile_or_profile).__name__}")
+
+    if any(o != 0.25 for _, o in scales):
+        return GeometryGateVerdict(
+            passed=False,
+            subtile_passed=False,
+            oversized_passed=True,
+            oversized_count=0,
+            reason="invalid_overlap: overlap must be 0.25",
         )
-    except KeyError:
-        return False
+
+    tiles = [t for t, _ in scales]
+    subtiles, oversized = partition_canonical_plates(canonical, tiles)
+    total_true = len(subtiles) + len(oversized)
+    if total_true == 0:
+        return GeometryGateVerdict(
+            passed=False,
+            subtile_passed=False,
+            oversized_passed=False,
+            oversized_count=0,
+            reason="no_true_plates",
+        )
+
+    # При отсутствии надтайловых номеров свидетель проверяет структурную гарантию
+    if witness is not None and not oversized:
+        max_tile = max(tiles)
+        if tile_guarantee(max_tile, scales[0][1]) < max(witness.w_max, witness.h_max):
+            return GeometryGateVerdict(
+                passed=False,
+                subtile_passed=False,
+                oversized_passed=True,
+                oversized_count=0,
+                reason="tile_guarantee_exceeded",
+            )
+
+    frame_sizes_map = frame_sizes if frame_sizes is not None else {}
+    subtile_passed = True
+    subtile_reason: str | None = None
+
+    for plate in subtiles:
+        candidate_scales = [
+            (t, o) for t, o in scales if (plate.x1 - plate.x0) <= t and (plate.y1 - plate.y0) <= t
+        ]
+        if plate.sha256 not in frame_sizes_map:
+            subtile_passed = False
+            subtile_reason = f"missing_frame_size: {plate.sha256}"
+            break
+        frame_size = frame_sizes_map[plate.sha256]
+        contained = any(box_fits_actual_tile(frame_size, plate, t, o) for t, o in candidate_scales)
+        if not contained:
+            subtile_passed = False
+            subtile_reason = f"subtile_uncontained: {plate.plate_id}"
+            break
+
+    oversized_passed = True
+    oversized_reason: str | None = None
+    oversized_count = len(oversized)
+
+    for plate in oversized:
+        if isinstance(fills, Mapping):
+            plate_fills = fills.get(plate.sha256, ())
+        elif isinstance(fills, Sequence) and not isinstance(fills, (str, bytes)):
+            plate_fills = fills
+        else:
+            plate_fills = ()
+        if not fills_cover(plate_fills, plate):
+            oversized_passed = False
+            oversized_reason = f"oversized_uncovered: {plate.plate_id}"
+            break
+
+    passed = subtile_passed and oversized_passed
+    reason = (
+        subtile_reason
+        if not subtile_passed
+        else (oversized_reason if not oversized_passed else None)
+    )
+
+    return GeometryGateVerdict(
+        passed=passed,
+        subtile_passed=subtile_passed,
+        oversized_passed=oversized_passed,
+        oversized_count=oversized_count,
+        reason=reason,
+    )
 
 
 def dominates(left: ProfileScore, right: ProfileScore) -> bool:

@@ -136,6 +136,34 @@ def fills_cover(fills: Sequence[Box], canonical: CanonicalPlate) -> bool:
     return bool(mask.all())
 
 
+def is_subtile_plate(plate: CanonicalPlate, tiles: int | Sequence[int]) -> bool:
+    """Проверить, что бокс номера не превосходит хотя бы один из тайлов."""
+    _validate_plate(plate)
+    tile_list = (tiles,) if isinstance(tiles, int) else tuple(tiles)
+    if not tile_list or any(t <= 0 for t in tile_list):
+        raise ValueError("tiles должен содержать положительные размеры тайлов")
+    w = plate.x1 - plate.x0
+    h = plate.y1 - plate.y0
+    return any(w <= t and h <= t for t in tile_list)
+
+
+def partition_canonical_plates(
+    canonical: Sequence[CanonicalPlate],
+    tiles: int | Sequence[int],
+) -> tuple[list[CanonicalPlate], list[CanonicalPlate]]:
+    """Разделить истинные канонические номера на подтайловые и надтайловые."""
+    subtile: list[CanonicalPlate] = []
+    oversized: list[CanonicalPlate] = []
+    for plate in canonical:
+        if plate.verdict != "true_plate":
+            continue
+        if is_subtile_plate(plate, tiles):
+            subtile.append(plate)
+        else:
+            oversized.append(plate)
+    return subtile, oversized
+
+
 def match_observation(
     observation: DetectorObservation,
     canonical: Sequence[CanonicalPlate],

@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE
 from pipeline.redaction_calibration.geometry import (
     CanonicalPlate,
     DetectorObservation,
@@ -27,6 +28,7 @@ from pipeline.redaction_calibration.measure import (
 from pipeline.redaction_calibration.model import (
     ConfidenceMargin,
     FrameProfileResult,
+    GeometryGateVerdict,
     ProfileGateReport,
     ProfileMetrics,
     ProfileScore,
@@ -340,3 +342,136 @@ def test_stale_profiles_сравнивает_canonical_и_оба_максиму�
     ]
 
     assert stale_profile_ids(reports, current) == ("hash-changed", "height-changed")
+
+
+def _make_plate(
+    plate_id: str,
+    sha256: str,
+    box: tuple[int, int, int, int],
+    *,
+    verdict: str = "true_plate",
+) -> CanonicalPlate:
+    return CanonicalPlate(
+        plate_id=plate_id,
+        sha256=sha256,
+        x0=box[0],
+        y0=box[1],
+        x1=box[2],
+        y1=box[3],
+        readable=verdict == "true_plate",
+        verdict=verdict,  # type: ignore[arg-type]
+        note="проверено",
+    )
+
+
+def test_geometry_preflight_разделяет_подтайловые_и_надтайловые_номера() -> None:
+    # 1. Номер меньше тайла и вмещающийся
+    sub_fit = _make_plate("sub-fit", "a" * 64, (650, 10, 810, 60))  # 160 x 50
+    v1 = geometry_preflight(
+        640,
+        0.25,
+        canonical=[sub_fit],
+        frame_sizes={"a" * 64: (1000, 200)},
+    )
+    assert isinstance(v1, GeometryGateVerdict)
+    assert v1.passed is True
+    assert v1.subtile_passed is True
+    assert v1.oversized_passed is True
+    assert v1.oversized_count == 0
+    assert v1.reason is None
+    assert bool(v1) is True
+
+    # 2. Номер меньше тайла и не вмещающийся из-за положения
+    sub_uncontained = _make_plate("sub-uncontained", "b" * 64, (400, 100, 660, 150))  # 260 x 50
+    v2 = geometry_preflight(
+        640,
+        0.25,
+        canonical=[sub_uncontained],
+        frame_sizes={"b" * 64: (2000, 1000)},
+    )
+    assert isinstance(v2, GeometryGateVerdict)
+    assert v2.passed is False
+    assert v2.subtile_passed is False
+    assert v2.oversized_passed is True
+    assert v2.oversized_count == 0
+    assert v2.reason == "subtile_uncontained: sub-uncontained"
+    assert bool(v2) is False
+
+    # 3. Номер крупнее тайла, покрытый объединением
+    over_covered = _make_plate("over-covered", "c" * 64, (100, 100, 900, 300))  # 800 x 200 > 640
+    v3 = geometry_preflight(
+        640,
+        0.25,
+        canonical=[over_covered],
+        frame_sizes={"c" * 64: (2000, 1000)},
+        fills={"c" * 64: [(50, 50, 600, 350), (550, 50, 950, 350)]},
+    )
+    assert isinstance(v3, GeometryGateVerdict)
+    assert v3.passed is True
+    assert v3.subtile_passed is True
+    assert v3.oversized_passed is True
+    assert v3.oversized_count == 1
+    assert v3.reason is None
+    assert bool(v3) is True
+
+    # 4. Номер крупнее тайла, не покрытый
+    over_uncovered = _make_plate(
+        "over-uncovered", "d" * 64, (100, 100, 900, 300)
+    )  # 800 x 200 > 640
+    v4 = geometry_preflight(
+        640,
+        0.25,
+        canonical=[over_uncovered],
+        frame_sizes={"d" * 64: (2000, 1000)},
+        fills={"d" * 64: [(50, 50, 500, 350)]},
+    )
+    assert isinstance(v4, GeometryGateVerdict)
+    assert v4.passed is False
+    assert v4.subtile_passed is True
+    assert v4.oversized_passed is False
+    assert v4.oversized_count == 1
+    assert v4.reason == "oversized_uncovered: over-uncovered"
+    assert bool(v4) is False
+
+    # Причины отказа 2 и 4 различны
+    assert v2.reason != v4.reason
+
+
+def test_geometry_preflight_мультимасштаб_и_свидетель() -> None:
+    # Номер не помещается в тайл 640, но помещается в 1280
+    plate = _make_plate("sub-multi", "a" * 64, (400, 100, 660, 150))
+    v_multi = geometry_preflight(
+        [640, 1280],
+        0.25,
+        canonical=[plate],
+        frame_sizes={"a" * 64: (2000, 1000)},
+    )
+    assert v_multi.passed is True
+    assert v_multi.subtile_passed is True
+
+    # При наличии надтайлового номера свидетель с большим W_max не блокирует гейт
+    over = _make_plate("over", "b" * 64, (100, 100, 900, 300))
+    witness = GeometryWitness(w_max=2420, h_max=1165, canonical_sha256="w" * 64)
+    v_witness = geometry_preflight(
+        640,
+        0.25,
+        witness=witness,
+        canonical=[plate, over],
+        frame_sizes={"a" * 64: (1000, 1000), "b" * 64: (2000, 1000)},
+        fills={"b" * 64: [(50, 50, 950, 350)]},
+    )
+    assert v_witness.passed is True
+    assert v_witness.oversized_count == 1
+
+
+def test_geometry_preflight_принимает_объект_redaction_profile() -> None:
+    plate = _make_plate("sub-profile", "a" * 64, (100, 100, 260, 150))
+    verdict = geometry_preflight(
+        CURRENT_REDACTION_PROFILE,
+        canonical=[plate],
+        frame_sizes={"a" * 64: (2000, 1000)},
+    )
+    assert verdict.passed is True
+    assert verdict.subtile_passed is True
+    assert verdict.oversized_count == 0
+    assert bool(verdict) is True

@@ -329,3 +329,33 @@ def test_campaign_не_объявляет_annotations_resolved_с_unresolved(tmp
             ],
             vetoes=[],
         )
+
+
+def test_gate_report_parses_oversized_blind_zone_and_reason() -> None:
+    from scripts.evaluate_redaction_profiles import _gate_report
+
+    doc = {
+        "profile_id": "prof-1",
+        "provenance_fresh": True,
+        "unresolved_count": 0,
+        "geometry_current": True,
+        "geometry_preflight_passed": True,
+        "canonical_coverage_complete": True,
+        "strict_leaks": 0,
+        "unreviewable_accepted": 0,
+        "report_arithmetic_closed": True,
+        "oversized_blind_zone_count": 5,
+        "geometry_preflight_reason": "oversized_uncovered: p-1",
+    }
+    report = _gate_report(doc)
+    assert report.oversized_blind_zone_count == 5
+    assert report.geometry_preflight_reason == "oversized_uncovered: p-1"
+
+    doc_legacy = {
+        k: v
+        for k, v in doc.items()
+        if k not in ("oversized_blind_zone_count", "geometry_preflight_reason")
+    }
+    legacy_report = _gate_report(doc_legacy)
+    assert legacy_report.oversized_blind_zone_count == 0
+    assert legacy_report.geometry_preflight_reason is None

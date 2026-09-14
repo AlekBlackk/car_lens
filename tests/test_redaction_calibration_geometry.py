@@ -18,10 +18,12 @@ from pipeline.redaction_calibration.geometry import (
     fill_contains,
     fills_cover,
     geometry_witness,
+    is_subtile_plate,
     load_canonical_plates,
     load_detector_links,
     load_detector_observations,
     match_observation,
+    partition_canonical_plates,
     tile_guarantee,
     write_canonical_plates,
     write_detector_links,
@@ -391,3 +393,33 @@ def test_canonical_csv_rejects_schema_ids_order_and_duplicates(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="дубликат"):
         write_canonical_plates(tmp_path / "duplicate.csv", [_plate(), _plate()])
+
+
+def test_is_subtile_plate_классифицирует_по_тайлам() -> None:
+    plate = _plate("plate-001", box=(100, 100, 260, 150))  # 160 x 50
+    assert is_subtile_plate(plate, 640)
+    assert is_subtile_plate(plate, [320, 640])
+    assert not is_subtile_plate(plate, 100)  # width 160 > 100
+    assert not is_subtile_plate(plate, 40)  # height 50 > 40
+
+    large = _plate("plate-002", box=(100, 100, 900, 400))  # 800 x 300
+    assert not is_subtile_plate(large, 640)
+    assert is_subtile_plate(large, [640, 1280])
+
+    with pytest.raises(ValueError, match="положительные"):
+        is_subtile_plate(plate, 0)
+    with pytest.raises(ValueError, match="положительные"):
+        is_subtile_plate(plate, [])
+
+
+def test_partition_canonical_plates_разделяет_только_истинные_номера() -> None:
+    sub = _plate("plate-001", box=(100, 100, 260, 150))  # 160 x 50
+    over = _plate("plate-002", box=(100, 100, 900, 400))  # 800 x 300
+    false_plate = _plate(
+        "plate-003",
+        box=(100, 100, 200, 150),
+        verdict="false_plate",
+    )
+    subtiles, oversized = partition_canonical_plates([sub, over, false_plate], 640)
+    assert subtiles == [sub]
+    assert oversized == [over]

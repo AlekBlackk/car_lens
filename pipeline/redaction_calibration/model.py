@@ -84,6 +84,25 @@ class ProfileGateReport:
     canonical_sha256: str | None = None
     w_max: int | None = None
     h_max: int | None = None
+    oversized_blind_zone_count: int = 0
+    geometry_preflight_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GeometryGateVerdict:
+    """Разделённый вердикт геометрического префлайта подтайловых и надтайловых номеров."""
+
+    passed: bool
+    subtile_passed: bool
+    oversized_passed: bool
+    oversized_count: int
+    reason: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.passed
+
+
+GeometryPreflightVerdict = GeometryGateVerdict
 
 
 @dataclass(frozen=True, slots=True)
