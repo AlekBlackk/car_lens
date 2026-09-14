@@ -5,13 +5,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import cv2
+import numpy as np
+import pandas as pd
 import pytest
 
+from pipeline.harvest.cache import cache_path
 from pipeline.harvest.manifest import HarvestRow, write_manifest
 from scripts.probe_multiscale_redaction import (
     CandidateMetrics,
+    create_diagnostics_for_candidate,
     make_probe_candidates,
     parse_candidate_report,
+    render_diagnostic_frame,
     select_probe_sample,
 )
 
@@ -170,3 +176,143 @@ def test_parse_candidate_report(tmp_path: Path) -> None:
     assert metrics2.redaction_failed_count == 90
     assert metrics2.ci_low > 0.038
     assert metrics2.exceeds_budget
+
+
+def test_render_diagnostic_frame(tmp_path: Path) -> None:
+    raw_image = np.zeros((100, 120, 3), dtype=np.uint8)
+    out_file = tmp_path / "diag.jpg"
+    obs = [
+        {"pass": "first", "merged": True, "x": 10.0, "y": 10.0, "w": 30.0, "h": 15.0},
+        {
+            "pass": "second",
+            "merged": True,
+            "x": 50.0,
+            "y": 50.0,
+            "w": 20.0,
+            "h": 10.0,
+            "confidence": 0.45,
+            "detector": "yolo_640",
+        },
+    ]
+    render_diagnostic_frame(raw_image, "photo123", "cand_test", obs, out_file)
+    assert out_file.exists()
+    assert out_file.stat().st_size > 0
+
+
+def test_create_diagnostics_for_candidate(tmp_path: Path) -> None:
+    candidate_dir = tmp_path / "candidate"
+    candidate_dir.mkdir()
+    harvest_data_dir = tmp_path / "harvest"
+    harvest_data_dir.mkdir()
+    diagnostics_dir = tmp_path / "diagnostics"
+
+    photo_id = "a" * 64
+    source = "commons"
+
+    # Создаём dummy rejects.csv
+    rejects_file = candidate_dir / "rejects.csv"
+    rejects_df = pd.DataFrame(
+        [
+            {
+                "file": f"{photo_id}.jpg",
+                "class_id": "test_car",
+                "source": source,
+                "source_item_id": "123",
+                "page_url": "http://example.invalid",
+                "file_url": "http://example.invalid",
+                "author": "author",
+                "license": "cc0",
+                "license_tier": 1,
+                "checked": "2026-09-14",
+                "basis": "cat",
+                "sha256": photo_id,
+                "phash": 0,
+                "clip_rank": 1,
+                "clip_margin": 0.0,
+                "plates": 1,
+                "faces": 0,
+                "bbox_x": 0.0,
+                "bbox_y": 0.0,
+                "bbox_w": 10.0,
+                "bbox_h": 10.0,
+                "bbox_area_frac": 0.1,
+                "det_conf": 0.9,
+                "audit": "",
+                "reason": "redaction_failed",
+            }
+        ]
+    )
+    rejects_df.to_csv(rejects_file, index=False)
+
+    # Создаём dummy observations.csv
+    obs_file = candidate_dir / "observations.csv"
+    obs_df = pd.DataFrame(
+        [
+            {
+                "photo_id": photo_id,
+                "detector": "plate",
+                "profile": "prof",
+                "zone_x0": 0,
+                "zone_y0": 0,
+                "zone_x1": 100,
+                "zone_y1": 100,
+                "tile_x0": 0,
+                "tile_y0": 0,
+                "tile_x1": 100,
+                "tile_y1": 100,
+                "x": 10.0,
+                "y": 10.0,
+                "w": 30.0,
+                "h": 15.0,
+                "confidence": 0.85,
+                "class_id": 0,
+                "raw": False,
+                "merged": True,
+                "pass": "first",
+            },
+            {
+                "photo_id": photo_id,
+                "detector": "yolo_640",
+                "profile": "prof",
+                "zone_x0": 0,
+                "zone_y0": 0,
+                "zone_x1": 100,
+                "zone_y1": 100,
+                "tile_x0": 0,
+                "tile_y0": 0,
+                "tile_x1": 100,
+                "tile_y1": 100,
+                "x": 50.0,
+                "y": 50.0,
+                "w": 20.0,
+                "h": 10.0,
+                "confidence": 0.45,
+                "class_id": 0,
+                "raw": False,
+                "merged": True,
+                "pass": "second",
+            },
+        ]
+    )
+    obs_df.to_csv(obs_file, index=False)
+
+    # Создаём синтетическое изображение в кэше харвеста
+    img_cache_path = cache_path(harvest_data_dir, source, photo_id, "jpg")
+    img_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    synthetic_img = np.zeros((100, 100, 3), dtype=np.uint8)
+    ok, buf = cv2.imencode(".jpg", synthetic_img)
+    assert ok
+    img_cache_path.write_bytes(buf.tobytes())
+
+    inspected_ids = create_diagnostics_for_candidate(
+        candidate_name="cand_test",
+        candidate_dir=candidate_dir,
+        harvest_data_dir=harvest_data_dir,
+        out_diagnostics_dir=diagnostics_dir,
+        max_frames=10,
+    )
+
+    assert inspected_ids == [photo_id]
+    expected_file = diagnostics_dir / f"cand_test_{photo_id[:12]}.jpg"
+    assert expected_file.exists()
+    assert expected_file.stat().st_size > 0

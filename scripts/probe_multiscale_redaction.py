@@ -11,6 +11,14 @@
 
 Бюджет отсева: ~3.8% (37 попаданий top-3 запаса до границы Клоппера–Пирсона).
 Если нижняя граница интервала Клоппера–Пирсона превышает бюджет — план закрывается.
+
+Примеры запуска:
+    uv run python -m scripts.probe_multiscale_redaction --step all
+    uv run python -m scripts.probe_multiscale_redaction --step sample
+    uv run python -m scripts.probe_multiscale_redaction --step run --candidates baseline
+    uv run python -m scripts.probe_multiscale_redaction --step evaluate
+    uv run python -m scripts.probe_multiscale_redaction --step diagnose
+    python scripts/probe_multiscale_redaction.py --help
 """
 
 from __future__ import annotations
@@ -30,21 +38,26 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
-from pipeline.harvest.cache import cache_path, decode_image
-from pipeline.harvest.manifest import (
+# Бутстрап sys.path для прямого вызова: python scripts/probe_multiscale_redaction.py
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from pipeline.harvest.cache import cache_path, decode_image  # noqa: E402
+from pipeline.harvest.manifest import (  # noqa: E402
     DEFAULT_MANIFEST_PATH,
     HarvestRow,
     load_manifest,
     write_manifest,
 )
-from pipeline.harvest.redaction_profile import (
+from pipeline.harvest.redaction_profile import (  # noqa: E402
     CURRENT_REDACTION_PROFILE,
     DetectorEntry,
     DetectorProfile,
     RedactionProfile,
 )
-from pipeline.paths import data_root, harvest_dir
-from pipeline.plate_leak import clopper_pearson
+from pipeline.paths import data_root, harvest_dir  # noqa: E402
+from pipeline.plate_leak import clopper_pearson  # noqa: E402
 
 DEFAULT_SEED = 20260914
 DEFAULT_SAMPLE_SIZE = 500
@@ -154,11 +167,15 @@ def select_probe_sample(
         sample_df = pd.read_csv(calibration_sample_path, dtype={"sha256": str})
         if "sha256" in sample_df.columns:
             excluded_hashes.update(sample_df["sha256"].dropna().astype(str).unique())
+    else:
+        print(f"Предупреждение: файл калибровочной выборки не найден: {calibration_sample_path}")
 
     if canonical_path.exists():
         canonical_df = pd.read_csv(canonical_path, dtype={"sha256": str})
         if "sha256" in canonical_df.columns:
             excluded_hashes.update(canonical_df["sha256"].dropna().astype(str).unique())
+    else:
+        print(f"Предупреждение: файл канонических номеров не найден: {canonical_path}")
 
     # Фильтруем корпус
     candidates = [r for r in rows if r.sha256 not in excluded_hashes]
@@ -273,10 +290,8 @@ def run_rebuild_subprocess(
         cmd.append("--trace")
 
     print(f"Запуск: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=repo_root)
+    result = subprocess.run(cmd, check=False, cwd=repo_root)
     if result.returncode != 0:
-        print(f"STDOUT:\n{result.stdout}")
-        print(f"STDERR:\n{result.stderr}")
         raise RuntimeError(f"Команда завершилась с кодом {result.returncode}")
 
 
@@ -381,6 +396,7 @@ def create_diagnostics_for_candidate(
         frame_obs: list[dict[str, Any]] = [{str(k): v for k, v in r.items()} for r in raw_rows]
         out_path = out_diagnostics_dir / f"{candidate_name}_{photo_id[:12]}.jpg"
         render_diagnostic_frame(raw_img, photo_id, candidate_name, frame_obs, out_path)
+        inspected_ids.append(photo_id)
     return inspected_ids
 
 
