@@ -1453,6 +1453,50 @@ def test_load_profile_document_принимает_старый_паспорт(tm
     assert load_profile_document(путь) == _кандидат()
 
 
+def test_load_profile_document_принимает_полный_паспорт_новой_и_старой_формы(
+    tmp_path: Path,
+) -> None:
+    # Полный паспорт новой формы (с метаданными прогона)
+    новый_паспорт = {
+        "profile": asdict(_кандидат()),
+        "profile_id": "a" * 64,
+        "git_sha": "b" * 40,
+        "stage_sha256": "c" * 64,
+    }
+    путь_новый = _файл_профиля(tmp_path / "new_passport.json", новый_паспорт)
+    assert load_profile_document(путь_новый) == _кандидат()
+
+    # Полный паспорт старой формы (с метаданными прогона)
+    старый_паспорт = {
+        "profile": _старый_документ(),
+        "profile_id": "d" * 64,
+        "git_sha": "e" * 40,
+        "stage_sha256": "f" * 64,
+    }
+    путь_старый = _файл_профиля(tmp_path / "old_passport.json", старый_паспорт)
+    assert load_profile_document(путь_старый) == _кандидат()
+
+
+def test_load_profile_document_отвергает_невалидную_запись_детектора(tmp_path: Path) -> None:
+    документ = asdict(_кандидат())
+    detectors = list(документ["detectors"])
+    # Запись не является объектом
+    detectors[0] = "not_a_dict"
+    документ["detectors"] = detectors
+    путь = _файл_профиля(tmp_path / "invalid_entry.json", документ)
+    with pytest.raises(ValueError, match="должна быть объектом"):
+        load_profile_document(путь)
+
+    # Недопустимое имя instance
+    документ2 = asdict(_кандидат())
+    detectors2 = [dict(d) for d in документ2["detectors"]]
+    detectors2[0]["instance"] = "bad-name"
+    документ2["detectors"] = detectors2
+    путь2 = _файл_профиля(tmp_path / "bad_instance.json", документ2)
+    with pytest.raises(ValueError, match="недопустимое имя экземпляра"):
+        load_profile_document(путь2)
+
+
 def test_load_profile_document_берёт_умолчание_iou_merge(tmp_path: Path) -> None:
     документ = _старый_документ()
     del документ["plate_hires"]["iou_merge"]

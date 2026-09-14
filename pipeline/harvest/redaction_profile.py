@@ -29,7 +29,7 @@ import re
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TypeAlias
+from typing import TypeAlias, overload
 
 from pipeline.crop import Detector
 from pipeline.harvest.detectors import DetectorPin
@@ -87,15 +87,20 @@ class DetectorEntry:
     params: DetectorProfile
 
     def __post_init__(self) -> None:
-        if not _INSTANCE_NAME_RE.match(self.instance):
+        if not isinstance(self.instance, str) or not _INSTANCE_NAME_RE.match(self.instance):
             raise ValueError(
                 f"недопустимое имя экземпляра {self.instance!r}: "
                 f"ожидался шаблон {_INSTANCE_NAME_RE.pattern}"
             )
-        if not _INSTANCE_NAME_RE.match(self.weights):
+        if not isinstance(self.weights, str) or not _INSTANCE_NAME_RE.match(self.weights):
             raise ValueError(
                 f"недопустимый ключ весов {self.weights!r}: "
                 f"ожидался шаблон {_INSTANCE_NAME_RE.pattern}"
+            )
+        if not isinstance(self.params, DetectorProfile):
+            raise TypeError(
+                "параметры детектора должны быть DetectorProfile, "
+                f"получено {type(self.params).__name__}"
             )
 
 
@@ -126,8 +131,18 @@ class RedactionProfile:
                         instance="plate_hires", weights="plate_hires", params=plate_hires
                     ),
                 )
+            elif plate is not None or plate_hires is not None:
+                raise ValueError(
+                    "необходимо указать оба детектора 'plate' и 'plate_hires' "
+                    "или передать 'detectors'"
+                )
             else:
                 raise ValueError("профиль редакции не может быть пустым")
+        elif plate is not None or plate_hires is not None:
+            raise ValueError(
+                "нельзя передавать одновременно 'detectors' "
+                "и именованные аргументы 'plate'/'plate_hires'"
+            )
         if not detectors:
             raise ValueError("профиль редакции не может быть пустым")
 
@@ -135,12 +150,22 @@ class RedactionProfile:
         for пункт in detectors:
             if isinstance(пункт, DetectorEntry):
                 нормализованные.append(пункт)
-            elif isinstance(пункт, tuple):
+            elif isinstance(пункт, (tuple, list)):
                 if len(пункт) == 2:
                     имя, params = пункт
+                    if not isinstance(params, DetectorProfile):
+                        raise TypeError(
+                            "параметры детектора должны быть DetectorProfile, "
+                            f"получено {type(params).__name__}"
+                        )
                     нормализованные.append(DetectorEntry(instance=имя, weights=имя, params=params))
                 elif len(пункт) == 3:
                     instance, weights, params = пункт
+                    if not isinstance(params, DetectorProfile):
+                        raise TypeError(
+                            "параметры детектора должны быть DetectorProfile, "
+                            f"получено {type(params).__name__}"
+                        )
                     нормализованные.append(
                         DetectorEntry(instance=instance, weights=weights, params=params)
                     )
@@ -162,8 +187,27 @@ class RedactionProfile:
     def __len__(self) -> int:
         return len(self.detectors)
 
-    def __getitem__(self, index: int) -> DetectorEntry:
-        return self.detectors[index]
+    @overload
+    def __getitem__(self, key: int) -> DetectorEntry: ...
+
+    @overload
+    def __getitem__(self, key: slice) -> tuple[DetectorEntry, ...]: ...
+
+    @overload
+    def __getitem__(self, key: str) -> DetectorEntry: ...
+
+    def __getitem__(self, key: int | slice | str) -> DetectorEntry | tuple[DetectorEntry, ...]:
+        if isinstance(key, str):
+            entry = self.get(key)
+            if entry is None:
+                raise KeyError(f"детектор {key!r} отсутствует в профиле")
+            return entry
+        return self.detectors[key]
+
+    def __contains__(self, item: object) -> bool:
+        if isinstance(item, str):
+            return any(d.instance == item for d in self.detectors)
+        return item in self.detectors
 
     def get(self, instance: str) -> DetectorEntry | None:
         for d in self.detectors:

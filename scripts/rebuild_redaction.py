@@ -368,11 +368,11 @@ def load_profile_document(path: Path) -> RedactionProfile:
             params = _detector_profile(пункт["params"], instance)
             try:
                 записи.append(DetectorEntry(instance=instance, weights=weights, params=params))
-            except ValueError as err:
+            except (ValueError, TypeError) as err:
                 raise RebuildError(f"профиль {path}: {err}") from err
         try:
             return RedactionProfile(записи)
-        except ValueError as err:
+        except (ValueError, TypeError) as err:
             raise RebuildError(f"профиль {path}: {err}") from err
 
     # Старая форма: {"plate": {...}, "plate_hires": {...}}

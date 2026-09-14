@@ -120,6 +120,111 @@ def test_недопустимое_имя_экземпляра() -> None:
         DetectorEntry("Plate-1", "plate", p)
     with pytest.raises(ValueError, match="недопустимое имя экземпляра"):
         DetectorEntry("", "plate", p)
+    with pytest.raises(ValueError, match="недопустимое имя экземпляра"):
+        DetectorEntry(123, "plate", p)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="недопустимый ключ весов"):
+        DetectorEntry("plate", "Plate-1", p)
+    with pytest.raises(TypeError, match="параметры детектора должны быть DetectorProfile"):
+        DetectorEntry("plate", "plate", 123)  # type: ignore[arg-type]
+
+
+def test_инициализация_через_кортежи_и_списки() -> None:
+    p1 = DetectorProfile(0.5, 1280, 0.25)
+    p2 = DetectorProfile(0.25, 640, 0.25)
+
+    # 2-элементный кортеж (имя, params)
+    prof_2tuple = RedactionProfile([("plate", p1), ("plate_hires", p2)])
+    assert len(prof_2tuple) == 2
+    assert prof_2tuple["plate"].weights == "plate"
+    assert prof_2tuple["plate_hires"].weights == "plate_hires"
+
+    # 3-элементный кортеж (instance, weights, params)
+    prof_3tuple = RedactionProfile(
+        [
+            ("plate_custom", "plate", p1),
+            ("plate_hires_640", "plate_hires", p2),
+        ]
+    )
+    assert len(prof_3tuple) == 2
+    assert prof_3tuple["plate_custom"].weights == "plate"
+    assert prof_3tuple["plate_hires_640"].weights == "plate_hires"
+
+    # Списки вместо кортежей элементов
+    prof_list = RedactionProfile([["plate", p1], ["plate_hires", p2]])  # type: ignore[list-item]
+    assert len(prof_list) == 2
+
+
+def test_инициализация_через_kwargs() -> None:
+    p1 = DetectorProfile(0.5, 1280, 0.25)
+    p2 = DetectorProfile(0.25, 1280, 0.25)
+    prof = RedactionProfile(plate=p1, plate_hires=p2)
+    assert len(prof) == 2
+    assert prof.plate == p1
+    assert prof.plate_hires == p2
+
+    # Ошибка при передаче только одного из kwargs
+    with pytest.raises(ValueError, match="необходимо указать оба детектора"):
+        RedactionProfile(plate=p1)
+    with pytest.raises(ValueError, match="необходимо указать оба детектора"):
+        RedactionProfile(plate_hires=p2)
+
+    # Ошибка при одновременной передаче detectors и kwargs
+    e1 = DetectorEntry("plate", "plate", p1)
+    with pytest.raises(ValueError, match="нельзя передавать одновременно"):
+        RedactionProfile((e1,), plate=p1)
+
+
+def test_недопустимые_элементы_в_detectors() -> None:
+    p = DetectorProfile(0.5, 1280, 0.25)
+    with pytest.raises(TypeError, match="недопустимый элемент профиля"):
+        RedactionProfile([123])  # type: ignore[list-item]
+    with pytest.raises(ValueError, match="недопустимый кортеж детектора"):
+        RedactionProfile([("plate",)])  # type: ignore[list-item]
+    with pytest.raises(ValueError, match="недопустимый кортеж детектора"):
+        RedactionProfile([("a", "b", p, "extra")])  # type: ignore[list-item]
+    with pytest.raises(TypeError, match="параметры детектора должны быть DetectorProfile"):
+        RedactionProfile([("plate", 123)])  # type: ignore[list-item]
+
+
+def test_индексация_и_оператор_in() -> None:
+    p1 = DetectorProfile(0.5, 1280, 0.25)
+    p2 = DetectorProfile(0.25, 1280, 0.25)
+    e1 = DetectorEntry("plate", "plate", p1)
+    e2 = DetectorEntry("plate_hires", "plate_hires", p2)
+    prof = RedactionProfile((e1, e2))
+
+    # По целочисленному индексу
+    assert prof[0] == e1
+    assert prof[1] == e2
+
+    # Срез
+    assert prof[:1] == (e1,)
+
+    # По имени instance
+    assert prof["plate"] == e1
+    assert prof["plate_hires"] == e2
+    with pytest.raises(KeyError, match="отсутствует в профиле"):
+        _ = prof["nonexistent"]
+
+    # get()
+    assert prof.get("plate") == e1
+    assert prof.get("nonexistent") is None
+
+    # Оператор in
+    assert "plate" in prof
+    assert "plate_hires" in prof
+    assert "nonexistent" not in prof
+    assert e1 in prof
+    assert DetectorEntry("custom", "plate", p1) not in prof
+
+
+def test_свойства_plate_и_plate_hires_падают_при_отсутствии() -> None:
+    p = DetectorProfile(0.5, 1280, 0.25)
+    prof = RedactionProfile((DetectorEntry("custom", "plate", p),))
+    with pytest.raises(AttributeError, match="в профиле нет детектора 'plate'"):
+        _ = prof.plate
+    with pytest.raises(AttributeError, match="в профиле нет детектора 'plate_hires'"):
+        _ = prof.plate_hires
 
 
 def test_канонический_порядок_и_стабильность_json() -> None:
