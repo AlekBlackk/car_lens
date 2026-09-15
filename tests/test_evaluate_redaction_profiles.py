@@ -14,6 +14,8 @@ from PIL import Image, ImageChops, ImageFont
 from pipeline.redaction_calibration.geometry import GeometryWitness
 from pipeline.redaction_calibration.model import (
     ConfidenceMargin,
+    FrontierEntry,
+    HardGate,
     ProfileGateReport,
     ProfileScore,
     VisualVeto,
@@ -29,6 +31,27 @@ from scripts.evaluate_redaction_profiles import (
 )
 
 
+def _entry(
+    profile_id: str,
+    *,
+    failed: tuple[HardGate, ...] = (),
+    changed: int = 1,
+    covered: int = 3,
+) -> FrontierEntry:
+    return FrontierEntry(
+        score=_score(profile_id, changed=changed, covered=covered),
+        failed_permitting_gates=failed,
+    )
+
+
+def _document(entry: FrontierEntry) -> dict[str, object]:
+    return {
+        **asdict(entry.score),
+        "promotable": entry.promotable,
+        "failed_permitting_gates": list(entry.failed_permitting_gates),
+    }
+
+
 def _score(profile_id: str, *, changed: int = 1, covered: int = 3) -> ProfileScore:
     return ProfileScore(
         profile_id=profile_id,
@@ -40,6 +63,7 @@ def _score(profile_id: str, *, changed: int = 1, covered: int = 3) -> ProfileSco
         above_quarter=0,
         new_over_redacted=0,
         changed_crops=changed,
+        rejected_frames=0,
     )
 
 
@@ -152,22 +176,22 @@ def test_veto_только_удаляет_профиль_и_ledger_roundtrip_с�
     write_visual_vetoes(path, vetoes)
 
     assert load_visual_vetoes(path) == vetoes
-    assert apply_visual_vetoes([_score("profile-a"), _score("profile-b")], vetoes) == (
-        _score("profile-a"),
+    assert apply_visual_vetoes([_entry("profile-a"), _entry("profile-b")], vetoes) == (
+        _entry("profile-a"),
     )
     with pytest.raises(ValueError, match="frontier"):
-        apply_visual_vetoes([_score("profile-a")], vetoes)
+        apply_visual_vetoes([_entry("profile-a")], vetoes)
 
 
 def test_campaign_artifacts_не_автовыбирают_из_полного_frontier(tmp_path: Path) -> None:
-    frontier = (_score("profile-a"), _score("profile-b"))
+    frontier = (_entry("profile-a"), _entry("profile-b"))
 
     write_campaign_artifacts(tmp_path, frontier, unresolved_rows=[], vetoes=[])
 
     pareto = json.loads((tmp_path / "pareto.json").read_text(encoding="utf-8"))
     selection = json.loads((tmp_path / "selection_required.json").read_text(encoding="utf-8"))
-    assert pareto == [asdict(score) for score in frontier]
-    assert selection == {"frontier": [asdict(score) for score in frontier]}
+    assert pareto == [_document(entry) for entry in frontier]
+    assert selection == {"frontier": [_document(entry) for entry in frontier]}
     assert not (tmp_path / "selected_profile.json").exists()
     unresolved_text = (tmp_path / "unresolved.csv").read_text(encoding="utf-8")
     assert unresolved_text == "link_id,observation_id,plate_id,reason\n"
@@ -175,10 +199,37 @@ def test_campaign_artifacts_не_автовыбирают_из_полного_fr
 
 
 def test_single_survivor_пишет_явный_результат_без_selection_required(tmp_path: Path) -> None:
-    write_campaign_artifacts(tmp_path, [_score("profile-a")], unresolved_rows=[], vetoes=[])
+    write_campaign_artifacts(tmp_path, [_entry("profile-a")], unresolved_rows=[], vetoes=[])
 
     assert json.loads((tmp_path / "selected_profile.json").read_text(encoding="utf-8")) == {
-        "profile": asdict(_score("profile-a"))
+        "profile": _document(_entry("profile-a"))
+    }
+    assert not (tmp_path / "selection_required.json").exists()
+
+
+def test_непродвигаемый_выживший_не_становится_выбранным_профилем(tmp_path: Path) -> None:
+    """§7.3: профиль с утечками виден на фронте, но продвигать его по-прежнему нельзя."""
+    протекающий = _entry("profile-leaky", failed=("strict_calibration_review",))
+
+    write_campaign_artifacts(tmp_path, [протекающий], unresolved_rows=[], vetoes=[])
+
+    pareto = json.loads((tmp_path / "pareto.json").read_text(encoding="utf-8"))
+    assert pareto == [_document(протекающий)]
+    assert pareto[0]["promotable"] is False
+    assert not (tmp_path / "selected_profile.json").exists()
+    assert not (tmp_path / "selection_required.json").exists()
+
+
+def test_единственный_продвигаемый_среди_непродвигаемых_выбирается(tmp_path: Path) -> None:
+    frontier = (
+        _entry("profile-clean"),
+        _entry("profile-leaky", failed=("full_canonical_coverage",)),
+    )
+
+    write_campaign_artifacts(tmp_path, frontier, unresolved_rows=[], vetoes=[])
+
+    assert json.loads((tmp_path / "selected_profile.json").read_text(encoding="utf-8")) == {
+        "profile": _document(frontier[0])
     }
     assert not (tmp_path / "selection_required.json").exists()
 
@@ -259,7 +310,7 @@ def test_cli_пишет_candidates_frontier_stale_и_changed_views(tmp_path: Pat
         "profile_ids": ["profile-stale"]
     }
     assert json.loads((out / "pareto.json").read_text(encoding="utf-8")) == [
-        asdict(_score("profile-fresh"))
+        _document(_entry("profile-fresh"))
     ]
     assert (views / "profile-fresh__frame-001.png").is_file()
 
@@ -319,7 +370,7 @@ def test_campaign_не_объявляет_annotations_resolved_с_unresolved(tmp
     with pytest.raises(ValueError, match="unresolved"):
         write_campaign_artifacts(
             tmp_path,
-            [_score("profile-a")],
+            [_entry("profile-a")],
             unresolved_rows=[
                 {
                     "link_id": "link-001",

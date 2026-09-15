@@ -16,6 +16,34 @@ HardGate: TypeAlias = Literal[
     "report_arithmetic",
 ]
 
+# Предрегистрированный порядок семи гейтов: отчёт называет первый провалившийся по нему.
+HARD_GATES: tuple[HardGate, ...] = (
+    "provenance_workspace_freshness",
+    "unresolved_empty",
+    "current_geometry_witness",
+    "structural_actual_tile_preflight",
+    "full_canonical_coverage",
+    "strict_calibration_review",
+    "report_arithmetic",
+)
+
+# §7.3 спеки: блокирующие говорят, что числам профиля нельзя верить либо что их нет вовсе.
+# Структурный префлайт здесь потому, что негодный по геометрии кандидат отвергается до
+# инференса и измеренных чисел у него не появляется, а не потому, что он «хуже».
+BLOCKING_GATES: tuple[HardGate, ...] = (
+    "provenance_workspace_freshness",
+    "unresolved_empty",
+    "current_geometry_witness",
+    "structural_actual_tile_preflight",
+    "report_arithmetic",
+)
+
+# Допускающие: числа достоверны, профиль измеряется и попадает на фронт, но непродвигаем.
+PERMITTING_GATES: tuple[HardGate, ...] = (
+    "full_canonical_coverage",
+    "strict_calibration_review",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class FrameProfileResult:
@@ -67,6 +95,16 @@ class PlateCoverage:
     uncovered: int
     rejected: int
 
+    @property
+    def complete(self) -> bool:
+        """Единственное определение гейта `full_canonical_coverage`: непокрытых нет.
+
+        Отсеянный номер гейт не роняет: он не утечка, потому что кадра в корпусе нет.
+        Поэтому `covered` среди прошедших гейт профилей всё же различается — ровно на
+        число отсеянных канонических кадров, и ось приватности это видит.
+        """
+        return self.uncovered == 0
+
 
 @dataclass(frozen=True, slots=True)
 class ProfileScore:
@@ -74,11 +112,13 @@ class ProfileScore:
 
     Ось `covered_plates` считает накрытие истинных канонических номеров заливками профиля
     и сама по себе не доказывает отсутствие строгих утечек: за это отвечает отдельный гейт.
+    Профиль с проваленным допускающим гейтом теперь до фронта доходит (§7.3), поэтому ось
+    различает и число утечек, а не только число отсеянных канонических кадров.
 
-    Пока `rank_profiles` пускает в Pareto только профили без проваленных гейтов, гейт
-    `full_canonical_coverage` требует ровно того покрытия, которое считает ось, поэтому
-    среди выживших она постоянна и на фронт влиять не может. Различать фронт ось начнёт
-    лишь после разделения гейтов на блокирующие и допускающие (§7.3).
+    Ось `rejected_frames` — предрегистрированная `rejects_by_reason`, свёрнутая в скаляр.
+    Без неё отсев не виден ни одной оси издержек: у отсеянной строки `delta_black`,
+    `pixels_equal` и `new_black_frac` пусты, и профиль, отсеявший весь корпус, оказался бы
+    на фронте с нулями по всем издержкам.
     """
 
     profile_id: str
@@ -90,6 +130,28 @@ class ProfileScore:
     above_quarter: int
     new_over_redacted: int
     changed_crops: int
+    rejected_frames: int
+
+
+@dataclass(frozen=True, slots=True)
+class FrontierEntry:
+    """Строка фронта Pareto вместе с правом на продвижение.
+
+    Провал допускающего гейта не убирает профиль с фронта: его числа достоверны и кампания
+    обязана их показать. Продвигать такой профиль по-прежнему нельзя, поэтому право названо
+    явно, а не выводится читателем отчёта из отсутствия гейтового поля.
+    """
+
+    score: ProfileScore
+    failed_permitting_gates: tuple[HardGate, ...]
+
+    @property
+    def profile_id(self) -> str:
+        return self.score.profile_id
+
+    @property
+    def promotable(self) -> bool:
+        return not self.failed_permitting_gates
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,6 +16,8 @@ from pipeline.redaction_calibration.measure import (
     confidence_breakpoints,
     confidence_margin,
     dominates,
+    failed_permitting_gates,
+    first_blocking_gate,
     first_failed_gate,
     geometry_fixpoint_converged,
     geometry_preflight,
@@ -24,11 +26,16 @@ from pipeline.redaction_calibration.measure import (
     rank_profiles,
     stale_profile_ids,
     summarize_profile_results,
+    total_rejects,
     write_frame_profile_results,
 )
 from pipeline.redaction_calibration.model import (
+    BLOCKING_GATES,
+    HARD_GATES,
+    PERMITTING_GATES,
     ConfidenceMargin,
     FrameProfileResult,
+    FrontierEntry,
     GeometryGateVerdict,
     PlateCoverage,
     ProfileGateReport,
@@ -165,6 +172,7 @@ def _score(
     yolo: tuple[float, float] = (0.15, 0.25),
     costs: tuple[float, float, int, int, int] = (0.10, 0.20, 2, 1, 5),
     covered: int = 0,
+    rejected: int = 0,
 ) -> ProfileScore:
     return ProfileScore(
         profile_id=profile_id,
@@ -176,6 +184,7 @@ def _score(
         above_quarter=costs[2],
         new_over_redacted=costs[3],
         changed_crops=costs[4],
+        rejected_frames=rejected,
     )
 
 
@@ -245,13 +254,13 @@ def test_ось_приватности_доминирует_при_равных_
 
 
 def test_ось_приватности_не_доминирует_при_подорожавших_издержках() -> None:
-    """Больше накрытий, но дороже: оси отсева в `ProfileScore` нет (R-1).
+    """Больше накрытий, но дороже по отсеву: ни один профиль не доминирует.
 
-    Spec §12: больше заливок повышает `delta_black` и риск новых `over_redacted`, поэтому
-    подорожание выражено осями `new_over_redacted` и `changed_crops`.
+    Отсев выражен собственной осью `rejected_frames`: пять осей издержек его не видят,
+    потому что у отсеянной строки нет ни `delta_black`, ни `pixels_equal`.
     """
-    private_but_costly = _score("private-costly", covered=5, costs=(0.10, 0.20, 2, 3, 9))
-    cheap_but_blind = _score("cheap-blind", covered=2)
+    private_but_costly = _score("private-costly", covered=5, rejected=58)
+    cheap_but_blind = _score("cheap-blind", covered=2, rejected=12)
 
     assert not dominates(private_but_costly, cheap_but_blind)
     assert not dominates(cheap_but_blind, private_but_costly)
@@ -277,7 +286,7 @@ def test_hard_gates_идут_в_заданном_порядке_до_pareto() ->
     assert first_failed_gate(failures) == "provenance_workspace_freshness"
     assert rank_profiles(
         [(failures, _score("failed")), (_gate_report("survivor"), _score("survivor"))]
-    ) == (_score("survivor"),)
+    ) == (FrontierEntry(score=_score("survivor"), failed_permitting_gates=()),)
 
     ordered_failures: list[tuple[str, dict[str, object]]] = [
         ("unresolved_empty", {"unresolved_count": 1}),
@@ -571,3 +580,100 @@ def test_canonical_coverage_отвергает_набор_без_истинны�
         canonical_coverage([], {}, rejected_sha256=set())
     with pytest.raises(ValueError, match="истинных номеров"):
         canonical_coverage([false_plate, ambiguous], {}, rejected_sha256=set())
+
+
+def test_гейт_покрытия_выводится_из_plate_coverage() -> None:
+    полное = PlateCoverage(covered=14, uncovered=0, rejected=1)
+    дырявое = PlateCoverage(covered=13, uncovered=1, rejected=1)
+
+    # Отсеянный номер не утечка: гейт он не роняет, хотя в ось покрытия и не попадает
+    assert полное.complete is True
+    assert дырявое.complete is False
+
+    прошёл = _gate_report("covered", canonical_coverage_complete=полное.complete)
+    провалился = _gate_report("holed", canonical_coverage_complete=дырявое.complete)
+    assert first_failed_gate(прошёл) is None
+    assert first_failed_gate(провалился) == "full_canonical_coverage"
+
+
+def test_ось_отсева_наказывает_профиль_с_большим_отсевом() -> None:
+    бережливый = _score("thrifty", rejected=12)
+    расточительный = _score("wasteful", rejected=263)
+
+    assert dominates(бережливый, расточительный)
+    assert not dominates(расточительный, бережливый)
+
+
+def test_отсеянные_строки_невидимы_пяти_осям_издержек() -> None:
+    """Почему оси отсева нельзя не иметь: профиль, отсеявший всё, бесплатен по издержкам."""
+    отсеявший_всё = summarize_profile_results(
+        [
+            _result(photo_id=str(index), old=None, new=None, equal=None, reason="redaction_failed")
+            for index in range(3)
+        ]
+    )
+
+    assert отсеявший_всё.median_delta_black == 0.0
+    assert отсеявший_всё.p95_delta_black == 0.0
+    assert отсеявший_всё.above_quarter == 0
+    assert отсеявший_всё.new_over_redacted == 0
+    assert отсеявший_всё.changed_crops == 0
+    assert total_rejects(отсеявший_всё) == 3
+
+
+def test_гейты_разделены_на_блокирующие_и_допускающие_без_остатка() -> None:
+    assert set(BLOCKING_GATES) | set(PERMITTING_GATES) == set(HARD_GATES)
+    assert not set(BLOCKING_GATES) & set(PERMITTING_GATES)
+    assert PERMITTING_GATES == ("full_canonical_coverage", "strict_calibration_review")
+
+
+def test_блокирующий_гейт_убирает_профиль_с_фронта() -> None:
+    несвежий = _gate_report("stale", provenance_fresh=False)
+    негодный = _gate_report("unfit", geometry_preflight_passed=False)
+    здоровый = _gate_report("healthy")
+
+    assert first_blocking_gate(несвежий) == "provenance_workspace_freshness"
+    assert first_blocking_gate(негодный) == "structural_actual_tile_preflight"
+    assert first_blocking_gate(здоровый) is None
+    assert [
+        entry.score.profile_id
+        for entry in rank_profiles(
+            [
+                (несвежий, _score("stale", covered=15)),
+                (негодный, _score("unfit", covered=15)),
+                (здоровый, _score("healthy", covered=15)),
+            ]
+        )
+    ] == ["healthy"]
+
+
+def test_допускающий_гейт_оставляет_профиль_на_фронте_непродвигаемым() -> None:
+    """§7.3: профиль с двумя утечками вместо восьми обязан дойти до фронта и быть виден."""
+    протекающий = _gate_report("leaky", strict_leaks=2, canonical_coverage_complete=False)
+    чистый = _gate_report("clean")
+
+    assert failed_permitting_gates(протекающий) == (
+        "full_canonical_coverage",
+        "strict_calibration_review",
+    )
+    assert failed_permitting_gates(чистый) == ()
+
+    фронт = rank_profiles(
+        [
+            (протекающий, _score("leaky", covered=13, costs=(0.05, 0.10, 0, 0, 2))),
+            (чистый, _score("clean", covered=15)),
+        ]
+    )
+
+    assert [entry.score.profile_id for entry in фронт] == ["clean", "leaky"]
+    assert [entry.promotable for entry in фронт] == [True, False]
+
+
+def test_rank_profiles_отвергает_дубликат_profile_id() -> None:
+    with pytest.raises(ValueError, match="дубликат"):
+        rank_profiles(
+            [
+                (_gate_report("twin"), _score("twin")),
+                (_gate_report("twin"), _score("twin")),
+            ]
+        )

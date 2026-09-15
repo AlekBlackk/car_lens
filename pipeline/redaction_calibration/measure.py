@@ -27,9 +27,13 @@ from pipeline.redaction_calibration.geometry import (
     tile_guarantee,
 )
 from pipeline.redaction_calibration.model import (
+    BLOCKING_GATES,
+    HARD_GATES,
+    PERMITTING_GATES,
     ConfidenceMargin,
     FrameOutcome,
     FrameProfileResult,
+    FrontierEntry,
     GeometryGateVerdict,
     HardGate,
     PlateCoverage,
@@ -78,6 +82,11 @@ def summarize_profile_results(results: Sequence[FrameProfileResult]) -> ProfileM
         changed_crops=sum(result.pixels_equal is False for result in results),
         rejects=tuple(sorted(отказы.items())),
     )
+
+
+def total_rejects(metrics: ProfileMetrics) -> int:
+    """Свернуть отсев по причинам в скалярную ось Pareto, ничего не теряя по дороге."""
+    return sum(count for _, count in metrics.rejects)
 
 
 _PROFILE_FIELDS = tuple(field.name for field in fields(FrameProfileResult))
@@ -139,20 +148,21 @@ def load_frame_profile_results(path: Path) -> list[FrameProfileResult]:
     return loaded
 
 
-_HARD_GATES: tuple[tuple[HardGate, Callable[[ProfileGateReport], bool]], ...] = (
-    ("provenance_workspace_freshness", lambda row: row.provenance_fresh),
-    ("unresolved_empty", lambda row: row.unresolved_count == 0),
-    ("current_geometry_witness", lambda row: row.geometry_current),
-    ("structural_actual_tile_preflight", lambda row: row.geometry_preflight_passed),
-    ("full_canonical_coverage", lambda row: row.canonical_coverage_complete),
-    (
-        "strict_calibration_review",
-        lambda row: row.strict_leaks == 0 and row.unreviewable_accepted == 0,
+_GATE_PREDICATES: Mapping[HardGate, Callable[[ProfileGateReport], bool]] = {
+    "provenance_workspace_freshness": lambda row: row.provenance_fresh,
+    "unresolved_empty": lambda row: row.unresolved_count == 0,
+    "current_geometry_witness": lambda row: row.geometry_current,
+    "structural_actual_tile_preflight": lambda row: row.geometry_preflight_passed,
+    "full_canonical_coverage": lambda row: row.canonical_coverage_complete,
+    "strict_calibration_review": (
+        lambda row: row.strict_leaks == 0 and row.unreviewable_accepted == 0
     ),
-    (
-        "report_arithmetic",
-        lambda row: row.operational_errors == 0 and row.report_arithmetic_closed,
-    ),
+    "report_arithmetic": (lambda row: row.operational_errors == 0 and row.report_arithmetic_closed),
+}
+
+# Порядок и полнота берутся из HARD_GATES: забытый предикат падает здесь, а не в кампании.
+_HARD_GATES: tuple[tuple[HardGate, Callable[[ProfileGateReport], bool]], ...] = tuple(
+    (name, _GATE_PREDICATES[name]) for name in HARD_GATES
 )
 
 
@@ -193,6 +203,28 @@ def first_failed_gate(report: ProfileGateReport) -> HardGate | None:
         if not predicate(report):
             return name
     return None
+
+
+def first_blocking_gate(report: ProfileGateReport) -> HardGate | None:
+    """Вернуть первый провал среди блокирующих гейтов: такой профиль не измеряется.
+
+    Блокирующий провал означает, что числам профиля нельзя верить либо что кандидат
+    отвергнут до инференса и чисел у него нет. Допускающие провалы здесь не считаются:
+    они запрещают продвижение, а не измерение (§7.3).
+    """
+    for name, predicate in _HARD_GATES:
+        if name in BLOCKING_GATES and not predicate(report):
+            return name
+    return None
+
+
+def failed_permitting_gates(report: ProfileGateReport) -> tuple[HardGate, ...]:
+    """Назвать все проваленные допускающие гейты в предзарегистрированном порядке."""
+    return tuple(
+        name
+        for name, predicate in _HARD_GATES
+        if name in PERMITTING_GATES and not predicate(report)
+    )
 
 
 def geometry_fixpoint_converged(
@@ -377,6 +409,7 @@ def dominates(left: ProfileScore, right: ProfileScore) -> bool:
         left.above_quarter,
         left.new_over_redacted,
         left.changed_crops,
+        left.rejected_frames,
     )
     right_lower = (
         right.median_delta,
@@ -384,6 +417,7 @@ def dominates(left: ProfileScore, right: ProfileScore) -> bool:
         right.above_quarter,
         right.new_over_redacted,
         right.changed_crops,
+        right.rejected_frames,
     )
     no_worse = all(a >= b for a, b in zip(left_higher, right_higher, strict=True)) and all(
         a <= b for a, b in zip(left_lower, right_lower, strict=True)
@@ -413,15 +447,27 @@ def pareto_frontier(scores: Sequence[ProfileScore]) -> tuple[ProfileScore, ...]:
 
 def rank_profiles(
     candidates: Sequence[tuple[ProfileGateReport, ProfileScore]],
-) -> tuple[ProfileScore, ...]:
-    """Пустить в Pareto только профили, прошедшие семь гейтов."""
-    survivors: list[ProfileScore] = []
+) -> tuple[FrontierEntry, ...]:
+    """Пустить в Pareto профили без блокирующих провалов, пометив непродвигаемых.
+
+    Профиль с проваленным допускающим гейтом измерен достоверно, поэтому конкурирует за
+    фронт наравне с остальными: иначе профиль с двумя утечками вместо восьми до фронта не
+    доходит и ось приватности его не видит (§7.3).
+    """
+    if len({report.profile_id for report, _ in candidates}) != len(candidates):
+        raise ValueError("дубликат profile_id среди кандидатов")
+    permitting: dict[str, tuple[HardGate, ...]] = {}
+    measured: list[ProfileScore] = []
     for report, score in candidates:
         if report.profile_id != score.profile_id:
             raise ValueError("gate report и score принадлежат разным профилям")
-        if first_failed_gate(report) is None:
-            survivors.append(score)
-    return pareto_frontier(survivors)
+        if first_blocking_gate(report) is None:
+            permitting[report.profile_id] = failed_permitting_gates(report)
+            measured.append(score)
+    return tuple(
+        FrontierEntry(score=score, failed_permitting_gates=permitting[score.profile_id])
+        for score in pareto_frontier(measured)
+    )
 
 
 def stale_profile_ids(

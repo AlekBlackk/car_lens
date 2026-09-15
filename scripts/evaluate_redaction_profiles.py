@@ -21,6 +21,7 @@ from pipeline.redaction_calibration.measure import (
 )
 from pipeline.redaction_calibration.model import (
     ConfidenceMargin,
+    FrontierEntry,
     ProfileGateReport,
     ProfileScore,
     VisualVeto,
@@ -150,15 +151,15 @@ def load_visual_vetoes(path: Path) -> list[VisualVeto]:
 
 
 def apply_visual_vetoes(
-    frontier: Sequence[ProfileScore], vetoes: Sequence[VisualVeto]
-) -> tuple[ProfileScore, ...]:
+    frontier: Sequence[FrontierEntry], vetoes: Sequence[VisualVeto]
+) -> tuple[FrontierEntry, ...]:
     """Исключить vetoed profiles, не разрешая ledger добавить профиль вне frontier."""
-    known = {score.profile_id for score in frontier}
+    known = {entry.profile_id for entry in frontier}
     vetoed = {veto.profile_id for veto in vetoes}
     foreign = sorted(vetoed - known)
     if foreign:
         raise ValueError(f"veto ссылается на профиль вне frontier: {foreign}")
-    return tuple(score for score in frontier if score.profile_id not in vetoed)
+    return tuple(entry for entry in frontier if entry.profile_id not in vetoed)
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -169,29 +170,45 @@ def _write_json(path: Path, value: object) -> None:
     )
 
 
+def _frontier_document(entry: FrontierEntry) -> dict[str, Any]:
+    """Оси профиля вместе с явным правом на продвижение и причиной его отсутствия."""
+    return {
+        **asdict(entry.score),
+        "promotable": entry.promotable,
+        "failed_permitting_gates": list(entry.failed_permitting_gates),
+    }
+
+
 def write_campaign_artifacts(
     out_dir: Path,
-    frontier: Sequence[ProfileScore],
+    frontier: Sequence[FrontierEntry],
     *,
     unresolved_rows: Sequence[Mapping[str, str]],
     vetoes: Sequence[VisualVeto],
-) -> tuple[ProfileScore, ...]:
-    """Записать минимальный строгий контракт кампании без автоматического выбора."""
+) -> tuple[FrontierEntry, ...]:
+    """Записать минимальный строгий контракт кампании без автоматического выбора.
+
+    Выбор идёт только среди продвигаемых выживших: непродвигаемый профиль остаётся в
+    `pareto.json` со своей причиной, но кандидатом на продвижение не становится (§7.3).
+    """
     if unresolved_rows:
         raise ValueError("annotations_resolved запрещён, пока unresolved.csv содержит строки")
     out_dir.mkdir(parents=True, exist_ok=True)
     ordered = tuple(sorted(frontier, key=lambda row: row.profile_id))
-    _write_json(out_dir / "pareto.json", [asdict(score) for score in ordered])
+    _write_json(out_dir / "pareto.json", [_frontier_document(entry) for entry in ordered])
     _write_csv(out_dir / "unresolved.csv", UNRESOLVED_COLUMNS, [])
     write_visual_vetoes(out_dir / "vetoes.csv", vetoes)
     survivors = apply_visual_vetoes(ordered, vetoes)
-    if len(survivors) > 1:
+    promotable = [entry for entry in survivors if entry.promotable]
+    if len(promotable) > 1:
         _write_json(
             out_dir / "selection_required.json",
-            {"frontier": [asdict(score) for score in survivors]},
+            {"frontier": [_frontier_document(entry) for entry in promotable]},
         )
-    elif len(survivors) == 1:
-        _write_json(out_dir / "selected_profile.json", {"profile": asdict(survivors[0])})
+    elif len(promotable) == 1:
+        _write_json(
+            out_dir / "selected_profile.json", {"profile": _frontier_document(promotable[0])}
+        )
     return survivors
 
 
@@ -201,6 +218,7 @@ def _score(document: Mapping[str, Any]) -> ProfileScore:
         ssd_margin=ConfidenceMargin(**document["ssd_margin"]),
         yolo_margin=ConfidenceMargin(**document["yolo_margin"]),
         covered_plates=int(document["covered_plates"]),
+        rejected_frames=int(document["rejected_frames"]),
         median_delta=float(document["median_delta"]),
         p95_delta=float(document["p95_delta"]),
         above_quarter=int(document["above_quarter"]),
@@ -328,7 +346,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     frontier = rank_profiles(scored_candidates)
     vetoes = load_visual_vetoes(arguments.vetoes)
     changed_crops = _load_changed_crops(arguments.changed_crops)
-    frontier_by_id = {score.profile_id: score for score in frontier}
+    frontier_by_id = {entry.profile_id: entry.score for entry in frontier}
     review_crops = [crop for crop in changed_crops if crop.profile_id in frontier_by_id]
     changed_ids: dict[str, set[str]] = {}
     for crop in review_crops:
