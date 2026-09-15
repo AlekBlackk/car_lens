@@ -254,8 +254,10 @@ def _assert_campaign_transition(record: CampaignRecord, target: CampaignState) -
             budget_result_sha256=SHA_B,
         )
     if target is CampaignState.NO_ELIGIBLE_PROFILES:
+        # Предусловие терминала — пустая запись, а не пустой аргумент: подменять им список
+        # выживших ребро больше не даёт
         return transition_campaign(
-            record,
+            replace(record, evaluated_survivor_ids=()),
             target,
             evaluated_survivor_ids=(),
             no_eligible_profiles_result_sha256=SHA_B,
@@ -1442,3 +1444,36 @@ def test_records_are_frozen_slotted_and_transition_retains_prior_witnesses() -> 
     assert passed.geometry_result_sha256 == SHA_E
     assert passed.calibration_result_sha256 == SHA_D
     assert records[1].state is ProfileState.GEOMETRY_FRESH
+
+
+def test_no_eligible_profiles_override_сверяется_а_не_подменяет() -> None:
+    """Запись авторитетна: иначе «не осталось» превращается в «мы решили, что не осталось»."""
+    с_выжившими = replace(
+        _campaign(CampaignState.PROFILES_EVALUATED),
+        evaluated_survivor_ids=("profile-a", "profile-b"),
+    )
+
+    with pytest.raises(CalibrationStateError, match="survivors"):
+        transition_campaign(
+            с_выжившими,
+            CampaignState.NO_ELIGIBLE_PROFILES,
+            evaluated_survivor_ids=(),
+            no_eligible_profiles_result_sha256=SHA_D,
+        )
+
+
+def test_no_eligible_profiles_принимает_совпадающий_override() -> None:
+    пустая = replace(
+        _campaign(CampaignState.PROFILES_EVALUATED),
+        evaluated_survivor_ids=(),
+    )
+
+    result = transition_campaign(
+        пустая,
+        CampaignState.NO_ELIGIBLE_PROFILES,
+        evaluated_survivor_ids=(),
+        no_eligible_profiles_result_sha256=SHA_D,
+    )
+
+    assert result.state is CampaignState.NO_ELIGIBLE_PROFILES
+    assert result.evaluated_survivor_ids == ()

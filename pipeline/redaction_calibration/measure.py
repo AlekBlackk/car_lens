@@ -470,6 +470,16 @@ def rank_profiles(
     )
 
 
+def promotable_profile_ids(frontier: Sequence[FrontierEntry]) -> tuple[str, ...]:
+    """Отобрать с фронта только продвигаемых — именно они «выжившие» для автомата.
+
+    Весь фронт идёт в отчёт, но `CampaignRecord.evaluated_survivor_ids` хранит лишь этот
+    список: иначе прямое ребро в `campaign_complete` назовёт выбранным профиль, который
+    провалил допускающий гейт.
+    """
+    return tuple(entry.profile_id for entry in frontier if entry.promotable)
+
+
 def stale_profile_ids(
     reports: Sequence[ProfileGateReport], current: GeometryWitness
 ) -> tuple[str, ...]:

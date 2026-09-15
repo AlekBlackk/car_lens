@@ -16,6 +16,7 @@ from PIL import Image, ImageFont
 from pipeline.redaction_calibration.geometry import DetectorLink, GeometryWitness
 from pipeline.redaction_calibration.measure import (
     first_failed_gate,
+    promotable_profile_ids,
     rank_profiles,
     stale_profile_ids,
 )
@@ -199,6 +200,14 @@ def write_campaign_artifacts(
     _write_csv(out_dir / "unresolved.csv", UNRESOLVED_COLUMNS, [])
     write_visual_vetoes(out_dir / "vetoes.csv", vetoes)
     survivors = apply_visual_vetoes(ordered, vetoes)
+    # Автомат кампании кормится отсюда: «выживший» для него — продвигаемый, а не весь фронт
+    _write_json(
+        out_dir / "survivors.json",
+        {
+            "frontier_profile_ids": [entry.profile_id for entry in survivors],
+            "promotable_profile_ids": list(promotable_profile_ids(survivors)),
+        },
+    )
     promotable = [entry for entry in survivors if entry.promotable]
     if len(promotable) > 1:
         _write_json(

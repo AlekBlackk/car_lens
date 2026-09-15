@@ -23,6 +23,7 @@ from pipeline.redaction_calibration.measure import (
     geometry_preflight,
     load_frame_profile_results,
     pareto_frontier,
+    promotable_profile_ids,
     rank_profiles,
     stale_profile_ids,
     summarize_profile_results,
@@ -677,3 +678,15 @@ def test_rank_profiles_отвергает_дубликат_profile_id() -> None:
                 (_gate_report("twin"), _score("twin")),
             ]
         )
+
+
+def test_promotable_profile_ids_отбирает_только_продвигаемых() -> None:
+    фронт = (
+        FrontierEntry(score=_score("clean"), failed_permitting_gates=()),
+        FrontierEntry(
+            score=_score("leaky"), failed_permitting_gates=("strict_calibration_review",)
+        ),
+    )
+
+    assert promotable_profile_ids(фронт) == ("clean",)
+    assert promotable_profile_ids(фронт[1:]) == ()

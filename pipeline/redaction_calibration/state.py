@@ -91,7 +91,15 @@ def _require_dimension(name: str, value: int | None) -> int:
 
 @dataclass(frozen=True, slots=True)
 class CampaignRecord:
-    """Состояние кампании и SHA256 результатов её доказательных этапов."""
+    """Состояние кампании и SHA256 результатов её доказательных этапов.
+
+    `evaluated_survivor_ids` — **продвигаемые** выжившие, а не весь фронт Pareto. После
+    разделения гейтов на блокирующие и допускающие (§7.3) профиль с утечками остаётся на
+    фронте, но продвигать его нельзя; фронт целиком живёт в `pareto.json`. Запись хранит
+    только идентификаторы, поэтому проверить продвигаемость автомат не может — список
+    собирает `promotable_profile_ids` и называет `survivors.json`. Спутать эти два списка
+    значит дать прямому ребру в `campaign_complete` назвать утекающий профиль выбранным.
+    """
 
     state: CampaignState
     preregistration_result_sha256: str | None = None
@@ -387,9 +395,14 @@ def transition_campaign(
     if target is CampaignState.NO_ELIGIBLE_PROFILES:
         # Партии здесь не спрашиваются: бюджет нетронут по самому смыслу исхода, и требование
         # их истории смешало бы этот терминал с `budget_exhausted`.
+        # Запись авторитетна: подмена превращала бы «допустимых не осталось» в «мы решили,
+        # что не осталось», и затирала бы список выживших предыдущего шага.
         survivors = record.evaluated_survivor_ids
-        if evaluated_survivor_ids is not None:
-            survivors = _validate_survivors(evaluated_survivor_ids)
+        if (
+            evaluated_survivor_ids is not None
+            and _validate_survivors(evaluated_survivor_ids) != survivors
+        ):
+            raise CalibrationStateError("явный список survivors обязан совпадать с записью")
         if survivors:
             raise CalibrationStateError("no_eligible_profiles требует пустой список survivors")
         return replace(

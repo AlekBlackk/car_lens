@@ -411,3 +411,29 @@ def test_gate_report_parses_oversized_blind_zone_and_reason() -> None:
     legacy_report = _gate_report(doc_legacy)
     assert legacy_report.oversized_blind_zone_count == 0
     assert legacy_report.geometry_preflight_reason is None
+
+
+def test_survivors_json_называет_фронт_и_продвигаемых_отдельно(tmp_path: Path) -> None:
+    """Задача 8 кормит автомат из файла, а не собирает список выживших глазами."""
+    frontier = (
+        _entry("profile-clean"),
+        _entry("profile-leaky", failed=("strict_calibration_review",)),
+    )
+
+    write_campaign_artifacts(tmp_path, frontier, unresolved_rows=[], vetoes=[])
+
+    assert json.loads((tmp_path / "survivors.json").read_text(encoding="utf-8")) == {
+        "frontier_profile_ids": ["profile-clean", "profile-leaky"],
+        "promotable_profile_ids": ["profile-clean"],
+    }
+
+
+def test_survivors_json_пуст_по_продвигаемым_на_фронте_из_непродвигаемых(tmp_path: Path) -> None:
+    frontier = (_entry("profile-leaky", failed=("full_canonical_coverage",)),)
+
+    write_campaign_artifacts(tmp_path, frontier, unresolved_rows=[], vetoes=[])
+
+    assert json.loads((tmp_path / "survivors.json").read_text(encoding="utf-8")) == {
+        "frontier_profile_ids": ["profile-leaky"],
+        "promotable_profile_ids": [],
+    }
