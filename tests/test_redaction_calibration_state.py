@@ -48,6 +48,9 @@ CAMPAIGN_EDGES = {
     # Единственный выживший профиль тоже способен сжечь бюджет: без этого ребра кампания
     # уходила бы в campaign_complete с проваленным профилем в selected_profile_id.
     (CampaignState.PROFILES_EVALUATED, CampaignState.BUDGET_EXHAUSTED),
+    # Дефект Д-3: нулевой исход не имел законного ребра, и кампания 2026-09-07 осталась в
+    # preregistered, закрытая отчётом. Бюджет партий здесь нетронут.
+    (CampaignState.PROFILES_EVALUATED, CampaignState.NO_ELIGIBLE_PROFILES),
 }
 
 PROFILE_EDGES = {
@@ -111,6 +114,7 @@ CAMPAIGN_RESULT_FIELDS = {
     CampaignState.PROFILES_EVALUATED: "profile_evaluation_result_sha256",
     CampaignState.CAMPAIGN_COMPLETE: "selection_result_sha256",
     CampaignState.BUDGET_EXHAUSTED: "budget_result_sha256",
+    CampaignState.NO_ELIGIBLE_PROFILES: "no_eligible_profiles_result_sha256",
 }
 
 PROMOTION_RESULT_FIELDS = {
@@ -146,6 +150,7 @@ def _campaign(state: CampaignState) -> CampaignRecord:
         profile_evaluation_result_sha256=SHA_A,
         selection_result_sha256=SHA_A,
         budget_result_sha256=SHA_A,
+        no_eligible_profiles_result_sha256=SHA_A,
         evaluated_survivor_ids=survivors,
     )
 
@@ -247,6 +252,13 @@ def _assert_campaign_transition(record: CampaignRecord, target: CampaignState) -
             target,
             batches=_exhausted_batches(),
             budget_result_sha256=SHA_B,
+        )
+    if target is CampaignState.NO_ELIGIBLE_PROFILES:
+        return transition_campaign(
+            record,
+            target,
+            evaluated_survivor_ids=(),
+            no_eligible_profiles_result_sha256=SHA_B,
         )
     return transition_campaign(record, target)
 
@@ -683,7 +695,7 @@ def test_selection_required_needs_multiple_survivors_and_selected_member() -> No
             )
 
 
-def test_campaign_profiles_evaluated_persists_unique_nonempty_survivors() -> None:
+def test_campaign_profiles_evaluated_persists_unique_survivors() -> None:
     record = _campaign(CampaignState.ANNOTATIONS_RESOLVED)
 
     result = transition_campaign(
@@ -695,7 +707,8 @@ def test_campaign_profiles_evaluated_persists_unique_nonempty_survivors() -> Non
 
     assert result.evaluated_survivor_ids == ("profile-b", "profile-a")
     assert result.profile_evaluation_result_sha256 == SHA_D
-    for survivors in ((), ("",), ("profile-a", "profile-a")):
+    # Пустой список выживших больше не ошибка: его фиксирует отдельный терминал Д-3.
+    for survivors in (("",), ("profile-a", "profile-a")):
         with pytest.raises(CalibrationStateError, match="survivor"):
             transition_campaign(
                 record,
@@ -703,6 +716,124 @@ def test_campaign_profiles_evaluated_persists_unique_nonempty_survivors() -> Non
                 evaluated_survivor_ids=survivors,
                 profile_evaluation_result_sha256=SHA_D,
             )
+
+
+def test_profiles_evaluated_accepts_empty_survivors() -> None:
+    """Нулевой исход оценивания — законное состояние: его фиксирует терминал Д-3."""
+    record = _campaign(CampaignState.ANNOTATIONS_RESOLVED)
+
+    result = transition_campaign(
+        record,
+        CampaignState.PROFILES_EVALUATED,
+        evaluated_survivor_ids=(),
+        profile_evaluation_result_sha256=SHA_D,
+    )
+
+    assert result.state is CampaignState.PROFILES_EVALUATED
+    assert result.evaluated_survivor_ids == ()
+    assert result.profile_evaluation_result_sha256 == SHA_D
+
+
+def test_profiles_evaluated_requires_explicit_survivor_list() -> None:
+    """Забытый аргумент не должен молча означать «выживших нет»."""
+    with pytest.raises(CalibrationStateError, match="evaluated_survivor_ids"):
+        transition_campaign(
+            _campaign(CampaignState.ANNOTATIONS_RESOLVED),
+            CampaignState.PROFILES_EVALUATED,
+            profile_evaluation_result_sha256=SHA_D,
+        )
+
+
+def test_no_eligible_profiles_reaches_terminal_from_empty_survivors() -> None:
+    # `selected_profile_id` заполнен намеренно: законным путём в `profiles_evaluated` он не
+    # попадает, и без метки проверка «переход его не трогает» была бы вакуумной.
+    record = replace(
+        _campaign(CampaignState.PROFILES_EVALUATED),
+        evaluated_survivor_ids=(),
+        profile_evaluation_result_sha256=SHA_C,
+        selected_profile_id="profile-a",
+    )
+
+    result = transition_campaign(
+        record,
+        CampaignState.NO_ELIGIBLE_PROFILES,
+        no_eligible_profiles_result_sha256=SHA_D,
+    )
+
+    assert result.state is CampaignState.NO_ELIGIBLE_PROFILES
+    assert result.evaluated_survivor_ids == ()
+    assert result.no_eligible_profiles_result_sha256 == SHA_D
+    assert result.profile_evaluation_result_sha256 == SHA_C
+    assert result.selected_profile_id == "profile-a"
+
+
+@pytest.mark.parametrize("survivors", [("profile-a",), ("profile-a", "profile-b")])
+def test_no_eligible_profiles_rejects_nonempty_survivors(
+    survivors: tuple[str, ...],
+) -> None:
+    carried = replace(
+        _campaign(CampaignState.PROFILES_EVALUATED),
+        evaluated_survivor_ids=survivors,
+    )
+    empty = replace(
+        _campaign(CampaignState.PROFILES_EVALUATED),
+        evaluated_survivor_ids=(),
+    )
+
+    with pytest.raises(CalibrationStateError, match="survivors"):
+        transition_campaign(
+            carried,
+            CampaignState.NO_ELIGIBLE_PROFILES,
+            no_eligible_profiles_result_sha256=SHA_D,
+        )
+    with pytest.raises(CalibrationStateError, match="survivors"):
+        transition_campaign(
+            empty,
+            CampaignState.NO_ELIGIBLE_PROFILES,
+            evaluated_survivor_ids=survivors,
+            no_eligible_profiles_result_sha256=SHA_D,
+        )
+
+
+@pytest.mark.parametrize("survivors", [("",), ("profile-a", "profile-a")])
+def test_no_eligible_profiles_validates_explicit_survivor_override(
+    survivors: tuple[str, ...],
+) -> None:
+    """Явный список проходит ту же проверку, что и на входе в `profiles_evaluated`.
+
+    Шаблон различает две ветви намеренно: сообщение о непустом списке тоже содержит слово
+    «survivors», и совпадение по нему означало бы, что проверка идентификаторов не сработала.
+    """
+    record = replace(
+        _campaign(CampaignState.PROFILES_EVALUATED),
+        evaluated_survivor_ids=(),
+    )
+
+    with pytest.raises(CalibrationStateError, match="survivor IDs"):
+        transition_campaign(
+            record,
+            CampaignState.NO_ELIGIBLE_PROFILES,
+            evaluated_survivor_ids=survivors,
+            no_eligible_profiles_result_sha256=SHA_D,
+        )
+
+
+def test_no_eligible_profiles_is_terminal() -> None:
+    assert not any(source is CampaignState.NO_ELIGIBLE_PROFILES for source, _ in CAMPAIGN_EDGES)
+
+    record = replace(
+        _campaign(CampaignState.PROFILES_EVALUATED),
+        evaluated_survivor_ids=(),
+    )
+    terminal = transition_campaign(
+        record,
+        CampaignState.NO_ELIGIBLE_PROFILES,
+        no_eligible_profiles_result_sha256=SHA_D,
+    )
+
+    for target in CampaignState:
+        with pytest.raises(CalibrationStateError, match="недопустимый переход кампании"):
+            _assert_campaign_transition(terminal, target)
 
 
 @pytest.mark.parametrize("unresolved_count", [1, -1, True])
@@ -748,6 +879,7 @@ def _campaign_witness_call(
         CampaignState.PROFILES_EVALUATED: CampaignState.ANNOTATIONS_RESOLVED,
         CampaignState.CAMPAIGN_COMPLETE: CampaignState.PROFILES_EVALUATED,
         CampaignState.BUDGET_EXHAUSTED: CampaignState.SELECTION_REQUIRED,
+        CampaignState.NO_ELIGIBLE_PROFILES: CampaignState.PROFILES_EVALUATED,
     }
     record = _campaign(sources[target])
     if target is CampaignState.PREREGISTERED:
@@ -773,6 +905,13 @@ def _campaign_witness_call(
     if target is CampaignState.CAMPAIGN_COMPLETE:
         record = replace(record, evaluated_survivor_ids=("profile-a",))
         return lambda: transition_campaign(record, target, selection_result_sha256=witness)
+    if target is CampaignState.NO_ELIGIBLE_PROFILES:
+        record = replace(record, evaluated_survivor_ids=())
+        return lambda: transition_campaign(
+            record,
+            target,
+            no_eligible_profiles_result_sha256=witness,
+        )
     return lambda: transition_campaign(
         record,
         target,

@@ -24,6 +24,11 @@ class CampaignState(StrEnum):
     SELECTION_REQUIRED = "selection_required"
     CAMPAIGN_COMPLETE = "campaign_complete"
     BUDGET_EXHAUSTED = "budget_exhausted"
+    # Дефект Д-3: ни одно из трёх рёбер из `profiles_evaluated` не выражало нулевой исход.
+    # Отдельное состояние, а не `budget_exhausted`: тот означает сожжённый бюджет восьми
+    # независимых партий, здесь же бюджет нетронут и все восемь партий остаются `sealed`.
+    # Смешение двух разных отрицательных исходов сделало бы историю кампаний нечитаемой.
+    NO_ELIGIBLE_PROFILES = "no_eligible_profiles"
 
 
 class ProfileState(StrEnum):
@@ -96,6 +101,7 @@ class CampaignRecord:
     profile_evaluation_result_sha256: str | None = None
     selection_result_sha256: str | None = None
     budget_result_sha256: str | None = None
+    no_eligible_profiles_result_sha256: str | None = None
     unresolved_count: int | None = None
     evaluated_survivor_ids: tuple[str, ...] = ()
     selected_profile_id: str | None = None
@@ -176,6 +182,10 @@ _CAMPAIGN_TRANSITIONS = {
         # ребра такая кампания уходила бы в `campaign_complete` и записывала проваленный
         # профиль в `selected_profile_id`; решение В-2 плана рекалибровки от 2026-09-12.
         CampaignState.BUDGET_EXHAUSTED,
+        # Дефект Д-3: кампания 2026-09-07 не оставила ни одного выжившего, законного ребра для
+        # этого исхода не было, и кампания осталась в `preregistered`, закрытая отчётом, а не
+        # автоматом. Бюджет партий здесь нетронут — отсюда отдельный терминал.
+        CampaignState.NO_ELIGIBLE_PROFILES,
     },
     CampaignState.SELECTION_REQUIRED: {
         CampaignState.CAMPAIGN_COMPLETE,
@@ -239,8 +249,15 @@ _BATCH_TRANSITIONS = {
 
 
 def _validate_survivors(values: Sequence[str]) -> tuple[str, ...]:
+    """Проверить идентификаторы выживших, допуская пустой список.
+
+    Пустой список — законный результат оценивания, а не ошибка вызывающего: именно его
+    записывает `profiles_evaluated` перед переходом в `no_eligible_profiles` (дефект Д-3).
+    Требования к длине живут на конкретных рёбрах: `selection_required` требует двух и
+    более выживших, `campaign_complete` из `profiles_evaluated` — ровно одного.
+    """
     survivors = tuple(values)
-    if not survivors or any(not value.strip() for value in survivors):
+    if any(not value.strip() for value in survivors):
         raise CalibrationStateError("survivor IDs должны быть непустыми")
     if len(set(survivors)) != len(survivors):
         raise CalibrationStateError("survivor IDs не должны повторяться")
@@ -277,6 +294,7 @@ def transition_campaign(
     profile_evaluation_result_sha256: str | None = None,
     selection_result_sha256: str | None = None,
     budget_result_sha256: str | None = None,
+    no_eligible_profiles_result_sha256: str | None = None,
     unresolved_count: int | None = None,
     evaluated_survivor_ids: Sequence[str] | None = None,
     selected_profile_id: str | None = None,
@@ -318,10 +336,14 @@ def transition_campaign(
             ),
         )
     if target is CampaignState.PROFILES_EVALUATED:
+        # Пустой список выживших законен, поэтому забытый аргумент больше нельзя сводить к `()`:
+        # это молча записало бы предусловие отрицательного терминала `no_eligible_profiles`.
+        if evaluated_survivor_ids is None:
+            raise CalibrationStateError("profiles_evaluated требует явный evaluated_survivor_ids")
         return replace(
             record,
             state=target,
-            evaluated_survivor_ids=_validate_survivors(evaluated_survivor_ids or ()),
+            evaluated_survivor_ids=_validate_survivors(evaluated_survivor_ids),
             profile_evaluation_result_sha256=_require_sha256(
                 "profile_evaluation_result_sha256", profile_evaluation_result_sha256
             ),
@@ -361,6 +383,22 @@ def transition_campaign(
             record,
             state=target,
             budget_result_sha256=_require_sha256("budget_result_sha256", budget_result_sha256),
+        )
+    if target is CampaignState.NO_ELIGIBLE_PROFILES:
+        # Партии здесь не спрашиваются: бюджет нетронут по самому смыслу исхода, и требование
+        # их истории смешало бы этот терминал с `budget_exhausted`.
+        survivors = record.evaluated_survivor_ids
+        if evaluated_survivor_ids is not None:
+            survivors = _validate_survivors(evaluated_survivor_ids)
+        if survivors:
+            raise CalibrationStateError("no_eligible_profiles требует пустой список survivors")
+        return replace(
+            record,
+            state=target,
+            evaluated_survivor_ids=survivors,
+            no_eligible_profiles_result_sha256=_require_sha256(
+                "no_eligible_profiles_result_sha256", no_eligible_profiles_result_sha256
+            ),
         )
     return replace(record, state=target)
 
