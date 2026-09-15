@@ -12,6 +12,7 @@ from pipeline.redaction_calibration.geometry import (
 )
 from pipeline.redaction_calibration.measure import (
     black_fraction,
+    canonical_coverage,
     confidence_breakpoints,
     confidence_margin,
     dominates,
@@ -29,6 +30,7 @@ from pipeline.redaction_calibration.model import (
     ConfidenceMargin,
     FrameProfileResult,
     GeometryGateVerdict,
+    PlateCoverage,
     ProfileGateReport,
     ProfileMetrics,
     ProfileScore,
@@ -162,11 +164,13 @@ def _score(
     ssd: tuple[float, float] = (0.10, 0.20),
     yolo: tuple[float, float] = (0.15, 0.25),
     costs: tuple[float, float, int, int, int] = (0.10, 0.20, 2, 1, 5),
+    covered: int = 0,
 ) -> ProfileScore:
     return ProfileScore(
         profile_id=profile_id,
         ssd_margin=ConfidenceMargin(*ssd),
         yolo_margin=ConfidenceMargin(*yolo),
+        covered_plates=covered,
         median_delta=costs[0],
         p95_delta=costs[1],
         above_quarter=costs[2],
@@ -227,6 +231,34 @@ def test_pareto_сохраняет_раздельные_margin_и_равные_�
     assert not dominates(a, c)
     assert not dominates(a, equal)
     assert [row.profile_id for row in pareto_frontier([equal, c, b, a])] == ["a", "c", "z"]
+
+
+def test_ось_приватности_доминирует_при_равных_издержках() -> None:
+    more_covered = _score("more-covered", covered=5)
+    less_covered = _score("less-covered", covered=2)
+
+    assert dominates(more_covered, less_covered)
+    assert not dominates(less_covered, more_covered)
+    assert [row.profile_id for row in pareto_frontier([less_covered, more_covered])] == [
+        "more-covered"
+    ]
+
+
+def test_ось_приватности_не_доминирует_при_подорожавших_издержках() -> None:
+    """Больше накрытий, но дороже: оси отсева в `ProfileScore` нет (R-1).
+
+    Spec §12: больше заливок повышает `delta_black` и риск новых `over_redacted`, поэтому
+    подорожание выражено осями `new_over_redacted` и `changed_crops`.
+    """
+    private_but_costly = _score("private-costly", covered=5, costs=(0.10, 0.20, 2, 3, 9))
+    cheap_but_blind = _score("cheap-blind", covered=2)
+
+    assert not dominates(private_but_costly, cheap_but_blind)
+    assert not dominates(cheap_but_blind, private_but_costly)
+    assert [row.profile_id for row in pareto_frontier([cheap_but_blind, private_but_costly])] == [
+        "cheap-blind",
+        "private-costly",
+    ]
 
 
 def test_hard_gates_идут_в_заданном_порядке_до_pareto() -> None:
@@ -475,3 +507,67 @@ def test_geometry_preflight_принимает_объект_redaction_profile() 
     assert verdict.subtile_passed is True
     assert verdict.oversized_count == 0
     assert bool(verdict) is True
+
+
+def test_canonical_coverage_разделяет_три_исхода() -> None:
+    covered = _make_plate("covered", "a" * 64, (100, 100, 200, 150))
+    uncovered = _make_plate("uncovered", "b" * 64, (100, 100, 200, 150))
+    rejected = _make_plate("rejected", "c" * 64, (100, 100, 200, 150))
+
+    coverage = canonical_coverage(
+        [covered, uncovered, rejected],
+        {"a" * 64: [(0, 0, 300, 300)], "c" * 64: [(0, 0, 300, 300)]},
+        rejected_sha256={"c" * 64},
+    )
+
+    # Кадр отсеян, хотя заливки накрывают номер полностью: это третий исход, не накрытие
+    assert coverage == PlateCoverage(covered=1, uncovered=1, rejected=1)
+    assert coverage.covered + coverage.uncovered + coverage.rejected == 3
+
+
+def test_canonical_coverage_складывает_объединение_заливок_и_видит_дыру() -> None:
+    plate = _make_plate("union", "a" * 64, (100, 100, 900, 300))
+    union_fills = {"a" * 64: [(50, 50, 600, 350), (550, 50, 950, 350)]}
+    holed_fills = {"a" * 64: [(50, 50, 500, 350)]}
+
+    union = canonical_coverage([plate], union_fills, rejected_sha256=set())
+    holed = canonical_coverage([plate], holed_fills, rejected_sha256=set())
+
+    assert union == PlateCoverage(covered=1, uncovered=0, rejected=0)
+    assert holed == PlateCoverage(covered=0, uncovered=1, rejected=0)
+
+
+def test_canonical_coverage_без_заливок_кадра_считает_номер_непокрытым() -> None:
+    plate = _make_plate("missing", "d" * 64, (100, 100, 200, 150))
+
+    coverage = canonical_coverage([plate], {}, rejected_sha256=set())
+
+    assert coverage == PlateCoverage(covered=0, uncovered=1, rejected=0)
+
+
+def test_canonical_coverage_не_считает_ложные_и_спорные_номера() -> None:
+    true_covered = _make_plate("true-covered", "a" * 64, (100, 100, 200, 150))
+    true_rejected = _make_plate("true-rejected", "b" * 64, (100, 100, 200, 150))
+    false_plate = _make_plate("false", "a" * 64, (100, 100, 200, 150), verdict="false_plate")
+    ambiguous = _make_plate("ambiguous", "a" * 64, (100, 100, 200, 150), verdict="ambiguous")
+
+    coverage = canonical_coverage(
+        [true_covered, true_rejected, false_plate, ambiguous],
+        {"a" * 64: [(0, 0, 300, 300)]},
+        rejected_sha256={"b" * 64},
+    )
+
+    # Ложный и спорный номера не могут утечь, поэтому не меняют ни один счётчик
+    assert coverage == PlateCoverage(covered=1, uncovered=0, rejected=1)
+    true_plates = [true_covered, true_rejected]
+    assert coverage.covered + coverage.uncovered + coverage.rejected == len(true_plates)
+
+
+def test_canonical_coverage_отвергает_набор_без_истинных_номеров() -> None:
+    false_plate = _make_plate("false", "a" * 64, (100, 100, 200, 150), verdict="false_plate")
+    ambiguous = _make_plate("ambiguous", "b" * 64, (100, 100, 200, 150), verdict="ambiguous")
+
+    with pytest.raises(ValueError, match="истинных номеров"):
+        canonical_coverage([], {}, rejected_sha256=set())
+    with pytest.raises(ValueError, match="истинных номеров"):
+        canonical_coverage([false_plate, ambiguous], {}, rejected_sha256=set())

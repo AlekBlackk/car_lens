@@ -54,12 +54,37 @@ class ConfidenceMargin:
 
 
 @dataclass(frozen=True, slots=True)
+class PlateCoverage:
+    """Три исхода измерения приватности по каноническим номерам.
+
+    `covered` — номер накрыт объединением заливок своего кадра; `uncovered` — кадр не
+    отсеян, но номер не накрыт; `rejected` — кадр отсеян, поэтому номер не относится ни к
+    накрытым, ни к непокрытым. Инвариант: `covered + uncovered + rejected` равно числу
+    канонических номеров с `verdict == "true_plate"`.
+    """
+
+    covered: int
+    uncovered: int
+    rejected: int
+
+
+@dataclass(frozen=True, slots=True)
 class ProfileScore:
-    """Раздельные Pareto-оси профиля без скалярной свёртки."""
+    """Раздельные Pareto-оси профиля: запасы, приватность и издержки, без скалярной свёртки.
+
+    Ось `covered_plates` считает накрытие истинных канонических номеров заливками профиля
+    и сама по себе не доказывает отсутствие строгих утечек: за это отвечает отдельный гейт.
+
+    Пока `rank_profiles` пускает в Pareto только профили без проваленных гейтов, гейт
+    `full_canonical_coverage` требует ровно того покрытия, которое считает ось, поэтому
+    среди выживших она постоянна и на фронт влиять не может. Различать фронт ось начнёт
+    лишь после разделения гейтов на блокирующие и допускающие (§7.3).
+    """
 
     profile_id: str
     ssd_margin: ConfidenceMargin
     yolo_margin: ConfidenceMargin
+    covered_plates: int
     median_delta: float
     p95_delta: float
     above_quarter: int

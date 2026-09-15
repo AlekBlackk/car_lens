@@ -6,6 +6,7 @@ import csv
 import math
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import asdict, fields
 from pathlib import Path
 from typing import cast
@@ -31,6 +32,7 @@ from pipeline.redaction_calibration.model import (
     FrameProfileResult,
     GeometryGateVerdict,
     HardGate,
+    PlateCoverage,
     ProfileGateReport,
     ProfileMetrics,
     ProfileScore,
@@ -318,39 +320,76 @@ def geometry_preflight(
     )
 
 
+def canonical_coverage(
+    canonical: Sequence[CanonicalPlate],
+    fills: Mapping[str, Sequence[Box]],
+    *,
+    rejected_sha256: AbstractSet[str],
+) -> PlateCoverage:
+    """Счесть накрытые, непокрытые и отсеянные истинные канонические номера.
+
+    Заливки заданы по `sha256` кадра, как в `geometry_preflight`; отсутствие ключа значит
+    «у кадра нет заливок», то есть номер не накрыт, но не отсеян. Отсев приходит отдельным
+    обязательным множеством `rejected_sha256` и не смешивается с непокрытием: у номера
+    ровно один из трёх исходов. Накрытие считает `fills_cover` по объединению заливок
+    кадра. Набор без единого истинного номера отвергается: ось приватности там не
+    определена.
+    """
+    true_plates = [plate for plate in canonical if plate.verdict == "true_plate"]
+    if not true_plates:
+        raise ValueError("канонический набор не содержит истинных номеров")
+    covered = 0
+    uncovered = 0
+    rejected = 0
+    for plate in true_plates:
+        if plate.sha256 in rejected_sha256:
+            rejected += 1
+        elif fills_cover(fills.get(plate.sha256, ()), plate):
+            covered += 1
+        else:
+            uncovered += 1
+    return PlateCoverage(covered=covered, uncovered=uncovered, rejected=rejected)
+
+
 def dominates(left: ProfileScore, right: ProfileScore) -> bool:
-    """Проверить строгое Pareto-доминирование по отдельным margin и cost осям."""
-    left_margins = (
+    """Проверить строгое Pareto-доминирование по осям запаса, приватности и издержек.
+
+    Правило буквальное: не хуже по всем осям и строго лучше хотя бы по одной. Взвешенного
+    score, скрытых весов и автоматического tie-break нет.
+    """
+    left_higher = (
         left.ssd_margin.to_next_lower,
         left.ssd_margin.to_min_true,
         left.yolo_margin.to_next_lower,
         left.yolo_margin.to_min_true,
+        left.covered_plates,
     )
-    right_margins = (
+    right_higher = (
         right.ssd_margin.to_next_lower,
         right.ssd_margin.to_min_true,
         right.yolo_margin.to_next_lower,
         right.yolo_margin.to_min_true,
+        right.covered_plates,
     )
-    left_costs = (
+    left_lower = (
         left.median_delta,
         left.p95_delta,
         left.above_quarter,
         left.new_over_redacted,
         left.changed_crops,
     )
-    right_costs = (
+    right_lower = (
         right.median_delta,
         right.p95_delta,
         right.above_quarter,
         right.new_over_redacted,
         right.changed_crops,
     )
-    no_worse = all(a >= b for a, b in zip(left_margins, right_margins, strict=True)) and all(
-        a <= b for a, b in zip(left_costs, right_costs, strict=True)
+    no_worse = all(a >= b for a, b in zip(left_higher, right_higher, strict=True)) and all(
+        a <= b for a, b in zip(left_lower, right_lower, strict=True)
     )
-    strictly_better = any(a > b for a, b in zip(left_margins, right_margins, strict=True)) or any(
-        a < b for a, b in zip(left_costs, right_costs, strict=True)
+    strictly_better = any(a > b for a, b in zip(left_higher, right_higher, strict=True)) or any(
+        a < b for a, b in zip(left_lower, right_lower, strict=True)
     )
     return no_worse and strictly_better
 

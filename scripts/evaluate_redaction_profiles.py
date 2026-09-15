@@ -200,6 +200,7 @@ def _score(document: Mapping[str, Any]) -> ProfileScore:
         profile_id=str(document["profile_id"]),
         ssd_margin=ConfidenceMargin(**document["ssd_margin"]),
         yolo_margin=ConfidenceMargin(**document["yolo_margin"]),
+        covered_plates=int(document["covered_plates"]),
         median_delta=float(document["median_delta"]),
         p95_delta=float(document["p95_delta"]),
         above_quarter=int(document["above_quarter"]),

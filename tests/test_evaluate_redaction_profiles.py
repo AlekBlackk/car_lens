@@ -29,11 +29,12 @@ from scripts.evaluate_redaction_profiles import (
 )
 
 
-def _score(profile_id: str, *, changed: int = 1) -> ProfileScore:
+def _score(profile_id: str, *, changed: int = 1, covered: int = 3) -> ProfileScore:
     return ProfileScore(
         profile_id=profile_id,
         ssd_margin=ConfidenceMargin(0.10, 0.20),
         yolo_margin=ConfidenceMargin(0.15, 0.25),
+        covered_plates=covered,
         median_delta=0.01,
         p95_delta=0.05,
         above_quarter=0,
