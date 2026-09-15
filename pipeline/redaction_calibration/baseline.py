@@ -17,6 +17,7 @@ from typing import Any, Literal, TypeAlias, cast
 
 import pandas as pd
 
+from pipeline.harvest.redaction_profile import DetectorEntry, DetectorProfile, RedactionProfile
 from pipeline.redaction_calibration.state import BatchRecord, BatchState, CampaignBudgetState
 from pipeline.redaction_calibration.state import (
     campaign_budget_state as state_campaign_budget_state,
@@ -220,6 +221,78 @@ def _validate_hashes(label: str, values: Mapping[str, str]) -> None:
         raise ValueError(f"{label}: SHA256 должен быть полным шестнадцатеричным: {invalid}")
 
 
+def canonical_profile_document(profile: object) -> dict[str, Any]:
+    """Канонизировать профиль редакции в форму паспорта, отказав прежней паре.
+
+    Схема паспорта хранит профиль как `asdict`, поэтому форма документа следует за типом
+    профиля: теперь это `{"detectors": [...]}`, а не пара `plate`/`plate_hires`. Прежняя
+    пара отвергается, а не переписывается молча, потому что она принадлежит прогону с
+    другим `detector_stage_sha256` (§4 дизайна: `redaction_profile.py` входит пятым
+    элементом в `DETECTOR_STAGE_SOURCES`, и правка типа профиля сменила хеш стадии).
+    Принятая как своя, она выдала бы чужой контур за контур этой кампании.
+
+    Правила самих записей проверяют `DetectorProfile`, `DetectorEntry` и `RedactionProfile`
+    — второй копии их правил здесь нет, а отказ пересказывается с именем виновной записи.
+    Возвращается канонический документ: записи отсортированы по `instance`, и в `params`
+    присутствуют все четыре поля `DetectorProfile`, включая эффективный `iou_merge`.
+    """
+    if not isinstance(profile, Mapping):
+        raise TypeError(
+            f"профиль должен быть отображением с ключом 'detectors', "
+            f"получено {type(profile).__name__}"
+        )
+    legacy = sorted({"plate", "plate_hires"} & set(profile))
+    if legacy:
+        raise ValueError(
+            f"профиль в прежней форме {legacy} не может быть профилем этой кампании: "
+            f"ожидается форма 'detectors' со списком записей. Прежняя пара принадлежит "
+            f"прогону, чей detector_stage_sha256 уже недействителен"
+        )
+    if set(profile) != {"detectors"}:
+        # `key=str` — не украшение: на враждебном наборе ключей (`{1: ..., "detectors": ...}`)
+        # обычный `sorted` падает `TypeError` на сравнении `int` со `str` и подменяет
+        # задокументированный `ValueError`, который обязан назвать полученные ключи.
+        raise ValueError(
+            f"ключи профиля должны быть ровно 'detectors', получено {sorted(profile, key=str)}"
+        )
+    detectors = profile["detectors"]
+    # `asdict(RedactionProfile)` отдаёт кортеж, поэтому принимается любая непустая
+    # последовательность записей: строки и байты ею не являются.
+    if not isinstance(detectors, Sequence) or isinstance(detectors, str | bytes) or not detectors:
+        raise ValueError(
+            f"'detectors' должен быть непустой последовательностью записей, получено {detectors!r}"
+        )
+
+    entries: list[DetectorEntry] = []
+    for index, entry in enumerate(detectors):
+        if not isinstance(entry, Mapping):
+            raise ValueError(
+                f"запись #{index} профиля должна быть отображением, получено {type(entry).__name__}"
+            )
+        instance = entry.get("instance")
+        label = (
+            f"запись #{index} ({instance!r})" if isinstance(instance, str) else f"запись #{index}"
+        )
+        if set(entry) != {"instance", "weights", "params"}:
+            raise ValueError(
+                f"{label}: ключи записи должны быть ровно 'instance', 'weights', 'params', "
+                f"получено {sorted(entry, key=str)}"
+            )
+        try:
+            params = DetectorProfile(**entry["params"])
+            entries.append(
+                DetectorEntry(instance=entry["instance"], weights=entry["weights"], params=params)
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{label}: {error}") from error
+
+    try:
+        reconstructed = RedactionProfile(tuple(entries))
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"профиль недопустим: {error}") from error
+    return asdict(reconstructed)
+
+
 def create_baseline_passport(
     *,
     manifest_path: Path,
@@ -279,7 +352,7 @@ def create_baseline_passport(
         pool_frames=len(pool),
         holdout_frames=len(holdout),
         calibration_frames=len(calibration),
-        profile=dict(profile),
+        profile=canonical_profile_document(profile),
         git={"sha": git_sha, "clean": git_clean},
         detector_stage_sha256=detector_stage_sha256,
         code_sha256=dict(sorted(code_sha256.items())),
@@ -407,28 +480,45 @@ def _render_campaign_artifacts(
 
 
 def _publish_checkpoint(campaign_root: Path, staging_root: Path, files: Sequence[Path]) -> None:
-    if campaign_root.exists():
-        existing = tuple(
-            sorted(
-                path.relative_to(campaign_root)
-                for path in campaign_root.rglob("*")
-                if path.is_file()
-            )
-        )
-        if existing != tuple(files) or any(
-            (campaign_root / relative).read_bytes() != (staging_root / relative).read_bytes()
+    """Опубликовать checkpoint, не трогая постороннее содержимое каталога кампании.
+
+    Каталог кампании не обязан быть пустым: под `multiscale/` лежит ещё workspace зонда
+    задачи 3, и его 1739 файлов не принадлежат этому checkpoint. Поэтому неизменяемость
+    судится по собственным путям checkpoint, а не по всему, что попало под их верхние
+    имена: посторонний `baseline/notes.md` не делает checkpoint другим и не блокирует
+    публикацию. Свой путь обязан либо отсутствовать, либо быть побайтово равным
+    регулярным файлом — иначе это чужой checkpoint, и он называется по имени. Уборка
+    после сбоя ограничена теми же путями и не может ни упасть, ни подменить исходную
+    ошибку: `rmtree` по каталогу кампании снёс бы чужой workspace.
+    """
+    if any((campaign_root / relative).exists() for relative in files):
+        conflicting = sorted(
+            relative.as_posix()
             for relative in files
-        ):
-            raise ValueError("неизменяемый checkpoint уже существует и отличается")
+            if not (campaign_root / relative).is_file()
+            or (campaign_root / relative).read_bytes() != (staging_root / relative).read_bytes()
+        )
+        if conflicting:
+            raise ValueError(
+                "неизменяемый checkpoint уже существует и отличается: " + ", ".join(conflicting)
+            )
         return
-    campaign_root.mkdir(parents=True)
+    created_root = not campaign_root.exists()
+    campaign_root.mkdir(parents=True, exist_ok=True)
     try:
         for relative in files:
             target = campaign_root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             (staging_root / relative).replace(target)
     except OSError:
-        shutil.rmtree(campaign_root, ignore_errors=True)
+        if created_root:
+            shutil.rmtree(campaign_root, ignore_errors=True)
+        else:
+            for relative in files:
+                try:
+                    (campaign_root / relative).unlink(missing_ok=True)
+                except OSError:
+                    continue
         raise
 
 

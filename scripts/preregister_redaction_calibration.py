@@ -9,7 +9,7 @@ import importlib.metadata
 import platform
 import subprocess
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +29,21 @@ from pipeline.redaction_calibration.baseline import (
     create_baseline_passport,
     write_campaign_artifacts,
 )
+from pipeline.redaction_calibration.model import (
+    BLOCKING_GATES,
+    HARD_GATES,
+    PERMITTING_GATES,
+    ProfileScore,
+)
+from pipeline.redaction_calibration.state import CampaignState
 from pipeline.schema import read_split
 
-DEFAULT_CAMPAIGN_ROOT = data_root() / "redaction-calibration"
+DEFAULT_CAMPAIGN_ROOT = data_root() / "multiscale"
 DEFAULT_CALIBRATION = Path("bench") / "plate-leak-sample.csv"
-DEFAULT_PREDICTIONS = DEFAULT_CAMPAIGN_ROOT / "baseline-predictions.csv"
+# Линейка общая с кампанией 2026-09-07: это замороженный few-shot экспорт 1523 кадров. Он не
+# зависит от профиля редакции, а его перегенерация сменила бы свидетеля, против которого
+# измеряется `quality_guardrail`.
+DEFAULT_PREDICTIONS = data_root() / "redaction-calibration" / "baseline-predictions.csv"
 DEFAULT_CREATED_AT = None
 
 
@@ -112,25 +122,60 @@ def preregistration_document(created_at: str) -> dict[str, Any]:
         "candidate_results_present": False,
         "profile_space": {
             "geometry": {
-                "ssd_tiles": [1280, 600, 300],
-                "yolo_tiles": [1280, 640],
+                "ssd_scales": [1280],
+                "yolo_scales": [1280, 640, 320],
+                "scale_sets": {
+                    "ssd": [[1280]],
+                    "yolo": [[1280], [1280, 640], [1280, 640, 320]],
+                },
                 "overlap": 0.25,
+                "overlap_verified": False,
                 "derivation": "real tile_origins plus observed canonical W_max/H_max",
             },
             "confidence": "observed canonical-plate confidence breakpoints",
             "independent_batches_may_expand_space": False,
         },
-        "pareto_axes": [
-            "ssd_confidence_margin",
-            "yolo_confidence_margin",
-            "median_positive_delta_black",
-            "p95_positive_delta_black",
-            "delta_black_above_0_25",
-            "new_over_redacted",
-            "rejects_by_reason",
-            "changed_crops_for_h3",
-        ],
+        "containment_gate": {
+            "subtile": "box_fits_actual_tile on any scale of the profile's scale set",
+            "overtile": "fills_cover over the run's own fills",
+            "overtile_counter": "oversized_blind_zone_count",
+            "note": (
+                "the blind zone has no structural guarantee; overtile numbers rest on the "
+                "observed coverage of one run"
+            ),
+        },
+        # Оси берутся из объявления `ProfileScore`, а не переписываются руками: вторая копия
+        # молча расходилась бы с моделью при правке осей.
+        "pareto_axes": [field.name for field in fields(ProfileScore) if field.name != "profile_id"],
         "pareto_rule": "not worse on every axis and strictly better on at least one",
+        # Разделение гейтов выводится из `model`, а не переписывается: предрегистрация не
+        # должна быть второй, молча расходящейся копией правила.
+        "gate_split": {
+            "order": list(HARD_GATES),
+            "blocking": list(BLOCKING_GATES),
+            "permitting": list(PERMITTING_GATES),
+            "permitting_failure_effect": (
+                "measured and on the frontier, marked non-promotable; promotion stays forbidden"
+            ),
+        },
+        "reject_budget": {
+            "ruler_frames": 1523,
+            "binding_metric": "top3",
+            "lower_bound": 0.6042,
+            "worst_case_frames": 37,
+            "worst_case_fraction": 0.024,
+            "random_loss_frames": 58,
+            "random_loss_fraction": 0.038,
+            "checked": "first, from manifest.csv, before building the index",
+            "exceeded_means": "candidate failure, not a reason to loosen the budget",
+        },
+        "terminal_states": {
+            "no_eligible_profiles": CampaignState.NO_ELIGIBLE_PROFILES.value,
+            "rule": (
+                "reachable only from profiles_evaluated with an empty survivor list; "
+                "deliberately distinct from budget_exhausted, whose eight-batch budget is spent"
+            ),
+        },
         "visual_veto_fields": [
             "profile_id",
             "sha256_or_plate_id",

@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pytest
 
+from pipeline.harvest.redaction_profile import CURRENT_REDACTION_PROFILE
 from pipeline.redaction_calibration.baseline import (
     IndependentBatch,
     Prediction,
     campaign_budget_state,
+    canonical_profile_document,
     create_baseline_passport,
     exact_prediction_counts,
     freeze_units,
@@ -27,6 +29,24 @@ PREREGISTRATION_MARKDOWN = (
     / "bench"
     / "plate-redaction-recalibration-preregistration.md"
 )
+
+
+def _detectors_profile() -> dict[str, Any]:
+    """Новая форма профиля: набор записей вместо прежней пары `plate`/`plate_hires`."""
+    return {
+        "detectors": [
+            {
+                "instance": "plate",
+                "weights": "plate",
+                "params": {
+                    "confidence": 0.5,
+                    "tile": 1280,
+                    "overlap": 0.25,
+                    "iou_merge": 0.45,
+                },
+            }
+        ]
+    }
 
 
 def _frame(rows: list[tuple[str, str]]) -> pd.DataFrame:
@@ -57,10 +77,7 @@ def _passport_fixture(
         "holdout": holdout,
         "calibration_ids": ("pool-a",),
         "predictions": predictions,
-        "profile": {
-            "plate": {"confidence": 0.5},
-            "plate_hires": {"confidence": 0.25},
-        },
+        "profile": _detectors_profile(),
         "git_sha": "a" * 40,
         "git_clean": True,
         "detector_stage_sha256": "b" * 64,
@@ -196,6 +213,141 @@ def test_passport_contains_full_frozen_provenance_and_exact_counts(tmp_path: Pat
     assert passport.created_at == "2026-09-07T12:00:00Z"
 
 
+def test_canonical_profile_document_rejects_legacy_pair_form() -> None:
+    legacy = {
+        "plate": {"confidence": 0.5, "tile": 1280, "overlap": 0.25},
+        "plate_hires": {"confidence": 0.25, "tile": 1280, "overlap": 0.25},
+    }
+
+    with pytest.raises(ValueError) as raised:
+        canonical_profile_document(legacy)
+
+    # Признак именно отказа от прежней формы, а не подстрока общей ошибки о ключах:
+    # сообщение «ключи профиля должны быть ровно 'detectors', получено ['plate',
+    # 'plate_hires']» тоже содержит `detectors`, `plate` и `plate_hires`, поэтому
+    # проверка по ним проходила бы и с удалённой ветвью прежней формы.
+    message = str(raised.value)
+    assert "прежней форме" in message
+    assert "detector_stage_sha256" in message
+
+
+def test_canonical_profile_document_rejects_non_mapping() -> None:
+    with pytest.raises(TypeError, match=r"list"):
+        canonical_profile_document(["plate"])
+
+
+def test_canonical_profile_document_sorts_entries_and_completes_params() -> None:
+    document = canonical_profile_document(
+        {
+            "detectors": [
+                {
+                    "instance": "plate_hires",
+                    "weights": "plate_hires",
+                    "params": {"confidence": 0.25, "tile": 1280, "overlap": 0.25},
+                },
+                {
+                    "instance": "plate",
+                    "weights": "plate",
+                    "params": {"confidence": 0.5, "tile": 1280, "overlap": 0.25},
+                },
+            ]
+        }
+    )
+
+    assert [entry["instance"] for entry in document["detectors"]] == ["plate", "plate_hires"]
+    assert all(
+        set(entry["params"]) == {"confidence", "tile", "overlap", "iou_merge"}
+        for entry in document["detectors"]
+    )
+
+
+def test_canonical_profile_document_accepts_asdict_tuple_of_entries() -> None:
+    document = canonical_profile_document(asdict(CURRENT_REDACTION_PROFILE))
+
+    assert [entry["instance"] for entry in document["detectors"]] == ["plate", "plate_hires"]
+
+
+def test_canonical_profile_document_records_effective_iou_merge_default() -> None:
+    document = canonical_profile_document(
+        {
+            "detectors": [
+                {
+                    "instance": "plate",
+                    "weights": "plate",
+                    "params": {"confidence": 0.5, "tile": 1280, "overlap": 0.25},
+                }
+            ]
+        }
+    )
+
+    assert document["detectors"][0]["params"]["iou_merge"] == 0.45
+
+
+def test_canonical_profile_document_rejects_empty_duplicate_and_unknown_params() -> None:
+    entry: dict[str, Any] = {
+        "instance": "plate",
+        "weights": "plate",
+        "params": {"confidence": 0.5, "tile": 1280, "overlap": 0.25},
+    }
+    unknown_params: dict[str, Any] = {
+        "confidence": 0.5,
+        "tile": 1280,
+        "overlap": 0.25,
+        "sharpness": 1,
+    }
+
+    with pytest.raises(ValueError, match=r"detectors"):
+        canonical_profile_document({"detectors": []})
+    with pytest.raises(ValueError, match=r"повторяющиеся имена"):
+        canonical_profile_document({"detectors": [entry, dict(entry)]})
+    with pytest.raises(ValueError, match=r"запись #0"):
+        canonical_profile_document({"detectors": [dict(entry, params=unknown_params)]})
+
+
+def test_canonical_profile_document_reports_hostile_key_sets() -> None:
+    """Смешанные типы ключей не подменяют задокументированный отказ на `TypeError`."""
+    entry: dict[Any, Any] = {
+        1: "x",
+        "instance": "plate",
+        "weights": "plate",
+        "params": {"confidence": 0.5, "tile": 1280, "overlap": 0.25},
+    }
+
+    with pytest.raises(ValueError, match=r"ключи профиля"):
+        canonical_profile_document({1: "x", "detectors": []})
+    with pytest.raises(ValueError, match=r"запись #0"):
+        canonical_profile_document({"detectors": [entry]})
+
+
+def test_passport_stores_canonical_profile_and_rejects_legacy_form(tmp_path: Path) -> None:
+    passport, _, arguments = _passport_fixture(tmp_path)
+
+    # `asdict` сохраняет кортеж `RedactionProfile.detectors`; в JSON паспорта он
+    # разворачивается в массив тем же `_json_document`, что и раньше.
+    assert passport.profile == {
+        "detectors": (
+            {
+                "instance": "plate",
+                "weights": "plate",
+                "params": {
+                    "confidence": 0.5,
+                    "tile": 1280,
+                    "overlap": 0.25,
+                    "iou_merge": 0.45,
+                },
+            },
+        )
+    }
+
+    legacy = dict(arguments)
+    legacy["profile"] = {"plate": {"confidence": 0.5, "tile": 1280, "overlap": 0.25}}
+    with pytest.raises(ValueError) as raised:
+        create_baseline_passport(**legacy)
+
+    assert "прежней форме" in str(raised.value)
+    assert "detector_stage_sha256" in str(raised.value)
+
+
 def test_passport_rejects_dirty_or_short_git_identity(tmp_path: Path) -> None:
     _, _, arguments = _passport_fixture(tmp_path)
     arguments = dict(arguments)
@@ -273,10 +425,16 @@ def test_preregistration_freezes_every_step_five_decision_without_candidate_resu
     document = preregistration_document("2026-09-07T12:00:00Z")
 
     assert document["candidate_results_present"] is False
-    assert document["pareto_axes"][-3:] == [
+    assert document["pareto_axes"] == [
+        "ssd_margin",
+        "yolo_margin",
+        "covered_plates",
+        "median_delta",
+        "p95_delta",
+        "above_quarter",
         "new_over_redacted",
-        "rejects_by_reason",
-        "changed_crops_for_h3",
+        "changed_crops",
+        "rejected_frames",
     ]
     assert document["independent_taxonomy"]["fields"] == [
         "pipeline_outcome",
@@ -296,9 +454,37 @@ def test_preregistration_freezes_every_step_five_decision_without_candidate_resu
         "upper_bound_reporting",
         "party_budget",
         "technical_states_do_not_authorize_training",
+        "containment_gate",
+        "gate_split",
+        "reject_budget",
+        "terminal_states",
     }
     assert document["training_authorized"] is False
     assert document["training_authorization_state"] == "full_pool_audited"
+
+
+def test_preregistration_gate_split_is_pairwise_consistent_and_pinned() -> None:
+    split = preregistration_document("2026-09-07T12:00:00Z")["gate_split"]
+
+    assert split["order"] == [
+        "provenance_workspace_freshness",
+        "unresolved_empty",
+        "current_geometry_witness",
+        "structural_actual_tile_preflight",
+        "full_canonical_coverage",
+        "strict_calibration_review",
+        "report_arithmetic",
+    ]
+    assert split["blocking"] == [
+        "provenance_workspace_freshness",
+        "unresolved_empty",
+        "current_geometry_witness",
+        "structural_actual_tile_preflight",
+        "report_arithmetic",
+    ]
+    assert split["permitting"] == ["full_canonical_coverage", "strict_calibration_review"]
+    assert set(split["blocking"]) | set(split["permitting"]) == set(split["order"])
+    assert not set(split["blocking"]) & set(split["permitting"])
 
 
 def test_fixture_dry_runs_are_byte_identical_and_keep_layout(tmp_path: Path) -> None:
@@ -392,6 +578,77 @@ def test_writer_allows_identical_noop_and_rejects_checkpoint_changes(tmp_path: P
     }
     assert after == before
     assert not list(campaign_root.parent.glob(f".{campaign_root.name}.staging-*"))
+
+
+def test_writer_publishes_beside_foreign_workspace_and_keeps_it(tmp_path: Path) -> None:
+    """Чужой workspace в каталоге кампании не блокирует checkpoint и остаётся цел."""
+    passport, predictions, _ = _passport_fixture(tmp_path / "inputs")
+    campaign_root = tmp_path / "campaign"
+    foreign = campaign_root / "probe" / "sample_manifest.csv"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("sha256\nprobe-a\n", encoding="utf-8")
+
+    write_campaign_artifacts(
+        campaign_root, passport, predictions, {"created_at": passport.created_at}
+    )
+
+    assert foreign.read_text(encoding="utf-8") == "sha256\nprobe-a\n"
+    assert (campaign_root / "baseline" / "passport.json").is_file()
+
+
+def test_writer_publishes_beside_foreign_file_in_owned_directory(tmp_path: Path) -> None:
+    """Посторонний файл под принадлежащим checkpoint именем не блокирует публикацию."""
+    passport, predictions, _ = _passport_fixture(tmp_path / "inputs")
+    campaign_root = tmp_path / "campaign"
+    foreign = campaign_root / "baseline" / "notes.md"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("заметки\n", encoding="utf-8")
+
+    write_campaign_artifacts(
+        campaign_root, passport, predictions, {"created_at": passport.created_at}
+    )
+
+    assert foreign.read_text(encoding="utf-8") == "заметки\n"
+    assert (campaign_root / "baseline" / "passport.json").is_file()
+
+
+def test_writer_publish_cleanup_survives_a_failing_unlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Уборка после сбоя не падает сама и не подменяет исходную ошибку публикации."""
+    passport, predictions, _ = _passport_fixture(tmp_path / "inputs")
+    campaign_root = tmp_path / "campaign"
+    # Каталог кампании существует заранее — иначе сбой снёс бы его целиком через
+    # `rmtree`, и уборка по собственным путям checkpoint не выполнялась бы вовсе.
+    foreign = campaign_root / "probe" / "keep.txt"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("зонд\n", encoding="utf-8")
+    preregistration = {"created_at": passport.created_at}
+    blocked = campaign_root / "baseline" / "baseline-predictions.csv"
+    real_unlink = Path.unlink
+
+    def fail_during_publish(self: Path, target: object) -> Path:
+        raise OSError("сбой публикации")
+
+    def fail_cleanup(self: Path, missing_ok: bool = False) -> None:
+        if self == blocked:
+            raise OSError("сбой уборки")
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "replace", fail_during_publish)
+    monkeypatch.setattr(Path, "unlink", fail_cleanup)
+    with pytest.raises(OSError, match="сбой публикации"):
+        write_campaign_artifacts(campaign_root, passport, predictions, preregistration)
+
+    assert [
+        path.relative_to(campaign_root).as_posix()
+        for path in campaign_root.rglob("*")
+        if path.is_file()
+    ] == ["probe/keep.txt"]
+    monkeypatch.undo()
+    write_campaign_artifacts(campaign_root, passport, predictions, preregistration)
+    assert (campaign_root / "baseline" / "passport.json").is_file()
+    assert foreign.read_text(encoding="utf-8") == "зонд\n"
 
 
 def test_writer_renders_before_publish_failure_leaves_no_partial_checkpoint(
