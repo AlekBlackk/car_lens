@@ -143,6 +143,15 @@ def test_данные_не_закрывают_тег_script() -> None:
     assert _конфиг(страница)["frames"][0]["class_id"] == "</script><b>"
 
 
+def test_данные_не_уводят_парсер_в_escaped_режим() -> None:
+    опасное = "<!--<script>"
+    страница = render_page(
+        [_кадр(опасное)], title="t", storage_prefix="x:", layout="grid", export_name="e.csv"
+    )
+    assert опасное not in страница
+    assert _конфиг(страница)["frames"][0]["class_id"] == опасное
+
+
 def test_неизвестная_раскладка_отвергается() -> None:
     with pytest.raises(ValueError, match="раскладка"):
         render_page([_кадр()], title="t", storage_prefix="x:", layout="list", export_name="e")

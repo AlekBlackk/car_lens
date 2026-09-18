@@ -165,6 +165,7 @@ body{font:14px system-ui;margin:0;background:#111;color:#eee}
 figure{margin:0;background:#1c1c1c;border:3px solid #444}
 figure.done{border-color:#2a2}
 figure.leak{border-color:#e33}
+figure.current{outline:3px solid #fc0;outline-offset:-6px}
 #frames img{width:100%;display:block;cursor:zoom-in}
 .single #frames img{max-height:92vh;object-fit:contain}
 .missing{padding:40px;background:#400}
@@ -201,11 +202,15 @@ function storageWorks() {
 }
 
 function load(frame) {
+  let verdict;
   try {
-    return JSON.parse(localStorage.getItem(CONFIG.prefix + frame.photo_id) || "{}");
+    verdict = JSON.parse(localStorage.getItem(CONFIG.prefix + frame.photo_id) || "{}");
   } catch (error) {
     return {};
   }
+  // Кроп сменился после вердикта (перестейдж того же сплита): оси судили другие пиксели,
+  // и кадр должен снова выглядеть pending, а не молча числиться готовым.
+  return verdict.sha === frame.crop_sha256 ? verdict : {};
 }
 
 function save(frame, verdict) {
@@ -249,8 +254,7 @@ function exportCsv() {
     const verdict = load(frame);
     const plate = verdict.plate || "pending";
     const face = verdict.face || "pending";
-    const sha = verdict.sha || frame.crop_sha256;
-    lines.push([frame.photo_id, frame.session, plate, face, sha].join(","));
+    lines.push([frame.photo_id, frame.session, plate, face, frame.crop_sha256].join(","));
   }
   const blob = new Blob([lines.join("\\n") + "\\n"], {type: "text/csv"});
   const link = document.createElement("a");
@@ -294,9 +298,20 @@ function render() {
   progress();
 }
 
+// Клавиша по физическому месту, а не по символу: на русской раскладке `f` даёт «а», с
+// Caps Lock — «F», и вердикт по лицу молча не ставился бы.
+function keyOf(event) {
+  const match = /^(?:Key|Digit)(.)$/.exec(event.code);
+  return match ? match[1].toLowerCase() : event.key;
+}
+
 document.addEventListener("mouseover", event => {
   const figure = event.target.closest("#frames figure");
-  if (figure) current = FRAMES[Number(figure.dataset.index)];
+  if (!figure) return;
+  // Вердикт уходит кадру под курсором: подсветка показывает, какому именно.
+  document.querySelector("figure.current")?.classList.remove("current");
+  figure.classList.add("current");
+  current = FRAMES[Number(figure.dataset.index)];
 });
 
 document.addEventListener("keydown", event => {
@@ -306,11 +321,10 @@ document.addEventListener("keydown", event => {
   }
   if (event.ctrlKey || event.altKey || event.metaKey) return;
   if (!current || current.problem === "crop_missing") return;
-  let verdict = load(current);
-  // Кроп сменился после прошлого вердикта: старые оси судили другие пиксели.
-  if (verdict.sha && verdict.sha !== current.crop_sha256) verdict = {};
-  if (event.key in CONFIG.plate_keys) verdict.plate = CONFIG.plate_keys[event.key];
-  else if (event.key in CONFIG.face_keys) verdict.face = CONFIG.face_keys[event.key];
+  const key = keyOf(event);
+  const verdict = load(current);
+  if (key in CONFIG.plate_keys) verdict.plate = CONFIG.plate_keys[key];
+  else if (key in CONFIG.face_keys) verdict.face = CONFIG.face_keys[key];
   else return;
   verdict.sha = current.crop_sha256;
   save(current, verdict);
@@ -356,8 +370,10 @@ def render_page(
         "export_name": export_name,
         "frames": [_frame_config(frame, layout) for frame in frames],
     }
-    # `</` внутри JSON закрыл бы тег `<script>`; `<\/` — та же строка для `JSON.parse`.
-    payload = json.dumps(config, ensure_ascii=False).replace("</", "<\\/")
+    # Любой `<` в данных — `<`: `</script>` закрыл бы тег, а `<!--<script>` увёл бы
+    # парсер HTML в режим, где настоящий `</script>` тег уже не закрывает. Для `JSON.parse`
+    # это та же строка.
+    payload = json.dumps(config, ensure_ascii=False).replace("<", "\\u003c")
     return (
         _PAGE.replace("__TITLE__", html.escape(title))
         .replace("__LAYOUT__", layout)
