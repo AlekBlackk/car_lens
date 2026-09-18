@@ -11,10 +11,12 @@ import pytest
 
 from pipeline.pool_audit import (
     FACE_KEYS,
+    KNOWN_FACE_LEAK_NUMBERS,
     PENDING,
     PLATE_KEYS,
     PLATE_VERDICTS,
     REGISTRY_COLUMNS,
+    PilotTruth,
     PoolAuditError,
     RegistryCheck,
     RegistryRow,
@@ -25,7 +27,9 @@ from pipeline.pool_audit import (
     excluded_ids,
     file_sha256,
     index_registry,
+    pilot_truth,
     read_registry,
+    score_pilot,
     write_registry,
 )
 
@@ -221,3 +225,80 @@ def test_audited_mismatch_ловит_оставленную_утечку_и_по
     assert audited_mismatch(строки, pool_ids=пул, audited_ids=["p0", "p2"]) == ()
     assert audited_mismatch(строки, pool_ids=пул, audited_ids=["p0", "p1", "p2"]) == ("p1",)
     assert audited_mismatch(строки, pool_ids=пул, audited_ids=["p0"]) == ("p2",)
+
+
+ВЫБОРКА = Path("bench") / "plate-leak-sample.csv"
+
+
+def _выборка() -> pd.DataFrame:
+    return pd.read_csv(ВЫБОРКА, dtype={"sha256": str})
+
+
+def test_эталон_пилота_из_настоящей_выборки() -> None:
+    выборка = _выборка()
+    эталон = pilot_truth(выборка)
+    assert len(эталон.plate_ids) == 9
+    assert len(эталон.face_ids) == 10
+    assert not эталон.plate_ids & эталон.face_ids
+    номер_43 = выборка.loc[выборка["номер"] == 43, "sha256"].item()
+    assert номер_43 in эталон.plate_ids
+
+
+def test_список_лиц_не_совпавший_с_выборкой_отвергается() -> None:
+    выборка = _выборка()
+    обрезанная = выборка[выборка["номер"] != KNOWN_FACE_LEAK_NUMBERS[0]]
+    with pytest.raises(PoolAuditError, match="лиц"):
+        pilot_truth(обрезанная)
+
+
+def _идеальная_выгрузка(эталон: PilotTruth, чистых: int = 3) -> list[RegistryRow]:
+    строки = [_строка(i, plate="leak") for i in sorted(эталон.plate_ids)]
+    строки += [_строка(i, face="leak") for i in sorted(эталон.face_ids)]
+    строки += [_строка(f"c{i}") for i in range(чистых)]
+    return строки
+
+
+def test_идеальная_выгрузка_проходит_пилот() -> None:
+    эталон = PilotTruth(frozenset({"n0", "n1"}), frozenset({"f0"}))
+    счёт = score_pilot(_идеальная_выгрузка(эталон), эталон)
+    assert счёт.passed
+    assert (счёт.plate_expected, счёт.face_expected) == (2, 1)
+
+
+def test_пропуск_номера_проваливает_пилот() -> None:
+    эталон = PilotTruth(frozenset({"n0", "n1"}), frozenset({"f0"}))
+    строки = [
+        _строка("n0", plate="leak_hist"),
+        _строка("n1", plate="clean_partial"),
+        _строка("f0", face="leak"),
+    ]
+    счёт = score_pilot(строки, эталон)
+    assert счёт.plate_misses == ("n1",)
+    assert not счёт.passed
+
+
+def test_пропуск_лица_проваливает_пилот_а_лишнее_лицо_нет() -> None:
+    эталон = PilotTruth(frozenset({"n0"}), frozenset({"f0", "f1"}))
+    строки = [
+        _строка("n0", plate="leak"),
+        _строка("f0", face="leak"),
+        _строка("f1", face="clean"),
+        _строка("x0", face="leak"),
+    ]
+    счёт = score_pilot(строки, эталон)
+    assert счёт.face_misses == ("f1",)
+    assert not счёт.passed
+
+
+def test_кадр_эталона_без_строки_это_промах() -> None:
+    эталон = PilotTruth(frozenset({"n0"}), frozenset({"f0"}))
+    счёт = score_pilot([_строка("f0", face="leak")], эталон)
+    assert счёт.plate_misses == ("n0",)
+
+
+def test_pending_не_даёт_пройти_пилот() -> None:
+    эталон = PilotTruth(frozenset({"n0"}), frozenset({"f0"}))
+    строки = [*_идеальная_выгрузка(эталон), _строка("c9", plate=PENDING)]
+    счёт = score_pilot(строки, эталон)
+    assert счёт.pending_ids == ("c9",)
+    assert not счёт.passed

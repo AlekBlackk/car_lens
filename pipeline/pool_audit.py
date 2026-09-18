@@ -198,3 +198,63 @@ def audited_mismatch(
     """Условие 4: `photo_id`, где `pool-audited` расходится с «пул минус утечки»."""
     expected = set(pool_ids) - excluded_ids(rows)
     return tuple(sorted(expected ^ set(audited_ids)))
+
+
+# Лица 300-выборки, найденные мимоходом при замере номеров (`bench/plate-leak-bound.md` §8).
+# Нижняя оценка, а не полная разметка: лицо сверх этого списка ошибкой пилота не считается.
+KNOWN_FACE_LEAK_NUMBERS: tuple[int, ...] = (32, 36, 68, 102, 120, 179, 196, 218, 231, 254)
+
+
+@dataclass(frozen=True, slots=True)
+class PilotTruth:
+    """Известные утечки 300-выборки: номера по колонке `вердикт`, лица по списку §8."""
+
+    plate_ids: frozenset[str]
+    face_ids: frozenset[str]
+
+
+def pilot_truth(sample: pd.DataFrame) -> PilotTruth:
+    """Эталон пилота из `bench/plate-leak-sample.csv` (колонки `номер`, `sha256`, `вердикт`)."""
+    plates = sample.loc[sample["вердикт"].isin(LEAK_WITH_HISTORICAL), "sha256"]
+    faces = sample.loc[sample["номер"].isin(KNOWN_FACE_LEAK_NUMBERS), "sha256"]
+    if len(faces) != len(KNOWN_FACE_LEAK_NUMBERS):
+        raise PoolAuditError(
+            f"в выборке {len(faces)} кадров лиц из {len(KNOWN_FACE_LEAK_NUMBERS)} известных"
+        )
+    return PilotTruth(frozenset(map(str, plates)), frozenset(map(str, faces)))
+
+
+@dataclass(frozen=True, slots=True)
+class PilotScore:
+    """Итог пилота против эталона; `passed` — гейт выполнимости формата."""
+
+    plate_misses: tuple[str, ...]
+    face_misses: tuple[str, ...]
+    pending_ids: tuple[str, ...]
+    plate_expected: int
+    face_expected: int
+
+    @property
+    def passed(self) -> bool:
+        """Пропуск хоть одного известного номера или лица — формат провален."""
+        return not (self.plate_misses or self.face_misses or self.pending_ids)
+
+
+def score_pilot(rows: Iterable[RegistryRow], truth: PilotTruth) -> PilotScore:
+    """Сверить выгрузку пилота с эталоном. Кадр эталона без строки — промах."""
+    indexed = index_registry(rows)
+    plate_misses = [
+        i
+        for i in truth.plate_ids
+        if i not in indexed or indexed[i].plate_verdict not in LEAK_WITH_HISTORICAL
+    ]
+    face_misses = [
+        i for i in truth.face_ids if i not in indexed or indexed[i].face_verdict != "leak"
+    ]
+    return PilotScore(
+        plate_misses=tuple(sorted(plate_misses)),
+        face_misses=tuple(sorted(face_misses)),
+        pending_ids=tuple(sorted(i for i, row in indexed.items() if row.pending)),
+        plate_expected=len(truth.plate_ids),
+        face_expected=len(truth.face_ids),
+    )
