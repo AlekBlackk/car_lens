@@ -6,6 +6,7 @@ import hashlib
 from dataclasses import fields
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from pipeline.pool_audit import (
@@ -15,9 +16,15 @@ from pipeline.pool_audit import (
     PLATE_VERDICTS,
     REGISTRY_COLUMNS,
     PoolAuditError,
+    RegistryCheck,
     RegistryRow,
     assign_sessions,
+    audited_mismatch,
+    audited_pool,
+    check_registry,
+    excluded_ids,
     file_sha256,
+    index_registry,
     read_registry,
     write_registry,
 )
@@ -137,3 +144,80 @@ def test_sha_кропа_считается_по_байтам(tmp_path: Path) -> 
     путь.write_bytes(b"second")
     assert file_sha256(путь) != первый
     assert file_sha256(путь) == hashlib.sha256(b"second").hexdigest()
+
+
+def _чистый_реестр(n: int) -> list[RegistryRow]:
+    return [_строка(f"p{i}", sha=f"s{i}") for i in range(n)]
+
+
+def _текущие_sha(n: int) -> dict[str, str | None]:
+    return {f"p{i}": f"s{i}" for i in range(n)}
+
+
+def test_полный_чистый_реестр_проходит_приёмку() -> None:
+    проверка = check_registry(
+        _чистый_реестр(3), pool_ids=["p0", "p1", "p2"], current_crop_sha256=_текущие_sha(3)
+    )
+    assert проверка == RegistryCheck((), (), (), ())
+    assert проверка.passed
+
+
+def test_кадр_пула_без_строки_и_лишняя_строка_ловятся() -> None:
+    проверка = check_registry(
+        _чистый_реестр(3), pool_ids=["p0", "p1", "p9"], current_crop_sha256=_текущие_sha(3)
+    )
+    assert проверка.missing_ids == ("p9",)
+    assert проверка.extra_ids == ("p2",)
+    assert not проверка.passed
+
+
+@pytest.mark.parametrize(("plate", "face"), [(PENDING, "clean"), ("clean_filled", PENDING)])
+def test_pending_блокирует_приёмку(plate: str, face: str) -> None:
+    строки = [*_чистый_реестр(2), _строка("p2", plate, face, "s2")]
+    проверка = check_registry(
+        строки, pool_ids=["p0", "p1", "p2"], current_crop_sha256=_текущие_sha(3)
+    )
+    assert проверка.pending_ids == ("p2",)
+    assert not проверка.passed
+
+
+def test_протухший_и_пропавший_кроп_ловятся() -> None:
+    текущие = _текущие_sha(3)
+    текущие["p1"] = "изменился"
+    текущие["p2"] = None
+    проверка = check_registry(
+        _чистый_реестр(3), pool_ids=["p0", "p1", "p2"], current_crop_sha256=текущие
+    )
+    assert проверка.stale_ids == ("p1", "p2")
+    assert not проверка.passed
+
+
+def test_дубликат_в_реестре_ошибка_а_не_последний_выигрывает() -> None:
+    with pytest.raises(PoolAuditError, match="дважды"):
+        index_registry([_строка("p0"), _строка("p0", plate="leak")])
+
+
+def test_исключение_вычисляется_из_вердиктов() -> None:
+    строки = [
+        _строка("p0", plate="leak"),
+        _строка("p1", plate="leak_hist"),
+        _строка("p2", face="leak"),
+        _строка("p3", plate="clean_partial"),
+    ]
+    assert excluded_ids(строки) == frozenset({"p0", "p1", "p2"})
+
+
+def test_audited_pool_выкидывает_только_утечки() -> None:
+    пул = pd.DataFrame({"photo_id": ["p0", "p1", "p2"], "model_id": ["a", "b", "c"]})
+    строки = [_строка("p0"), _строка("p1", plate="leak"), _строка("p2")]
+    итог = audited_pool(пул, строки)
+    assert list(итог["photo_id"]) == ["p0", "p2"]
+    assert list(итог.index) == [0, 1]
+
+
+def test_audited_mismatch_ловит_оставленную_утечку_и_потерянный_чистый() -> None:
+    строки = [_строка("p0"), _строка("p1", plate="leak"), _строка("p2")]
+    пул = ["p0", "p1", "p2"]
+    assert audited_mismatch(строки, pool_ids=пул, audited_ids=["p0", "p2"]) == ()
+    assert audited_mismatch(строки, pool_ids=пул, audited_ids=["p0", "p1", "p2"]) == ("p1",)
+    assert audited_mismatch(строки, pool_ids=пул, audited_ids=["p0"]) == ("p2",)

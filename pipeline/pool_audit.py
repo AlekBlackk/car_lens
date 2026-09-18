@@ -18,6 +18,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import astuple, dataclass
 from pathlib import Path
 
+import pandas as pd
+
 from pipeline.plate_leak import LEAK_WITH_HISTORICAL
 
 PENDING = "pending"
@@ -129,3 +131,70 @@ def assign_sessions(photo_ids: Iterable[str], size: int = SESSION_SIZE) -> dict[
 def file_sha256(path: Path) -> str:
     """sha256 байтов файла — основание проверки протухших вердиктов."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def index_registry(rows: Iterable[RegistryRow]) -> dict[str, RegistryRow]:
+    """Реестр по `photo_id`; повтор — ошибка, а не «последний выигрывает»."""
+    indexed: dict[str, RegistryRow] = {}
+    for row in rows:
+        if row.photo_id in indexed:
+            raise PoolAuditError(f"photo_id дважды в реестре: {row.photo_id}")
+        indexed[row.photo_id] = row
+    return indexed
+
+
+@dataclass(frozen=True, slots=True)
+class RegistryCheck:
+    """Условия 1–3 предиката приёмки; пустой кортеж — условие выполнено."""
+
+    missing_ids: tuple[str, ...]
+    extra_ids: tuple[str, ...]
+    pending_ids: tuple[str, ...]
+    stale_ids: tuple[str, ...]
+
+    @property
+    def passed(self) -> bool:
+        return not (self.missing_ids or self.extra_ids or self.pending_ids or self.stale_ids)
+
+
+def check_registry(
+    rows: Iterable[RegistryRow],
+    *,
+    pool_ids: Iterable[str],
+    current_crop_sha256: Mapping[str, str | None],
+) -> RegistryCheck:
+    """Проверить условия 1–3: реестр покрывает ровно пул, без `pending`, без протухших.
+
+    `current_crop_sha256` — sha256 байтов кропа на диске сейчас; `None` значит, что кропа
+    нет, и вердикт по нему действующим не считается.
+    """
+    indexed = index_registry(rows)
+    pool = set(pool_ids)
+    present = pool & indexed.keys()
+    pending = [i for i in present if indexed[i].pending]
+    stale = [i for i in present if current_crop_sha256.get(i) != indexed[i].crop_sha256]
+    return RegistryCheck(
+        missing_ids=tuple(sorted(pool - indexed.keys())),
+        extra_ids=tuple(sorted(indexed.keys() - pool)),
+        pending_ids=tuple(sorted(pending)),
+        stale_ids=tuple(sorted(stale)),
+    )
+
+
+def excluded_ids(rows: Iterable[RegistryRow]) -> frozenset[str]:
+    """Кадры с любой утечкой. Вычисляются из вердиктов, отдельной колонкой не хранятся."""
+    return frozenset(row.photo_id for row in rows if row.excluded)
+
+
+def audited_pool(pool: pd.DataFrame, rows: Iterable[RegistryRow]) -> pd.DataFrame:
+    """Пул минус кадры с утечкой — вход обучения вместо неизменного `pool.parquet`."""
+    drop = excluded_ids(rows)
+    return pool.loc[~pool["photo_id"].isin(drop)].reset_index(drop=True)
+
+
+def audited_mismatch(
+    rows: Iterable[RegistryRow], *, pool_ids: Iterable[str], audited_ids: Iterable[str]
+) -> tuple[str, ...]:
+    """Условие 4: `photo_id`, где `pool-audited` расходится с «пул минус утечки»."""
+    expected = set(pool_ids) - excluded_ids(rows)
+    return tuple(sorted(expected ^ set(audited_ids)))
