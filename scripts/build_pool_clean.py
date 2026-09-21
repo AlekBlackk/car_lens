@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from pipeline.class_purity import (
+    TIERS,
     ClassPurityError,
     class_impact,
     cleaned_pool,
@@ -51,6 +52,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         nargs="+",
         default=[1],
+        choices=TIERS,
         help="Уровни tier для исключения (по умолчанию [1])",
     )
     parser.add_argument(

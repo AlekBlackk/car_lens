@@ -81,10 +81,26 @@ def test_drop_row_валидация_полей() -> None:
         _make_row(photo_id="")
     with pytest.raises(ClassPurityError, match="photo_id"):
         _make_row(photo_id="   ")
+    with pytest.raises(ClassPurityError, match="photo_id"):
+        _make_row(photo_id=123)  # type: ignore[arg-type]
 
-    # tier=9 вне TIERS
+    # Некорректный sheet / cell (должны быть строго int, не bool и не str)
+    with pytest.raises(ClassPurityError, match="sheet"):
+        _make_row(sheet="1")  # type: ignore[arg-type]
+    with pytest.raises(ClassPurityError, match="sheet"):
+        _make_row(sheet=True)
+    with pytest.raises(ClassPurityError, match="cell"):
+        _make_row(cell="2")  # type: ignore[arg-type]
+    with pytest.raises(ClassPurityError, match="cell"):
+        _make_row(cell=False)
+
+    # tier вне TIERS или не int (bool/float не допускаются)
     with pytest.raises(ClassPurityError, match="tier"):
         _make_row(tier=9)
+    with pytest.raises(ClassPurityError, match="tier"):
+        _make_row(tier=True)
+    with pytest.raises(ClassPurityError, match="tier"):
+        _make_row(tier=1.0)  # type: ignore[arg-type]
 
     # confidence='maybe' вне CONFIDENCES
     with pytest.raises(ClassPurityError, match="confidence"):
@@ -136,6 +152,59 @@ def test_read_drop_list_дубль_photo_id_ошибка(tmp_path: Path) -> None
 
     with pytest.raises(ClassPurityError, match=r"(?i)дважды"):
         read_drop_list(csv_path)
+
+
+def test_read_drop_list_поддержка_str_и_utf8_bom(tmp_path: Path) -> None:
+    csv_path = tmp_path / "bom.csv"
+    row = "id1,audi__a4,1,2,1,fragment,high,фара,audi/id1.jpg\n"
+    content = "\ufeff" + ",".join(DROP_COLUMNS) + "\n" + row
+    csv_path.write_bytes(content.encode("utf-8"))
+
+    # Вызов как через Path, так и через str
+    rows_path = read_drop_list(csv_path)
+    assert len(rows_path) == 1
+    assert rows_path[0].photo_id == "id1"
+
+    rows_str = read_drop_list(str(csv_path))
+    assert len(rows_str) == 1
+    assert rows_str[0].photo_id == "id1"
+
+
+def test_read_drop_list_пустой_файл_ошибка(tmp_path: Path) -> None:
+    empty_csv = tmp_path / "empty.csv"
+    empty_csv.write_text("", encoding="utf-8")
+
+    with pytest.raises(ClassPurityError, match=r"(?i)шапка"):
+        read_drop_list(empty_csv)
+
+
+def test_read_drop_list_пропуск_tier_0(tmp_path: Path) -> None:
+    csv_path = tmp_path / "struck_out.csv"
+    rows_data: list[list[object]] = [
+        ["id1", "audi__a4", 1, 1, 1, "fragment", "high", "фара", "audi/id1.jpg"],
+        ["id0", "bmw__3", 1, 2, 0, "fragment", "high", "вычеркнут", "bmw/id0.jpg"],
+        ["id2", "bmw__3", 1, 3, 2, "nameplate", "medium", "модель", "bmw/id2.jpg"],
+    ]
+    _write_csv(csv_path, list(DROP_COLUMNS), rows_data)
+
+    rows = read_drop_list(csv_path)
+    # tier 0 должен быть пропущен как вычеркнутый
+    assert [r.photo_id for r in rows] == ["id1", "id2"]
+
+
+def test_read_drop_list_битые_строки_ошибка(tmp_path: Path) -> None:
+    # Меньше колонок
+    bad_cols = tmp_path / "bad_cols.csv"
+    _write_csv(bad_cols, list(DROP_COLUMNS), [["id1", "audi", 1]])
+    with pytest.raises(ClassPurityError, match=r"колонок"):
+        read_drop_list(bad_cols)
+
+    # Нечисловое значение в int колонке
+    bad_int = tmp_path / "bad_int.csv"
+    bad_row: list[object] = ["id1", "audi", "не_число", 1, 1, "f", "high", "r", "c"]
+    _write_csv(bad_int, list(DROP_COLUMNS), [bad_row])
+    with pytest.raises(ClassPurityError, match=r"ошибка преобразования чисел"):
+        read_drop_list(bad_int)
 
 
 def test_select_tiers() -> None:

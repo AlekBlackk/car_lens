@@ -48,24 +48,28 @@ class DropRow:
     crop_path: str
 
     def __post_init__(self) -> None:
-        if not self.photo_id or not self.photo_id.strip():
+        if not isinstance(self.photo_id, str) or not self.photo_id.strip():
             raise ClassPurityError("photo_id не может быть пустым")
-        if self.tier not in TIERS:
+        if type(self.sheet) is not int:
+            raise ClassPurityError(f"sheet должен быть int, получено {type(self.sheet).__name__}")
+        if type(self.cell) is not int:
+            raise ClassPurityError(f"cell должен быть int, получено {type(self.cell).__name__}")
+        if type(self.tier) is not int or self.tier not in TIERS:
             raise ClassPurityError(f"tier {self.tier} вне допустимых {TIERS}")
         if self.confidence not in CONFIDENCES:
             raise ClassPurityError(f"confidence '{self.confidence}' вне допустимых {CONFIDENCES}")
 
 
-def read_drop_list(path: Path) -> list[DropRow]:
+def read_drop_list(path: Path | str) -> list[DropRow]:
     """Прочитать CSV-файл со списком кандидатов на исключение.
 
     Проверяет точное совпадение шапки с DROP_COLUMNS и отсутствие
-    повторов photo_id.
+    повторов photo_id. Строки с tier=0 пропускаются (вычеркнуты).
     """
     rows: list[DropRow] = []
     seen_ids: set[str] = set()
 
-    with path.open("r", encoding="utf-8", newline="") as f:
+    with Path(path).open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f)
         try:
             header = next(reader)
@@ -98,6 +102,9 @@ def read_drop_list(path: Path) -> list[DropRow]:
                 raise ClassPurityError(
                     f"Строка {line_num}: ошибка преобразования чисел ({e})"
                 ) from e
+
+            if tier == 0:
+                continue
 
             rows.append(
                 DropRow(

@@ -191,3 +191,87 @@ def test_tiers_берёт_несколько_уровней(tmp_path: Path) -> N
     cleaned = read_split(out_path)
     # p1 (tier 1) и p2 (tier 2) удалены, p3 (tier 3) и p4 (нет в drop) остались
     assert sorted(cleaned["photo_id"].tolist()) == ["p3", "p4"]
+
+
+def test_недопустимый_tier_отвергается(tmp_path: Path) -> None:
+    pool_path = tmp_path / "pool.parquet"
+    drop_path = tmp_path / "drop.csv"
+    out_path = tmp_path / "pool-clean.parquet"
+
+    _make_synthetic_pool(pool_path, [("p1", "m1")])
+    _make_drop_csv(drop_path, [("p1", "m1", 1)])
+
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "--split",
+                str(pool_path),
+                "--drop-list",
+                str(drop_path),
+                "--out",
+                str(out_path),
+                "--tiers",
+                "9",
+            ]
+        )
+
+
+def test_расхождение_перечитанного_файла_возвращает_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pool_path = tmp_path / "pool.parquet"
+    drop_path = tmp_path / "drop.csv"
+    out_path = tmp_path / "pool-clean.parquet"
+
+    _make_synthetic_pool(pool_path, [("p1", "m1"), ("p2", "m1")])
+    _make_drop_csv(drop_path, [("p1", "m1", 1)])
+
+    from pipeline.schema import read_split as schema_read_split
+
+    def fake_read_split(path: Path) -> pd.DataFrame:
+        df = schema_read_split(path)
+        if path.resolve() == out_path.resolve():
+            # Симулируем искажение данных при перечитывании (другой photo_id)
+            corrupted = df.copy()
+            corrupted["photo_id"] = ["corrupted_id"]
+            return corrupted
+        return df
+
+    monkeypatch.setattr("scripts.build_pool_clean.read_split", fake_read_split)
+
+    ret = main(
+        [
+            "--split",
+            str(pool_path),
+            "--drop-list",
+            str(drop_path),
+            "--out",
+            str(out_path),
+        ]
+    )
+    assert ret == 1
+    err = capsys.readouterr().err
+    assert "не сходятся" in err
+
+
+def test_отказ_писать_в_исходный_сплит_через_относительный_путь(tmp_path: Path) -> None:
+    pool_path = tmp_path / "pool.parquet"
+    drop_path = tmp_path / "drop.csv"
+
+    _make_synthetic_pool(pool_path, [("p1", "bmw")])
+    _make_drop_csv(drop_path, [("p1", "bmw", 1)])
+
+    # Пути через "." и absolute должны распознаться как один файл
+    equivalent_path = tmp_path / "." / "pool.parquet"
+
+    with pytest.raises(ValueError, match=r"(?i)исходный пул"):
+        main(
+            [
+                "--split",
+                str(pool_path),
+                "--drop-list",
+                str(drop_path),
+                "--out",
+                str(equivalent_path),
+            ]
+        )
