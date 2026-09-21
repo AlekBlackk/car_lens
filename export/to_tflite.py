@@ -34,7 +34,8 @@ from ai_edge_litert.interpreter import Interpreter
 from torch import Tensor
 
 from export.calibration import Calibration, select_calibration
-from pipeline.paths import crops_dir, splits_dir
+from pipeline.paths import splits_dir
+from training.build_index import resolve_crops_root
 from training.dataset import PREPROCESS_VERSION, build_transforms
 from training.model import create_model
 from training.samples import read_samples
@@ -370,6 +371,11 @@ def _parse_args() -> argparse.Namespace:
     парсер.add_argument("--total", type=int, default=512)
     парсер.add_argument("--seed", type=int, default=1337)
     парсер.add_argument("--skip-int8", action="store_true")
+    # Калибровка INT8 — только по обучающему сплиту (`export/calibration.py:3-6`): у Stanford
+    # это `train`, у русского пула — `pool-clean`. Корень кропов разрешается той же функцией,
+    # что у сборщика индекса, чтобы шкалы квантования считались по тем же пикселям.
+    парсер.add_argument("--split", default="train", help="обучающий сплит для калибровки INT8")
+    парсер.add_argument("--crops-root", type=Path, default=None, help="корень кропов сплита")
     return парсер.parse_args()
 
 
@@ -389,9 +395,10 @@ def main() -> None:
     модель.load_state_dict(чекпоинт["model_state" if аргументы.weights == "raw" else "ema_state"])
     модель.eval()
 
+    корень_кропов = resolve_crops_root(аргументы.crops_root)
     образцы = read_samples(
-        splits_dir() / "train.parquet",
-        crops_dir() / "stanford",
+        splits_dir() / f"{аргументы.split}.parquet",
+        корень_кропов,
         num_classes=len(индекс),
         skip_multi_car=True,
     )
@@ -404,7 +411,7 @@ def main() -> None:
         mean=tuple(чекпоинт["mean"]),
         std=tuple(чекпоинт["std"]),
     )
-    тензоры = calibration_tensors(калибровка, преобразование, crops_dir() / "stanford")
+    тензоры = calibration_tensors(калибровка, преобразование, корень_кропов)
     пример = torch.zeros(1, 3, чекпоинт["img_size"], чекпоинт["img_size"])
 
     каталог = аргументы.out or аргументы.checkpoint.parent / "export"
@@ -461,6 +468,8 @@ def main() -> None:
                 имя for имя, число in калибровка.per_class_counts.items() if число < размеры[-1]
             )[:5],
             "seed": калибровка.seed,
+            "split": аргументы.split,
+            "crops_root": str(корень_кропов),
         },
         "models": модели,
         "self_check": (

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -239,3 +240,24 @@ def test_контракт_форм_ловит_чужой_граф(tmp_path: Path
     _проверить_контракт(_рантайм([[1, 3, 16, 16]], [[1, 8]], dtype="int8", scale=0.03), путь, 16, 8)
     with pytest.raises(ExportError, match="uint8"):
         _проверить_контракт(_рантайм([[1, 3, 16, 16]], [[1, 8]], dtype="uint8"), путь, 16, 8)
+
+
+def test_флаги_калибровки_разбираются(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--split` и `--crops-root` доезжают до экспорта, без флагов — умолчания Stanford.
+
+    Подменяется `sys.argv`, как в `tests/test_build_index.py`: без подмены разбор увидел бы
+    аргументы самого pytest.
+    """
+    pytest.importorskip("litert_torch")
+    from export.to_tflite import _parse_args
+
+    базовые = ["to_tflite.py", "--checkpoint", "/tmp/ckpt.pt"]
+    monkeypatch.setattr(sys, "argv", [*базовые, "--split", "pool-clean", "--crops-root", "/x/y"])
+    аргументы = _parse_args()
+    assert аргументы.split == "pool-clean"
+    assert аргументы.crops_root == Path("/x/y")
+
+    monkeypatch.setattr(sys, "argv", базовые)
+    аргументы = _parse_args()
+    assert аргументы.split == "train"
+    assert аргументы.crops_root is None

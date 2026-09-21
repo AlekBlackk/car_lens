@@ -31,7 +31,8 @@ from export.provenance import check_provenance
 from export.to_tflite import _run_tflite, sha256_of_file
 from pipeline.index_format import read_index, verify_meta
 from pipeline.knn import top5_by_centroids
-from pipeline.paths import crops_dir, splits_dir
+from pipeline.paths import splits_dir
+from training.build_index import resolve_crops_root
 from training.dataset import build_transforms, make_loader
 from training.metrics import Metrics, aggregate
 from training.model import create_model
@@ -119,6 +120,7 @@ def _parse_args() -> argparse.Namespace:
     парсер.add_argument("--checkpoint", type=Path, required=True)
     парсер.add_argument("--splits", nargs="+", default=["val", "test"])
     парсер.add_argument("--limit", type=int, default=0, help="0 — сплит целиком")
+    парсер.add_argument("--crops-root", type=Path, default=None, help="корень кропов сплитов")
     # По умолчанию CPU, а не CUDA. Torch включает TF32 для свёрток сам, мантисса TF32 —
     # десять бит, и погрешность самой базы выходит порядка 1e-3 при пороге 1e-3. Замерено
     # на этом проекте, сплит `val`, один и тот же экспорт, менялся только флаг:
@@ -234,7 +236,7 @@ def main() -> None:
     for имя in аргументы.splits:
         образцы = read_samples(
             splits_dir() / f"{имя}.parquet",
-            crops_dir() / "stanford",
+            resolve_crops_root(аргументы.crops_root),
             num_classes=len(индекс),
             skip_multi_car=False,
         )
