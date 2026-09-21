@@ -284,11 +284,12 @@ def test_чтение_реального_файла_кандидатов() -> No
     if not real_csv.exists():
         pytest.skip("bench/class-purity-drop-candidates.csv не найден")
 
+    # Владелец правит список руками (вычёркивает строки или ставит tier=0), поэтому
+    # проверяются свойства файла, а не его размер: шапку, дубли, tier и confidence уже
+    # сторожит read_drop_list, здесь — связность строк и то, что чистить есть что.
+    # Каталог кропа не обязан совпадать с model_id (бывают групповые `grp__*`),
+    # а имя файла — всегда photo_id.
     rows = read_drop_list(real_csv)
-    assert len(rows) == 196
-    t1_ids = select_tiers(rows, [1])
-    assert len(t1_ids) == 67
-    t2_ids = select_tiers(rows, [2])
-    assert len(t2_ids) == 104
-    t3_ids = select_tiers(rows, [3])
-    assert len(t3_ids) == 25
+    assert select_tiers(rows, [1])
+    for row in rows:
+        assert Path(row.crop_path).name == f"{row.photo_id}.jpg", row.photo_id
