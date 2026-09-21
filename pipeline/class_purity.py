@@ -28,6 +28,11 @@ DROP_COLUMNS: tuple[str, ...] = (
 TIERS: tuple[int, ...] = (1, 2, 3)
 CONFIDENCES: tuple[str, ...] = ("high", "medium")
 
+# Ярлыки для отчёта о перекосе источника: хватит ли классу кадров после
+# гипотетического прореживания. Порог — параметр вызывающего кода, не зашит здесь.
+LABEL_CAN_THIN = "можно_проредить"
+LABEL_COVERAGE_HOLE = "дыра_покрытия"
+
 
 class ClassPurityError(ValueError):
     """Ошибка валидации или целостности списка кандидатов на исключение."""
@@ -166,3 +171,13 @@ def class_impact(pool: pd.DataFrame, drop_ids: Collection[str]) -> dict[str, tup
         impact[model_str] = (before, before - dropped_count)
 
     return impact
+
+
+def skew_label(remaining: int, min_street: int) -> str:
+    """Ярлык класса по числу кадров, которые останутся после прореживания.
+
+    `remaining >= min_street` — прореживать безопасно (в классе хватит кадров);
+    иначе класс — дыра покрытия, удаление сделает хуже. Ярлык говорит только о
+    достаточности остатка, а не о том, что остаток снят с уровня глаз.
+    """
+    return LABEL_CAN_THIN if remaining >= min_street else LABEL_COVERAGE_HOLE

@@ -11,6 +11,8 @@ import pytest
 from pipeline.class_purity import (
     CONFIDENCES,
     DROP_COLUMNS,
+    LABEL_CAN_THIN,
+    LABEL_COVERAGE_HOLE,
     TIERS,
     ClassPurityError,
     DropRow,
@@ -18,6 +20,7 @@ from pipeline.class_purity import (
     cleaned_pool,
     read_drop_list,
     select_tiers,
+    skew_label,
     unknown_ids,
 )
 
@@ -277,6 +280,17 @@ def test_class_impact() -> None:
     # Если ничего не удалено
     empty_impact = class_impact(pool, [])
     assert empty_impact == {}
+
+
+def test_skew_label_по_порогу() -> None:
+    # Остаётся больше порога → класс можно проредить
+    assert skew_label(remaining=15, min_street=10) == LABEL_CAN_THIN
+    # Ровно на пороге → ещё можно
+    assert skew_label(remaining=10, min_street=10) == LABEL_CAN_THIN
+    # Меньше порога → дыра покрытия, прореживать нельзя
+    assert skew_label(remaining=4, min_street=10) == LABEL_COVERAGE_HOLE
+    # Ничего не останется
+    assert skew_label(remaining=0, min_street=10) == LABEL_COVERAGE_HOLE
 
 
 def test_чтение_реального_файла_кандидатов() -> None:
