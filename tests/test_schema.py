@@ -79,6 +79,9 @@ def test_допустимые_источники() -> None:
         "street",
         "stanford",
         "commons",
+        "autoevolution",
+        "skillfactory",
+        "manual",
         "negatives",
     } == SOURCES
 

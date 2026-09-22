@@ -31,6 +31,11 @@ SOURCES = frozenset(
         # Выборка открытого провенанса Р-11 (Wikimedia Commons). Отделена от `street`
         # намеренно: `street_holdout` §3.5 меряет улицу, `holdout_ru` — каталог.
         "commons",
+        # Внешние кадры спеки 2026-09-22-external-data-design: готовые наборы и ручной
+        # сбор владельца. Идут только в обучение и индекс, в эталон — никогда.
+        "autoevolution",
+        "skillfactory",
+        "manual",
         "negatives",
     }
 )
