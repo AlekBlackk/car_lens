@@ -8,13 +8,18 @@ import cv2
 import numpy as np
 import pytest
 
-from pipeline.catalog import Catalog, load_catalog
+from pipeline.catalog import Catalog, class_index, load_catalog, member_index
+from pipeline.crop import Detection
 from pipeline.ingest.external import (
     ExternalIngestError,
+    ExternalPhoto,
+    ExternalResult,
+    build_external_frame,
     read_manual,
     read_mapped,
     read_mapping,
 )
+from pipeline.schema import validate_frame
 
 YAML = """
 version: 1
@@ -119,3 +124,109 @@ def test_неизвестная_папка_ручного_сбора_роняе�
     шум(tmp_path / "manual" / "аudi__a5" / "1.jpg", 1)
     with pytest.raises(ExternalIngestError, match="не model_id каталога"):
         read_manual(tmp_path / "manual", каталог)
+
+
+class ФейковыйДетектор:
+    """Отдаёт заранее заданные боксы, ничего не считая."""
+
+    def __init__(self, боксы: list[Detection]) -> None:
+        self._боксы = боксы
+
+    def detect(self, image: np.ndarray) -> list[Detection]:
+        return list(self._боксы)
+
+
+# Бокс на почти весь кадр 240×320: кроп выходит ~240 px по короткой стороне.
+ВЕСЬ_КАДР = ФейковыйДетектор([Detection(x=10.0, y=10.0, w=300.0, h=220.0, conf=0.9, cls=2)])
+
+
+def принять(
+    фото: list[ExternalPhoto],
+    каталог: Catalog,
+    кропы: Path,
+    *,
+    детектор: ФейковыйДетектор = ВЕСЬ_КАДР,
+    эталон: tuple[int, ...] = (),
+    пул: tuple[tuple[str, int], ...] = (),
+) -> ExternalResult:
+    return build_external_frame(
+        фото, детектор, каталог, кропы, source="manual", holdout_hashes=эталон, pool=пул
+    )
+
+
+def одно(tmp_path: Path, зерно: int, модель: str = "audi__a5", имя: str = "") -> ExternalPhoto:
+    путь = шум(tmp_path / "in" / модель / (имя or f"{зерно}.jpg"), зерно)
+    return ExternalPhoto(путь, модель, путь.name, None)
+
+
+def test_кадр_проходит_схему_и_несёт_поля(tmp_path: Path, каталог: Catalog) -> None:
+    итог = принять([одно(tmp_path, 1, "volkswagen__golf")], каталог, tmp_path / "crops")
+
+    validate_frame(итог.frame)
+    строка = итог.frame.iloc[0]
+    класс = member_index(каталог)["volkswagen__golf"]
+    assert строка["source"] == "manual"
+    assert строка["model_id"] == "volkswagen__golf"
+    assert строка["brand"] == "Volkswagen"
+    assert строка["class_idx"] == class_index(каталог)[класс]
+    assert строка["photo_id"].startswith("manual:")
+    assert строка["listing_id"] == f"manual:{класс}:1.jpg"
+    assert строка["crop_path"].startswith(f"external/manual/{класс}/")
+    assert (tmp_path / "crops" / строка["crop_path"]).is_file()
+    assert итог.seen == 1
+    assert итог.rejected == {}
+
+
+def test_нет_машины_и_мелкий_кроп(tmp_path: Path, каталог: Catalog) -> None:
+    пусто = принять([одно(tmp_path, 1)], каталог, tmp_path / "c1", детектор=ФейковыйДетектор([]))
+    assert пусто.rejected == {"no_vehicle": 1}
+
+    мелкое = одно(tmp_path, 2)
+    шум(мелкое.path, 2, размер=(100, 100))
+    бокс = ФейковыйДетектор([Detection(x=5.0, y=5.0, w=90.0, h=90.0, conf=0.9, cls=2)])
+    итог = принять([мелкое], каталог, tmp_path / "c2", детектор=бокс)
+    assert итог.rejected == {"small": 1}
+    assert итог.frame.empty
+
+
+def test_дубли_внутри_источника(tmp_path: Path, каталог: Catalog) -> None:
+    первое = одно(tmp_path, 1, имя="a.jpg")
+    побайтно = tmp_path / "in" / "audi__a5" / "b.jpg"
+    побайтно.write_bytes(первое.path.read_bytes())
+    # Тот же массив в другом кодеке: байты другие, pHash почти тот же.
+    поле = cv2.imread(str(первое.path))
+    assert поле is not None
+    перекодировано = tmp_path / "in" / "audi__a5" / "c.png"
+    assert cv2.imwrite(str(перекодировано), поле)
+    фото = [первое] + [
+        ExternalPhoto(путь, "audi__a5", путь.name, None) for путь in (побайтно, перекодировано)
+    ]
+
+    итог = принять(фото, каталог, tmp_path / "crops")
+
+    assert len(итог.frame) == 1
+    assert итог.frame.iloc[0]["listing_id"].endswith(":a.jpg")
+    assert итог.rejected == {"dup_source": 2}
+    # Кропы отброшенных удалены: на диске ровно то, что в кадре.
+    assert len(list((tmp_path / "crops").rglob("*.jpg"))) == 1
+
+
+def test_утечка_в_эталон_без_оглядки_на_класс(tmp_path: Path, каталог: Catalog) -> None:
+    фото = [одно(tmp_path, 1)]
+    хеш = int(принять(фото, каталог, tmp_path / "c1").frame.iloc[0]["phash"])
+
+    итог = принять(фото, каталог, tmp_path / "c2", эталон=(хеш,))
+
+    assert итог.rejected == {"holdout_leak": 1}
+    assert not list((tmp_path / "c2").rglob("*.jpg"))
+
+
+def test_совпадение_с_пулом_только_в_своём_классе(tmp_path: Path, каталог: Catalog) -> None:
+    фото = [одно(tmp_path, 1)]
+    хеш = int(принять(фото, каталог, tmp_path / "c1").frame.iloc[0]["phash"])
+
+    свой = принять(фото, каталог, tmp_path / "c2", пул=(("audi__a5", хеш),))
+    чужой = принять(фото, каталог, tmp_path / "c3", пул=(("grp__x5_golf", хеш),))
+
+    assert свой.rejected == {"dup_pool": 1}
+    assert len(чужой.frame) == 1

@@ -11,19 +11,32 @@
 вход не повод трогать рабочий путь.
 """
 
-from __future__ import annotations
-
 import csv
-from collections.abc import Mapping
+import hashlib
+from collections import Counter
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from pipeline.catalog import Catalog
+import cv2
+import numpy as np
+import pandas as pd
+
+from pipeline.catalog import Catalog, class_index, member_index
+from pipeline.clean import DEFAULT_PHASH_HAMMING, duplicate_indices, phash_of
+from pipeline.crop import Detector, crop_image, select_primary
+from pipeline.hashing import close_pairs
+from pipeline.schema import COLUMNS, empty_frame
 
 # Порядок — приоритет при склейке: съёмка с уровня глаз ценнее пресс-фото (фильтры 7–8).
 SOURCE_PRIORITY: tuple[str, ...] = ("manual", "skillfactory", "autoevolution")
 IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 MAPPING_COLUMNS = ("dir_path", "model_id")
+
+# Тот же порог, что `min_short_side_px` в `thresholds.json` приложения: кроп мельче
+# приложение не классифицирует, учить на нём незачем.
+MIN_SHORT_SIDE_PX = 120
 
 
 class ExternalIngestError(ValueError):
@@ -39,6 +52,15 @@ class ExternalPhoto:
     # Объявление §13.1: у набора — галерея (`dir_path`), у ручного сбора — сам файл.
     group: str
     raw_model_string: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalResult:
+    """Кадр §13.1 одного источника и счётчики: `rejected` — отказы по причинам спеки."""
+
+    frame: pd.DataFrame
+    seen: int
+    rejected: dict[str, int]
 
 
 def read_mapping(path: Path, catalog: Catalog) -> dict[str, str]:
@@ -93,3 +115,124 @@ def read_manual(root: Path, catalog: Catalog) -> list[ExternalPhoto]:
             raise ExternalIngestError(f"{путь}: папка не model_id каталога")
         фото.extend(ExternalPhoto(файл, путь.name, файл.name, None) for файл in _картинки(путь))
     return фото
+
+
+def _близкие(кандидаты: Sequence[int], опорные: Sequence[int]) -> Iterator[tuple[int, int]]:
+    """Пары (индекс кандидата, индекс опорного) на расстоянии ≤ `DEFAULT_PHASH_HAMMING`.
+
+    Через `close_pairs` по общему списку, а не перебором: тысячи на тысячи — десятки
+    миллионов сравнений. `close_pairs` выдаёт пары с возрастающими индексами, поэтому
+    смешанная пара — ровно та, где первый индекс слева от границы, второй справа.
+    """
+    граница = len(кандидаты)
+    for i, j in close_pairs([*кандидаты, *опорные], DEFAULT_PHASH_HAMMING):
+        if i < граница <= j:
+            yield i, j - граница
+
+
+def build_external_frame(
+    photos: Iterable[ExternalPhoto],
+    detector: Detector,
+    catalog: Catalog,
+    crops_root: Path,
+    *,
+    source: str,
+    holdout_hashes: Sequence[int],
+    pool: Sequence[tuple[str, int]],
+) -> ExternalResult:
+    """Фотографии одного источника → кадр §13.1 после фильтров 1–6 спеки.
+
+    `holdout_hashes` — pHash всех кадров `holdout_ru`: близость к любому из них выбрасывает
+    кадр без оглядки на класс. `pool` — пары `(class_id, phash)` обучающего пула: там
+    выбрасывается только совпадение в своём классе.
+    """
+    индекс = class_index(catalog)
+    класс_модели = member_index(catalog)
+    отказы: Counter[str] = Counter()
+    записи: list[dict[str, Any]] = []
+    классы: list[str] = []
+    хеши: list[int] = []
+    отпечатки: set[str] = set()
+    просмотрено = 0
+
+    for фото in photos:
+        просмотрено += 1
+        байты = фото.path.read_bytes()
+        отпечаток = hashlib.sha256(байты).hexdigest()[:16]
+        if отпечаток in отпечатки:
+            # Тот же файл второй раз записал бы кроп поверх первого, а дедуп ниже удалил бы
+            # общий файл вместе с дублем.
+            отказы["dup_source"] += 1
+            continue
+        отпечатки.add(отпечаток)
+        # На пустом буфере `imdecode` бросает `cv2.error`, а не возвращает `None`.
+        изображение = (
+            cv2.imdecode(np.frombuffer(байты, np.uint8), cv2.IMREAD_COLOR) if байты else None
+        )
+        if изображение is None:
+            отказы["unreadable"] += 1
+            continue
+        высота, ширина = изображение.shape[:2]
+        решение = select_primary(detector.detect(изображение), ширина, высота)
+        if решение.box is None:
+            отказы[решение.reject_reason or "unknown"] += 1
+            continue
+        кроп = crop_image(изображение, решение.box)
+        if min(кроп.shape[:2]) < MIN_SHORT_SIDE_PX:
+            отказы["small"] += 1
+            continue
+
+        class_id = класс_модели[фото.model_id]
+        относительный = f"external/{source}/{class_id}/{отпечаток}.jpg"
+        путь_кропа = crops_root / относительный
+        путь_кропа.parent.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(путь_кропа), кроп):
+            raise OSError(f"не удалось записать кроп {путь_кропа}")
+        # Хеш — по перечитанному JPEG, как в `ingest/build.py`: иначе колонка `phash`
+        # разойдётся с тем, что получит любой код, открывший файл заново.
+        кроп_с_диска = cv2.imread(str(путь_кропа))
+        if кроп_с_диска is None:
+            raise OSError(f"кроп записан, но не читается обратно: {путь_кропа}")
+        хеши.append(phash_of(кроп_с_диска))
+        классы.append(class_id)
+        записи.append(
+            {
+                "photo_id": f"{source}:{отпечаток}",
+                "listing_id": f"{source}:{class_id}:{фото.group}",
+                "source": source,
+                "crop_path": относительный,
+                "brand": catalog.by_id(фото.model_id).brand,
+                "model_id": фото.model_id,
+                "class_idx": индекс[class_id],
+                "body_style": None,
+                "year": None,
+                "bbox": [
+                    float(решение.box.x),
+                    float(решение.box.y),
+                    float(решение.box.w),
+                    float(решение.box.h),
+                ],
+                "bbox_area_frac": float(решение.area_frac),
+                "det_conf": float(решение.box.conf),
+                "phash": 0,  # проставляется ниже, после фильтров
+                "raw_model_string": фото.raw_model_string,
+                "is_multi_car": решение.is_multi_car,
+            }
+        )
+
+    # Причина — первая сработавшая: дубль внутри источника, утечка в эталон, повтор пула.
+    отброшены: dict[int, str] = dict.fromkeys(duplicate_indices(хеши), "dup_source")
+    for i, _ in _близкие(хеши, holdout_hashes):
+        отброшены.setdefault(i, "holdout_leak")
+    for i, j in _близкие(хеши, [хеш for _, хеш in pool]):
+        if pool[j][0] == классы[i]:
+            отброшены.setdefault(i, "dup_pool")
+    for i, причина in отброшены.items():
+        отказы[причина] += 1
+        (crops_root / записи[i]["crop_path"]).unlink(missing_ok=True)
+
+    оставшиеся = [
+        {**запись, "phash": хеши[i]} for i, запись in enumerate(записи) if i not in отброшены
+    ]
+    кадр = pd.DataFrame(оставшиеся, columns=list(COLUMNS)) if оставшиеся else empty_frame()
+    return ExternalResult(frame=кадр, seen=просмотрено, rejected=dict(отказы))
