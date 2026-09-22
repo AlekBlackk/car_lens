@@ -28,7 +28,7 @@ import pandas as pd
 from pipeline.catalog import Catalog, class_index, member_index
 from pipeline.clean import DEFAULT_PHASH_HAMMING, duplicate_indices, phash_of
 from pipeline.crop import Detector, crop_image, select_primary
-from pipeline.hashing import close_pairs
+from pipeline.hashing import bucket_of, close_pairs
 from pipeline.schema import COLUMNS, empty_frame
 
 # Порядок — приоритет при склейке: съёмка с уровня глаз ценнее пресс-фото (фильтры 7–8).
@@ -39,6 +39,11 @@ MAPPING_COLUMNS = ("dir_path", "model_id")
 # Тот же порог, что `min_short_side_px` в `thresholds.json` приложения: кроп мельче
 # приложение не классифицирует, учить на нём незачем.
 MIN_SHORT_SIDE_PX = 120
+
+DEFAULT_MAX_PER_CLASS = 150
+GAP_CLASSES_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "catalog" / "external" / "gap_classes.txt"
+)
 
 
 class ExternalIngestError(ValueError):
@@ -238,3 +243,48 @@ def build_external_frame(
     ]
     кадр = pd.DataFrame(оставшиеся, columns=list(COLUMNS)) if оставшиеся else empty_frame()
     return ExternalResult(frame=кадр, seen=просмотрено, rejected=dict(отказы))
+
+
+def merge_external(
+    frames: Mapping[str, pd.DataFrame], *, max_per_class: int, seed: int
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Склеить кадры источников: межисточниковый дедуп и потолок на класс (фильтры 7–8).
+
+    Источники обходятся в порядке `SOURCE_PRIORITY`: из близкой пары остаётся кадр более
+    приоритетного (`duplicate_indices` оставляет самый ранний), и потолок заполняется им же
+    первым. Внутри источника порядок задаёт `bucket_of(photo_id, seed)` — от порядка строк
+    на входе результат не зависит.
+    """
+    чужие = sorted(set(frames) - set(SOURCE_PRIORITY))
+    if чужие:
+        raise ExternalIngestError(f"неизвестные источники: {', '.join(чужие)}")
+    части = []
+    for источник in SOURCE_PRIORITY:
+        кадр = frames.get(источник)
+        if кадр is None or кадр.empty:
+            continue
+        ключи = [bucket_of(str(photo_id), seed) for photo_id in кадр["photo_id"]]
+        части.append(кадр.assign(_ключ=ключи).sort_values("_ключ", kind="stable"))
+    if not части:
+        return empty_frame(), {}
+
+    всё = pd.concat(части, ignore_index=True)
+    отказы: Counter[str] = Counter()
+    дубли = duplicate_indices([int(хеш) for хеш in всё["phash"]])
+    отказы["dup_cross"] = len(дубли)
+    всё = всё.drop(index=sorted(дубли))
+    сверх = всё.groupby("class_idx", sort=False).cumcount() >= max_per_class
+    отказы["cap"] = int(сверх.sum())
+    итог = всё.loc[~сверх, list(COLUMNS)].reset_index(drop=True)
+    return итог, {причина: n for причина, n in отказы.items() if n}
+
+
+def read_gap_classes(path: Path, catalog: Catalog) -> frozenset[str]:
+    """Классы «дыры» из текстового списка; `#` — комментарий. Чужой `class_id` — ошибка."""
+    известные = {класс.class_id for класс in catalog.classes}
+    строки = (строка.split("#", 1)[0].strip() for строка in path.read_text("utf-8").splitlines())
+    дыра = frozenset(строка for строка in строки if строка)
+    чужие = sorted(дыра - известные)
+    if чужие:
+        raise ExternalIngestError(f"{path}: классов нет в каталоге: {', '.join(чужие)}")
+    return дыра
