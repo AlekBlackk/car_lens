@@ -11,6 +11,8 @@
 вход не повод трогать рабочий путь.
 """
 
+from __future__ import annotations
+
 import csv
 import hashlib
 from collections import Counter
