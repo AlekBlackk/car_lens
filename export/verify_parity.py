@@ -128,6 +128,16 @@ def _parse_args() -> argparse.Namespace:
     # 3.8e-03. То есть на CUDA приёмка падает на исправном графе. `--device cuda` остаётся
     # доступным явным выбором того, кто про TF32 знает.
     парсер.add_argument("--device", default="cpu")
+    # Точность, которая едет на устройство. При `int8` гейт судит просадку квантованной
+    # модели (путь M-1). При `fp32` на телефон едет fp32-граф, совпадающий с PyTorch по
+    # построению, и просадка INT8 считается ради отчёта, но приговором не является; порог
+    # `TOP1_DROP_LIMIT_PP` при этом не трогается — меняется не он, а чью просадку блокировать.
+    парсер.add_argument(
+        "--precision",
+        choices=["int8", "fp32"],
+        default="int8",
+        help="точность, которая едет на устройство: её просадку судит гейт",
+    )
     return парсер.parse_args()
 
 
@@ -318,7 +328,9 @@ def main() -> None:
                 f"при пороге {RAW_MAX_ABS:.0e} — сломан граф, а не квантизация"
             )
         просадка = итоги["deltas"][имя]["int8"]["metrics_pp"]["top1_model"]
-        if просадка < TOP1_DROP_LIMIT_PP:
+        # Проверка графа (raw fp32 выше) безусловна: сломанный граф ломает и fp32. А вот
+        # просадка INT8 блокирует гейт только когда INT8 и едет на устройство.
+        if аргументы.precision == "int8" and просадка < TOP1_DROP_LIMIT_PP:
             провалы.append(
                 f"{имя}: top1_model INT8 ниже базы на {abs(просадка):.2f} п.п. "
                 f"при допуске {abs(TOP1_DROP_LIMIT_PP)} п.п."
@@ -333,6 +345,7 @@ def main() -> None:
     итоги["thresholds"] = {
         "raw_max_abs": RAW_MAX_ABS,
         "top1_drop_limit_pp": TOP1_DROP_LIMIT_PP,
+        "precision": аргументы.precision,
         "failures": провалы,
         "passed": not провалы,
     }

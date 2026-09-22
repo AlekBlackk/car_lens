@@ -29,3 +29,24 @@ def test_флаг_корня_кропов_разбирается(monkeypatch: py
 
     monkeypatch.setattr(sys, "argv", базовые)
     assert _parse_args().crops_root is None
+
+
+def test_флаг_точности_разбирается(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--precision` разбирается, умолчание — `int8` (путь Stanford не меняется)."""
+    pytest.importorskip("litert_torch")
+    from export.verify_parity import _parse_args
+
+    базовые = [
+        "verify_parity.py",
+        "--export",
+        "/e",
+        "--index",
+        "/i",
+        "--checkpoint",
+        "/c.pt",
+    ]
+    monkeypatch.setattr(sys, "argv", [*базовые, "--precision", "fp32"])
+    assert _parse_args().precision == "fp32"
+
+    monkeypatch.setattr(sys, "argv", базовые)
+    assert _parse_args().precision == "int8"

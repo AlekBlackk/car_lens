@@ -225,6 +225,27 @@ UV_PROJECT_ENVIRONMENT=~/.venvs/carlens-export uv run --locked --group export \
   pytest -m export
 ```
 
+### Русская модель
+
+Тот же путь, что у M-1, но с двумя отличиями: калибровка INT8 и паритет читают кропы русского
+пула (флаги `--split pool-clean --crops-root`), а на устройство едет **fp32**, а не INT8 —
+квантование русской модели проваливает гейт паритета на `holdout_ru`, тогда как fp32 совпадает
+с PyTorch. Паритет запускается с `--precision fp32`, чтобы гейт судил ту точность, что едет;
+порог `TOP1_DROP_LIMIT_PP` при этом не трогается. Индекс берётся готовый — тот, по которому
+мерили дообучение (`bench/finetune-ru.md`). Числа и обоснование —
+[`bench/export-ru.md`](bench/export-ru.md).
+
+```bash
+UV_PROJECT_ENVIRONMENT=~/.venvs/carlens-export uv run --locked --group export \
+  python -m export.to_tflite --checkpoint $CARLENS_DATA_ROOT/runs/<прогон>/last.pt \
+  --split pool-clean --crops-root $CARLENS_DATA_ROOT/harvest/crops
+UV_PROJECT_ENVIRONMENT=~/.venvs/carlens-export uv run --locked --group export \
+  python -m export.verify_parity --export $CARLENS_DATA_ROOT/runs/<прогон>/export \
+  --index $CARLENS_DATA_ROOT/index/finetune_ru_mnv4m \
+  --checkpoint $CARLENS_DATA_ROOT/runs/<прогон>/last.pt \
+  --splits holdout_ru --crops-root $CARLENS_DATA_ROOT/harvest/crops --device cpu --precision fp32
+```
+
 ## Экспорт детектора M-1.5
 
 Детектор собирается в **третьей** venv, отдельно от классификатора: ultralytics
