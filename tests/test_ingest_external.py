@@ -230,3 +230,12 @@ def test_совпадение_с_пулом_только_в_своём_клас�
 
     assert свой.rejected == {"dup_pool": 1}
     assert len(чужой.frame) == 1
+
+
+def test_cli_manual_без_таблицы_а_набор_с_таблицей(tmp_path: Path) -> None:
+    from scripts.ingest_external import main
+
+    with pytest.raises(SystemExit, match="нужна --mapping"):
+        main(["--source", "autoevolution", "--root", str(tmp_path)])
+    with pytest.raises(SystemExit, match="у manual нет таблицы"):
+        main(["--source", "manual", "--root", str(tmp_path), "--mapping", "x.csv"])

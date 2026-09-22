@@ -246,6 +246,25 @@ UV_PROJECT_ENVIRONMENT=~/.venvs/carlens-export uv run --locked --group export \
   --splits holdout_ru --crops-root $CARLENS_DATA_ROOT/harvest/crops --device cpu --precision fp32
 ```
 
+### Внешние данные
+
+Кадры сверх Commons: готовые наборы (`autoevolution`, `skillfactory`) по таблицам
+соответствия `catalog/external/<источник>.csv` (`dir_path,model_id`) и ручной сбор владельца
+в `$CARLENS_DATA_ROOT/external/manual/<model_id>/`. Каждый источник проходит детектор,
+дедуп и **отсечение утечки в `holdout_ru`** (pHash ≤ 6 к любому кадру эталона, без учёта
+класса), затем склейка с `pool-clean` в `pool-plus` с потолком 150 кадров на класс.
+Дизайн — `docs/superpowers/specs/2026-09-22-external-data-design.md`, итог приёма —
+[`bench/external-ingest.md`](bench/external-ingest.md).
+
+```bash
+uv run --group train python -m scripts.ingest_external --source manual \
+  --root $CARLENS_DATA_ROOT/external/manual
+uv run --group train python -m scripts.ingest_external --source autoevolution \
+  --root $CARLENS_DATA_ROOT/external/autoevolution --mapping catalog/external/autoevolution.csv
+uv run python -m scripts.build_pool_plus --sources manual autoevolution
+uv run python -m scripts.external_sheets --out /tmp/sheets --classes lada__vesta
+```
+
 ## Экспорт детектора M-1.5
 
 Детектор собирается в **третьей** venv, отдельно от классификатора: ultralytics
