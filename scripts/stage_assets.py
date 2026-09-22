@@ -38,8 +38,14 @@ from export.provenance import check_provenance
     "score_layout",
     "max_det",
 )
+# Классификатор — единственный файл, чьё имя зависит от точности: int8 (путь M-1) или
+# fp32 (русская модель, §Task 3). Имя выбирает флаг `--precision`, поэтому в `ИМЕНА` его
+# нет — его подставляет `stage`.
+ФАЙЛ_КЛАССИФИКАТОРА = {
+    "int8": "classifier_int8.tflite",
+    "fp32": "classifier_fp32.tflite",
+}
 ИМЕНА = {
-    "classifier": "classifier_int8.tflite",
     "detector": "detector_fp32.tflite",
     "index": "catalog_index.bin",
     "meta": "catalog_meta.json",
@@ -123,6 +129,7 @@ def _контракт(detector_report: Mapping[str, Any]) -> dict[str, Any]:
 def build_manifest(
     *,
     files: Mapping[str, Path],
+    имена: Mapping[str, str],
     export_report: Mapping[str, Any],
     catalog_meta: Mapping[str, Any],
     detector_report: Mapping[str, Any],
@@ -132,11 +139,11 @@ def build_manifest(
     манифест_экспорта = export_report["manifest"]
     описания = {
         ключ: {
-            "name": ИМЕНА[ключ],
+            "name": имя,
             "size": files[ключ].stat().st_size,
             "sha256": sha256_of_file(files[ключ]),
         }
-        for ключ in ИМЕНА
+        for ключ, имя in имена.items()
     }
     return {
         "files": описания,
@@ -238,17 +245,28 @@ def _каталог_индекса(run: Path, index_dir: str | None) -> Path:
     )
 
 
-def stage(run: Path, detector: Path, out: Path, *, index_dir: str | None = None) -> Path:
+def stage(
+    run: Path,
+    detector: Path,
+    out: Path,
+    *,
+    index_dir: str | None = None,
+    precision: str = "int8",
+) -> Path:
     """Разложить файлы прогона в `out` и написать рядом манифест. Вернуть его путь.
 
     Четыре файла копируются из прогона, ещё два — `thresholds.json` и `calibration.json`
     (§13.5, §13.6) — пишутся плейсхолдерами на месте: копировать их неоткуда, пока нет
     негативов и калибровочной таблицы.
 
-    Ждёт раскладку прогона обучения: `run/export/` с `classifier_int8.tflite` и
+    Ждёт раскладку прогона обучения: `run/export/` с файлом классификатора и
     `export_report.json`, каталог индекса с `catalog_index.bin` и `catalog_meta.json`,
     `detector_report.json` рядом с графом детектора (так его пишет
     `scripts/export_yolo.py`).
+
+    `precision` выбирает, какой классификатор разложить и под каким именем записать в
+    манифест: `int8` (`classifier_int8.tflite`, путь M-1) или `fp32`
+    (`classifier_fp32.tflite`). Остальные пять имён точности не зависят.
 
     `index_dir` — путь к каталогу индекса: относительный считается от `run`, абсолютный
     берётся как есть. `None` означает «спросить у `parity.json`»: путь берётся оттуда и
@@ -259,6 +277,9 @@ def stage(run: Path, detector: Path, out: Path, *, index_dir: str | None = None)
     сначала, а отказать потом значило бы оставить в дереве сборки полурассинхронизированный
     набор, которым инструментальные тесты воспользуются как настоящим.
     """
+    # Имя классификатора зависит от точности; остальные пять фиксированы. Локальная карта
+    # используется всюду вместо глобальной `ИМЕНА`: источник, цели копирования, манифест.
+    имена = {**ИМЕНА, "classifier": ФАЙЛ_КЛАССИФИКАТОРА[precision]}
     отчёт_экспорта = _обязательный_json(
         run / "export" / "export_report.json",
         "сначала `python -m export.to_tflite` — без манифеста экспорта происхождение не сверить",
@@ -277,8 +298,8 @@ def stage(run: Path, detector: Path, out: Path, *, index_dir: str | None = None)
     манифест_индекса = _load_json(индекс / "index_manifest.json")
     отчёт_индекса = None if манифест_индекса is not None else _load_json(индекс / "report.json")
     классификатор = _обязательный_файл(
-        run / "export" / "classifier_int8.tflite",
-        "вероятно, экспорт шёл с --skip-int8; на устройство едет квантованная модель",
+        run / "export" / имена["classifier"],
+        f"нет {имена['classifier']} в run/export: экспорт не дал модель точности {precision}",
     )
     источники = {
         "classifier": классификатор,
@@ -303,7 +324,7 @@ def stage(run: Path, detector: Path, out: Path, *, index_dir: str | None = None)
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    цели = {ключ: out / имя for ключ, имя in ИМЕНА.items()}
+    цели = {ключ: out / имя for ключ, имя in имена.items()}
     for ключ, источник in источники.items():
         shutil.copy2(источник, цели[ключ])
     write_placeholders(out)
@@ -312,6 +333,7 @@ def stage(run: Path, detector: Path, out: Path, *, index_dir: str | None = None)
     # уедет на устройство, и оборванное копирование обязано разойтись с ним, а не совпасть.
     манифест = build_manifest(
         files=цели,
+        имена=имена,
         export_report=отчёт_экспорта,
         catalog_meta=мета,
         detector_report=отчёт_детектора,
@@ -333,12 +355,24 @@ def _parse_args() -> argparse.Namespace:
     парсер.add_argument(
         "--index", default=None, help="каталог индекса; по умолчанию принятый в parity.json"
     )
+    парсер.add_argument(
+        "--precision",
+        choices=["int8", "fp32"],
+        default="int8",
+        help="точность классификатора: какой .tflite разложить (умолчание int8, путь M-1)",
+    )
     return парсер.parse_args()
 
 
 def main() -> None:
     аргументы = _parse_args()
-    путь = stage(аргументы.run, аргументы.detector, аргументы.out, index_dir=аргументы.index)
+    путь = stage(
+        аргументы.run,
+        аргументы.detector,
+        аргументы.out,
+        index_dir=аргументы.index,
+        precision=аргументы.precision,
+    )
     print(f"манифест: {путь}")
 
 

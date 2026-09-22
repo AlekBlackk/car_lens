@@ -9,7 +9,13 @@ from typing import Any
 
 import pytest
 
-from scripts.stage_assets import ИМЕНА, ManifestError, build_manifest, stage
+from scripts.stage_assets import (
+    ИМЕНА,
+    ФАЙЛ_КЛАССИФИКАТОРА,
+    ManifestError,
+    build_manifest,
+    stage,
+)
 
 ЧЕКПОИНТ_SHA = "aa" * 32
 
@@ -59,20 +65,25 @@ from scripts.stage_assets import ИМЕНА, ManifestError, build_manifest, stag
 }
 
 
-def _файлы(tmp_path: Path) -> dict[str, Path]:
-    # Имена берутся из самого модуля, а не переписываются здесь: манифест описывает все
-    # ключи `ИМЕНА`, и локальная копия словаря разошлась бы с ним на первом же добавлении.
+def _имена(precision: str = "int8") -> dict[str, str]:
+    # Имя классификатора зависит от точности, остальные пять берутся из модуля. Локальная
+    # копия словаря разошлась бы с `stage`/`build_manifest` на первом же добавлении файла.
+    return {**ИМЕНА, "classifier": ФАЙЛ_КЛАССИФИКАТОРА[precision]}
+
+
+def _файлы(tmp_path: Path, precision: str = "int8") -> dict[str, Path]:
     пути: dict[str, Path] = {}
-    for ключ, имя in ИМЕНА.items():
+    for ключ, имя in _имена(precision).items():
         путь = tmp_path / имя
         путь.write_bytes(имя.encode("utf-8"))
         пути[ключ] = путь
     return пути
 
 
-def _собрать(tmp_path: Path, **правки: Any) -> dict[str, Any]:
+def _собрать(tmp_path: Path, *, precision: str = "int8", **правки: Any) -> dict[str, Any]:
     аргументы: dict[str, Any] = {
-        "files": _файлы(tmp_path),
+        "files": _файлы(tmp_path, precision),
+        "имена": _имена(precision),
         "export_report": ОТЧЁТ_ЭКСПОРТА,
         "catalog_meta": МЕТА,
         "detector_report": ОТЧЁТ_ДЕТЕКТОРА,
@@ -95,7 +106,7 @@ def test_манифест_несёт_четыре_группы(tmp_path: Path) -
 
 def test_каждый_файл_описан_размером_и_хешем(tmp_path: Path) -> None:
     манифест = _собрать(tmp_path)
-    assert set(манифест["files"]) == set(ИМЕНА)
+    assert set(манифест["files"]) == set(ИМЕНА) | {"classifier"}
     for запись in манифест["files"].values():
         assert set(запись) == {"name", "size", "sha256"}
         assert len(запись["sha256"]) == 64
@@ -305,3 +316,33 @@ def test_манифест_описывает_плейсхолдеры(tmp_path: 
     assert файлы["thresholds"]["name"] == "thresholds.json"
     assert файлы["calibration"]["name"] == "calibration.json"
     assert файлы["thresholds"]["size"] == (выход / "thresholds.json").stat().st_size
+
+
+def test_stage_fp32_разкладывает_модель_под_именем_точности(tmp_path: Path) -> None:
+    """`--precision fp32` кладёт `classifier_fp32.tflite` и пишет это имя в манифест.
+
+    Android читает имя классификатора из манифеста (`files.classifier.name`), а не по
+    константе, поэтому именно оно определяет, какой файл поедет на устройство.
+    """
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    (прогон / "export" / "classifier_fp32.tflite").write_bytes(b"fp32")
+    куда = tmp_path / "models"
+
+    путь = stage(прогон, детектор, куда, precision="fp32")
+
+    имена = sorted(п.name for п in куда.iterdir())
+    assert "classifier_fp32.tflite" in имена
+    assert "classifier_int8.tflite" not in имена
+    записанный = json.loads(путь.read_text(encoding="utf-8"))
+    assert записанный["files"]["classifier"]["name"] == "classifier_fp32.tflite"
+
+
+def test_stage_умолчание_точности_кладёт_int8(tmp_path: Path) -> None:
+    """Без флага точности путь M-1 не меняется: разложен `classifier_int8.tflite`."""
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    куда = tmp_path / "models"
+
+    путь = stage(прогон, детектор, куда)
+
+    записанный = json.loads(путь.read_text(encoding="utf-8"))
+    assert записанный["files"]["classifier"]["name"] == "classifier_int8.tflite"
