@@ -127,18 +127,11 @@ CITROEN_Berlingo_20152018,citroen__berlingo,CITROEN,CITROEN Berlingo,1996-2024,4
 CITROEN_Berlingo_2018Present,citroen__berlingo,CITROEN,CITROEN Berlingo,1996-2024,27
 2008_Citroen_C4_Coupe,citroen__c4,CITROEN,CITROEN C4 Coupe,2004-2010,26
 CITROEN_C4_2020Present,citroen__c4,CITROEN,CITROEN C4,2020-2024,55
-CITROEN_C4_Cactus_20142018,citroen__c4,CITROEN,CITROEN C4 Cactus,2014-2020,31
-CITROEN_C4_Cactus_20182020,citroen__c4,CITROEN,CITROEN C4 Cactus,2014-2020,21
 CITROEN_C4_Coupe_20042008,citroen__c4,CITROEN,CITROEN C4 Coupe,2004-2010,43
 CITROEN_C4_Hatchback_20042008,citroen__c4,CITROEN,CITROEN C4 Hatchback,2004-2013,31
 CITROEN_C4_Hatchback_20102013,citroen__c4,CITROEN,CITROEN C4 Hatchback,2004-2013,78
-CITROEN_C4_Picasso_20072010,citroen__c4,CITROEN,CITROEN C4 Picasso,2007-2024,37
-CITROEN_C4_Picasso_20102013,citroen__c4,CITROEN,CITROEN C4 Picasso,2007-2024,23
-CITROEN_C4_Picasso_20132016,citroen__c4,CITROEN,CITROEN C4 Picasso,2007-2024,82
 CITROEN_C4_Sedan_20072012,citroen__c4,CITROEN,CITROEN C4 Sedan,2007-2012,29
 CITROEN_C4_X_2022Present,citroen__c4,CITROEN,CITROEN C4 X,2020-2024,39
-CITROEN_Grand_C4_Picasso_20132016,citroen__c4,CITROEN,CITROEN Grand C4 Picasso,2006-2024,83
-CITROEN_Grand_C4_Picasso_2016Present,citroen__c4,CITROEN,CITROEN Grand C4 Picasso,2006-2024,31
 DAEWOO_Matiz_20012005,daewoo__matiz,DAEWOO,DAEWOO Matiz,1998-2009,32
 FORD_Fiesta_3_doors_2017Present,ford__fiesta,FORD,FORD Fiesta 3 doors,1976-2024,22
 FORD_Fiesta_5_doors_20172021,ford__fiesta,FORD,FORD Fiesta 5 doors,1989-2024,50
@@ -190,7 +183,6 @@ HONDA_Accord_Coupe_19941998,honda__accord,HONDA,HONDA Accord Coupe,1994-2016,22
 HONDA_Accord_Coupe_20122015,honda__accord,HONDA,HONDA Accord Coupe,1994-2016,32
 HONDA_Accord_Coupe_20152016,honda__accord,HONDA,HONDA Accord Coupe,1994-2016,30
 HONDA_Accord_Coupe_US_20082012,honda__accord,HONDA,HONDA Accord Coupe US,1994-2016,46
-HONDA_Accord_Crosstour_20092013,honda__accord,HONDA,HONDA Accord Crosstour,2009-2016,51
 HONDA_Accord_Sedan_US_20022005,honda__accord,HONDA,HONDA Accord Sedan US,1981-2024,40
 HONDA_Accord_Sedan_US_20052007,honda__accord,HONDA,HONDA Accord Sedan US,1981-2024,30
 HONDA_Accord_Sedan_US_20082012,honda__accord,HONDA,HONDA Accord Sedan US,1981-2024,54
@@ -252,11 +244,7 @@ HYUNDAI_Elantra_20102014,hyundai__elantra,HYUNDAI,HYUNDAI Elantra,2000-2024,73
 HYUNDAI_Elantra_20142016,hyundai__elantra,HYUNDAI,HYUNDAI Elantra,2000-2024,42
 HYUNDAI_Elantra_4_doors_20062010,hyundai__elantra,HYUNDAI,HYUNDAI Elantra 4 doors,2000-2024,49
 HYUNDAI_Elantra_Coupe_20122014,hyundai__elantra,HYUNDAI,HYUNDAI Elantra Coupe,2012-2014,26
-HYUNDAI_Elantra_GT_2012Present,hyundai__elantra,HYUNDAI,HYUNDAI Elantra GT,2000-2024,33
-HYUNDAI_Elantra_GT_20152017,hyundai__elantra,HYUNDAI,HYUNDAI Elantra GT,2012-2024,25
-HYUNDAI_Elantra_GT_2017Present,hyundai__elantra,HYUNDAI,HYUNDAI Elantra GT,2012-2024,72
 HYUNDAI_Elantra_N_Line_2020Present,hyundai__elantra,HYUNDAI,HYUNDAI Elantra N Line,2020-2024,87
-HYUNDAI_Elantra_Touring_20092012,hyundai__elantra,HYUNDAI,HYUNDAI Elantra Touring,2009-2012,22
 HYUNDAI_Elantra__2020Present,hyundai__elantra,HYUNDAI,HYUNDAI Elantra,2000-2024,73
 2019_Hyundai_Santa_Fe,hyundai__santa_fe,HYUNDAI,HYUNDAI Santa Fe US,2000-2024,183
 HYUNDAI_Santa_Fe_20002004,hyundai__santa_fe,HYUNDAI,HYUNDAI Santa Fe,2000-2024,21
@@ -289,8 +277,6 @@ JEEP_Grand_Cherokee_SRT8_20122014,jeep__grand_cherokee,JEEP,JEEP Grand Cherokee 
 KIA_Ceed_SportWagon_2012Present,kia__ceed,KIA,KIA Ceed SportWagon,2007-2024,68
 KIA_Pro_ceed_20072013,kia__ceed,KIA,KIA Pro ceed,2007-2024,32
 KIA_Pro_ceed_20132018,kia__ceed,KIA,KIA Pro ceed,2007-2024,35
-KIA_XCeed_20192022,kia__ceed,KIA,KIA XCeed,2019-2024,38
-KIA_XCeed_2022Present,kia__ceed,KIA,KIA XCeed,2019-2024,62
 KIA_ceed_20072009,kia__ceed,KIA,KIA ceed,2007-2024,43
 KIA_ceed_20092012,kia__ceed,KIA,KIA ceed,2007-2024,45
 KIA_ceed_2015Present,kia__ceed,KIA,KIA ceed,2007-2024,70
@@ -601,7 +587,6 @@ SUBARU_Outback_20142019,subaru__outback,SUBARU,SUBARU Outback,1998-2024,34
 SUBARU_Outback_20192022,subaru__outback,SUBARU,SUBARU Outback,1998-2024,92
 SUZUKI_Escudo__Grand_Vitara_5_Doors_19982005,suzuki__grand_vitara,SUZUKI,SUZUKI Escudo  Grand Vitara 5 Doors,1991-2014,30
 SUZUKI_Grand_Vitara_5_Doors_20082014,suzuki__grand_vitara,SUZUKI,SUZUKI Grand Vitara 5 Doors,1991-2014,89
-SUZUKI_Grand_Vitara_XL7_20042006,suzuki__grand_vitara,SUZUKI,SUZUKI Grand Vitara XL7,2004-2009,31
 SUZUKI_SX4_20062013,suzuki__sx4,SUZUKI,SUZUKI SX4,2006-2024,61
 SUZUKI_SX4_20132016,suzuki__sx4,SUZUKI,SUZUKI SX4,2006-2024,79
 SUZUKI_SX4_SCross_2016Present,suzuki__sx4,SUZUKI,SUZUKI SX4 SCross,2006-2024,54
@@ -628,7 +613,6 @@ TOYOTA_Camry_20172020,toyota__camry,TOYOTA,TOYOTA Camry,1983-2024,95
 TOYOTA_Camry_2020Present,toyota__camry,TOYOTA,TOYOTA Camry,1983-2024,51
 TOYOTA_Camry_Hybrid_20092014,toyota__camry,TOYOTA,TOYOTA Camry Hybrid,1983-2024,59
 TOYOTA_Camry_Hybrid_2022Present,toyota__camry,TOYOTA,TOYOTA Camry Hybrid,1983-2024,23
-TOYOTA_Camry_Solara_20042009,toyota__camry,TOYOTA,TOYOTA Camry Solara,1983-2024,28
 2000_Toyota_Corolla_Sedan,toyota__corolla,TOYOTA,TOYOTA Corolla Sedan,1992-2024,28
 2014_Toyota_Corolla_US,toyota__corolla,TOYOTA,TOYOTA Corolla US,2013-2024,71
 2023_Toyota_Corolla,toyota__corolla,TOYOTA,TOYOTA Corolla EU,1992-2024,21
@@ -672,7 +656,6 @@ TOYOTA_RAV4_5_Doors_20152018,toyota__rav4,TOYOTA,TOYOTA RAV4 5 Doors,2000-2024,6
 TOYOTA_Rav4_2018Present,toyota__rav4,TOYOTA,TOYOTA Rav4,2000-2024,182
 2013_Volkswagen_Golf_VII_R__5_Doors,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf VII R 5 Doors,2002-2024,56
 2015_Volkswagen_Golf_VII_R_Variant,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf VII R Variant,2015-2024,22
-VOLKSWAGEN_CrossGolf_20072010,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN CrossGolf,1974-2024,32
 VOLKSWAGEN_Golf_Alltrack_2020Present,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf Alltrack,2014-2024,34
 VOLKSWAGEN_Golf_GTD_3_Doors_20092013,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf GTD 3 Doors,1976-2024,53
 VOLKSWAGEN_Golf_GTD_5_Doors_20092013,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf GTD 5 Doors,1976-2024,26
@@ -683,11 +666,8 @@ VOLKSWAGEN_Golf_GTI_2020Present,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf GTI,
 VOLKSWAGEN_Golf_III_Cabrio_19931998,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf III Cabrio,1993-2016,53
 VOLKSWAGEN_Golf_III_GTI_19921997,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf III GTI,1976-2024,37
 VOLKSWAGEN_Golf_IV_Cabrio_19982002,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf IV Cabrio,1993-2016,34
-VOLKSWAGEN_Golf_Plus_20082013,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf Plus,2005-2013,38
 VOLKSWAGEN_Golf_R_2021Present,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf R,2002-2024,76
 VOLKSWAGEN_Golf_R_Variant_2021Present,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf R Variant,2015-2024,22
-VOLKSWAGEN_Golf_Sportsvan_20142017,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf Sportsvan,2014-2024,49
-VOLKSWAGEN_Golf_Sportsvan_2017Present,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf Sportsvan,2014-2024,34
 VOLKSWAGEN_Golf_VII_3_Doors_20122017,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf VII 3 Doors,1974-2019,34
 VOLKSWAGEN_Golf_VII_5_Doors_20122017,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf VII 5 Doors,1974-2024,98
 VOLKSWAGEN_Golf_VII_5_Doors_20172019,volkswagen__golf,VOLKSWAGEN,VOLKSWAGEN Golf VII 5 Doors,1974-2024,21
@@ -718,7 +698,6 @@ VOLKSWAGEN_Passat_2019Present,volkswagen__passat,VOLKSWAGEN,VOLKSWAGEN Passat,19
 VOLKSWAGEN_Passat_Alltrack_20122015,volkswagen__passat,VOLKSWAGEN,VOLKSWAGEN Passat Alltrack,2012-2024,56
 VOLKSWAGEN_Passat_Alltrack_20152019,volkswagen__passat,VOLKSWAGEN,VOLKSWAGEN Passat Alltrack,2012-2024,76
 VOLKSWAGEN_Passat_Alltrack_2019Present,volkswagen__passat,VOLKSWAGEN,VOLKSWAGEN Passat Alltrack,2012-2024,25
-VOLKSWAGEN_Passat_CC_20092011,volkswagen__passat,VOLKSWAGEN,VOLKSWAGEN Passat CC,1981-2024,108
 VOLKSWAGEN_Passat_R36_20082010,volkswagen__passat,VOLKSWAGEN,VOLKSWAGEN Passat R36,2008-2010,28
 VOLKSWAGEN_Passat_R36_Variant_20082010,volkswagen__passat,VOLKSWAGEN,VOLKSWAGEN Passat R36 Variant,2008-2010,22
 VOLKSWAGEN_Passat_US_20122019,volkswagen__passat,VOLKSWAGEN,VOLKSWAGEN Passat US,1981-2024,26
