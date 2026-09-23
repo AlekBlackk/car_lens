@@ -165,6 +165,14 @@ val проверкаМанифеста =
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }
     .configureEach { dependsOn(проверкаМанифеста) }
 
+// JS импортирует `catalog_meta.json`, `thresholds.json` и `calibration.json` прямо из
+// `models/` (`src/vision/labels.ts`, `thresholds.ts`), а входы бандлера RN — только
+// `*.js|*.ts` вне `**/android/**`. Без этой строки новая раскладка моделей не делает бандл
+// устаревшим: Gradle берёт его из прошлой сборки, и в APK едут новые веса со старыми
+// подписями классов и порогами (так уехала 0.3 до правки, 2026-09-23).
+tasks.matching { it.name.startsWith("createBundle") && it.name.endsWith("JsAndAssets") }
+    .configureEach { inputs.dir(rootProject.file("models")).withPropertyName("carlensModels") }
+
 dependencies {
     // Будущие задачи (3-11) добавят сюда вызовы FrameProcessorPlugin из `:vision`.
     implementation(project(":vision"))
