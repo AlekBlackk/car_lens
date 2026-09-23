@@ -12,12 +12,23 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import random
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+import cv2
+import numpy as np
+import pandas as pd
+
+from pipeline.clean import phash_of
+from pipeline.crop import VEHICLE_CLASSES, Detection, Detector, crop_image, select_primary
 from pipeline.harvest.aliases import matches_needle, normalize_filename
+from pipeline.harvest.cache import cache_path
+from pipeline.schema import COLUMNS, empty_frame
 
 
 class NegativesError(ValueError):
@@ -107,3 +118,165 @@ def sample_candidates(
         кандидаты.extend((группа, путь) for путь in пути[:per_group])
     генератор.shuffle(кандидаты)
     return кандидаты
+
+
+NEG_KINDS = ("off_catalog", "detector_fp", "truck_bus")
+# Кроп короче 120 px телефон не классифицирует — показывает «Подойдите ближе» (§6.4), и
+# порог сходства такой кадр не видит никогда.
+MIN_SHORT_SIDE_PX = 120
+# Кадры харвеста, где при штатном пороге 0.5 машины не нашлось или CLIP счёл кадр не
+# фотографией машины: всё транспортное, что YOLO найдёт там при 0.35, — ложное срабатывание
+# в том смысле, какой имеет в виду §13.5.
+REJECT_REASONS = frozenset({"no_vehicle", "not_a_car_photo"})
+# COCO 2 — car; 5 и 7 — bus и truck (§4.1).
+_ЛЕГКОВОЙ = 2
+
+
+def neg_kind_of(listing_id: str) -> str:
+    """Вид негатива хранится первым сегментом `listing_id`: у схемы §13.1 нет своей колонки."""
+    вид = listing_id.split("/", 1)[0]
+    if вид not in NEG_KINDS:
+        raise NegativesError(f"{listing_id!r}: вид {вид!r} не из {NEG_KINDS}")
+    return вид
+
+
+@dataclass(frozen=True, slots=True)
+class NegativeCandidate:
+    """Фото-источник. `off_catalog` — один главный бокс; иначе — каждый транспортный бокс."""
+
+    path: Path
+    off_catalog: bool
+    origin: str
+    raw_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class NegativesResult:
+    frame: pd.DataFrame
+    kept: dict[str, int]
+    rejected: dict[str, int]
+
+
+def _боксы(
+    кандидат: NegativeCandidate, детекции: list[Detection], ширина: int, высота: int
+) -> tuple[list[tuple[str, Detection, float]], str | None]:
+    """Боксы кандидата с видом и долей площади; вторым — причина, если боксов нет."""
+    площадь = float(ширина * высота)
+    if кандидат.off_catalog:
+        решение = select_primary(детекции, ширина, высота)
+        if решение.box is None:
+            return [], решение.reject_reason or "no_vehicle"
+        return [("off_catalog", решение.box, решение.area_frac)], None
+    транспорт = [д for д in детекции if д.cls in VEHICLE_CLASSES]
+    if not транспорт:
+        return [], "no_vehicle"
+    return [
+        ("detector_fp" if д.cls == _ЛЕГКОВОЙ else "truck_bus", д, д.area / площадь)
+        for д in транспорт
+    ], None
+
+
+def build_negative_frame(
+    candidates: Iterable[NegativeCandidate],
+    detector: Detector,
+    crops_root: Path,
+    *,
+    off_catalog_cap: int,
+    excluded_photos: frozenset[str],
+) -> NegativesResult:
+    """Кандидаты → строки `negatives.parquet` и кропы под `crops_root/negatives/<вид>/`."""
+    оставлено: Counter[str] = Counter()
+    отказы: Counter[str] = Counter()
+    записи: list[dict[str, Any]] = []
+    отпечатки: set[str] = set()
+    for кандидат in candidates:
+        if кандидат.off_catalog and оставлено["off_catalog"] >= off_catalog_cap:
+            continue
+        байты = кандидат.path.read_bytes()
+        отпечаток = hashlib.sha256(байты).hexdigest()[:16]
+        if отпечаток in отпечатки:
+            отказы["dup_source"] += 1
+            continue
+        отпечатки.add(отпечаток)
+        изображение = (
+            cv2.imdecode(np.frombuffer(байты, np.uint8), cv2.IMREAD_COLOR) if байты else None
+        )
+        if изображение is None:
+            отказы["unreadable"] += 1
+            continue
+        высота, ширина = изображение.shape[:2]
+        боксы, причина = _боксы(кандидат, detector.detect(изображение), ширина, высота)
+        if причина is not None:
+            отказы[причина] += 1
+        for номер, (вид, бокс, доля) in enumerate(боксы):
+            photo_id = f"negatives:{отпечаток}:{номер}"
+            if photo_id in excluded_photos:
+                отказы["excluded"] += 1
+                continue
+            кроп = crop_image(изображение, бокс)
+            if min(кроп.shape[:2]) < MIN_SHORT_SIDE_PX:
+                отказы["small"] += 1
+                continue
+            относительный = f"negatives/{вид}/{отпечаток}_{номер}.jpg"
+            путь = crops_root / относительный
+            путь.parent.mkdir(parents=True, exist_ok=True)
+            if not cv2.imwrite(str(путь), кроп):
+                raise OSError(f"не удалось записать кроп {путь}")
+            # Хеш — по перечитанному JPEG, как в `ingest/external.py`.
+            перечитан = cv2.imread(str(путь))
+            if перечитан is None:
+                raise OSError(f"кроп записан, но не читается обратно: {путь}")
+            оставлено[вид] += 1
+            записи.append(
+                {
+                    "photo_id": photo_id,
+                    "listing_id": f"{вид}/{кандидат.origin}",
+                    "source": "negatives",
+                    "crop_path": относительный,
+                    "brand": None,
+                    "model_id": None,
+                    "class_idx": None,
+                    "body_style": None,
+                    "year": None,
+                    "bbox": [float(бокс.x), float(бокс.y), float(бокс.w), float(бокс.h)],
+                    "bbox_area_frac": float(доля),
+                    "det_conf": float(бокс.conf),
+                    "phash": phash_of(перечитан),
+                    "raw_model_string": кандидат.raw_name,
+                    "is_multi_car": False,
+                }
+            )
+    кадр = pd.DataFrame(записи, columns=list(COLUMNS)) if записи else empty_frame()
+    return NegativesResult(frame=кадр, kept=dict(оставлено), rejected=dict(отказы))
+
+
+def reject_candidates(
+    reject_log: Path, reject_index: Path, harvest_root: Path
+) -> tuple[list[NegativeCandidate], int]:
+    """Отбраковки харвеста с причинами `REJECT_REASONS`, у которых сырой кадр на диске.
+
+    Журнал знает причину, индекс — sha256 сырого файла; связь — пара
+    `(class_id, source_item_id)`. Вторым значением — сколько подходящих записей без файла:
+    это число идёт в отчёт, а не теряется молча.
+    """
+    хеши = {
+        (строка["class_id"], строка["source_item_id"]): строка["sha256"]
+        for строка in csv.DictReader(reject_index.read_text(encoding="utf-8").splitlines())
+    }
+    кандидаты: list[NegativeCandidate] = []
+    без_файла = 0
+    for строка in csv.DictReader(reject_log.read_text(encoding="utf-8").splitlines()):
+        if строка["reason"] not in REJECT_REASONS:
+            continue
+        ключ = (строка["class_id"], строка["source_item_id"])
+        хеш = хеши.get(ключ)
+        путь = cache_path(harvest_root, строка["source"], хеш, "jpg") if хеш else None
+        if путь is None or not путь.is_file():
+            без_файла += 1
+            continue
+        кандидаты.append(
+            NegativeCandidate(
+                путь, False, f"{строка['source']}/{строка['source_item_id']}", ":".join(ключ)
+            )
+        )
+    return кандидаты, без_файла
