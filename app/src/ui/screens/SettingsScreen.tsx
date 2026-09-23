@@ -1,12 +1,13 @@
 /**
- * Экран «Настройки» §6.6: порог подписи, два переключателя и версия каталога.
+ * Экран «Настройки» §6.6: порог подписи, два переключателя, версии приложения и каталога.
  *
  * Компонент ничего не пишет на диск. Наружу уходит целиком новый объект настроек, а запись,
  * как и чистка очереди отзывов при выключении сбора, живёт в корне приложения — там же, где
  * хранилище. Так у настроек один писатель, а не два.
  */
 import React from 'react'
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
+import { NativeModules, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
+import { версияПриложения, type КонстантыВерсии } from '../../appInfo'
 import { МАКСИМУМ_ПОРОГА, type Настройки } from '../../store/settings'
 import { catalogInfo } from '../../vision/labels'
 
@@ -73,6 +74,11 @@ export default function SettingsScreen(свойства: СвойстваНас�
       <Text style={styles.пояснение}>
         §8: сбор выключен по умолчанию и включается только вручную. Данные не покидают
         телефон; при выключении уже собранная очередь стирается.
+      </Text>
+
+      <Text style={styles.раздел}>Приложение</Text>
+      <Text style={styles.пояснение}>
+        версия {версияПриложения(NativeModules.CarlensAppInfo as КонстантыВерсии | undefined)}
       </Text>
 
       <Text style={styles.раздел}>Каталог</Text>

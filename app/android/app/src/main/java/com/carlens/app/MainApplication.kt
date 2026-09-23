@@ -27,6 +27,8 @@ class MainApplication : Application(), ReactApplication {
               // приложения приходится добавлять руками. Отдаёт JS ключ шифрования
               // хранилища (§9: история в MMKV с шифрованием).
               add(CarlensStoragePackage())
+              // Версия APK для экрана «Настройки».
+              add(AppInfoPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"
