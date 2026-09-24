@@ -1,1 +1,11 @@
 kind,value,reason
+name,2005_Chevrolet_MatizSpark,Chevrolet Matiz/Spark M200 — тот же кузов что Daewoo Matiz (daewoo__matiz)
+name,DAEWOO_Gentra_20052011,Daewoo Gentra T250 — седан Chevrolet Aveo (chevrolet__aveo)
+name,HOLDEN_Barina_RS_2014Present,Holden Barina RS — хэтч Chevrolet Aveo T300 (chevrolet__aveo)
+name,SUZUKI_Across_2020Present,Suzuki Across — ребейдж Toyota RAV4 (toyota__rav4)
+name,SUZUKI_Swace_2020Present,Suzuki Swace — ребейдж универсала Toyota Corolla (toyota__corolla)
+name,SUZUKI_SCross_2021Present,Suzuki SX4 S-Cross — второе поколение SX4 (suzuki__sx4) по правилу §7
+name,FIAT_Sedici_20062009,Fiat Sedici — ребейдж Suzuki SX4 первого поколения (suzuki__sx4)
+name,FIAT_Sedici_20092014,Fiat Sedici — ребейдж Suzuki SX4 первого поколения (suzuki__sx4)
+name,SEAT_Exeo_20082013,SEAT Exeo — ребейдж Audi A4 поколения B7 (audi__a4)
+name,SEAT_Toledo_20122018,SEAT Toledo IV — ребейдж Skoda Rapid (skoda__rapid)
