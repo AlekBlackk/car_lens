@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from pipeline.knn import ranked_by_centroids, top5_by_centroids
+from pipeline.knn import ranked_by_centroids, top2_with_sims, top5_by_centroids
 
 
 def test_top5_ставит_свой_класс_первым() -> None:
@@ -131,3 +131,30 @@ def test_индекс_без_живых_классов_отвергается() 
         ranked_by_centroids(
             np.zeros((1, 4), dtype=np.float32), np.zeros((3, 2, 4), dtype=np.float32), 2
         )
+
+
+def test_top2_отдаёт_классы_и_сходства_по_максимуму_центроидов() -> None:
+    центроиды = np.zeros((3, 2, 2), dtype=np.float32)
+    центроиды[0, 0] = [1.0, 0.0]
+    центроиды[1, 1] = [0.6, 0.8]
+    центроиды[2, 0] = [0.0, 1.0]
+    эмбеддинг = np.array([[0.8, 0.6]], dtype=np.float32)
+
+    top1, sim1, top2, sim2 = top2_with_sims(эмбеддинг, центроиды)
+
+    assert (int(top1[0]), int(top2[0])) == (1, 0)
+    assert sim1[0] == pytest.approx(0.96)
+    assert sim2[0] == pytest.approx(0.8)
+
+
+def test_top2_согласован_с_ранжированием() -> None:
+    генератор = np.random.default_rng(0)
+    центроиды = генератор.normal(size=(5, 4, 8)).astype(np.float32)
+    центроиды /= np.linalg.norm(центроиды, axis=2, keepdims=True)
+    эмбеддинги = генератор.normal(size=(20, 8)).astype(np.float32)
+    эмбеддинги /= np.linalg.norm(эмбеддинги, axis=1, keepdims=True)
+
+    top1, _, top2, _ = top2_with_sims(эмбеддинги, центроиды)
+    ранги = ranked_by_centroids(эмбеддинги, центроиды, k=2)
+
+    assert [[int(a), int(b)] for a, b in zip(top1, top2, strict=True)] == ранги
