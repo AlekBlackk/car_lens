@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import shutil
 import subprocess
@@ -77,9 +78,9 @@ def sha256_of_file(path: Path) -> str:
 
 # Плейсхолдеры §13.5 и §13.6. Пишутся здесь, а не руками, по той же причине, по которой
 # здесь считаются хеши моделей: единственный каталог ассетов сборки должен собираться
-# одной командой целиком. `tune_thresholds.py` и `export_calibration.py` появятся к M3 и
-# заменят эти два вызова; флаг `tuned: false` до тех пор обязывает приложение показывать
-# отметку «не откалибровано» (§13.5).
+# одной командой целиком. Настоящие файлы пишет `training/tune_thresholds.py`, сюда они
+# приходят флагами `--thresholds/--calibration` и ложатся поверх; флаг `tuned: false` до
+# тех пор обязывает приложение показывать отметку «не откалибровано» (§13.5).
 ПЛЕЙСХОЛДЕР_ПОРОГОВ: dict[str, Any] = {
     "version": 1,
     "tuned": False,
@@ -113,6 +114,53 @@ def write_placeholders(out: Path) -> dict[str, Path]:
         путь.write_text(json.dumps(документ, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         пути[ключ] = путь
     return пути
+
+
+МАКС_УЗЛОВ = 32
+
+
+def check_tuned_thresholds(документ: Mapping[str, Any]) -> None:
+    """Подобранные пороги §13.5: форма плейсхолдера, `tuned: true` и живой `tuned_on`."""
+    if set(документ) != set(ПЛЕЙСХОЛДЕР_ПОРОГОВ):
+        raise ManifestError(f"thresholds: поля {sorted(документ)} не по форме §13.5")
+    if документ["tuned"] is not True:
+        raise ManifestError("thresholds: tuned не true — это плейсхолдер, а не подбор")
+    for поле in ("val_n", "neg_n"):
+        if int(документ["tuned_on"].get(поле, 0)) <= 0:
+            raise ManifestError(f"thresholds: tuned_on.{поле} пуст — подбор ни на чём")
+    for поле in ("sim_min", "margin_min"):
+        if not 0.0 <= float(документ[поле]) <= 1.0:
+            raise ManifestError(f"thresholds: {поле}={документ[поле]} вне [0, 1]")
+
+
+def check_tuned_calibration(документ: Mapping[str, Any]) -> None:
+    """Подобранная шкала §13.6: те же правила, что проверяет `parseCalibration` на телефоне."""
+    if документ.get("tuned") is not True:
+        raise ManifestError("calibration: tuned не true — это плейсхолдер, а не подбор")
+    узлы = документ.get("knots") or []
+    if not 2 <= len(узлы) <= МАКС_УЗЛОВ:
+        raise ManifestError(f"calibration: узлов {len(узлы)}, нужно от 2 до {МАКС_УЗЛОВ}")
+    for x, y in узлы:
+        if not (0.0 <= float(x) <= 1.0 and 0.0 <= float(y) <= 1.0):
+            raise ManifestError(f"calibration: узел {[x, y]} вне [0, 1]")
+    for (x0, y0), (x1, y1) in itertools.pairwise(узлы):
+        if not (x1 > x0 and y1 > y0):
+            raise ManifestError(f"calibration: узлы не строго возрастают у {[x1, y1]}")
+    lo, hi = документ.get("clip") or [None, None]
+    if lo is None or hi is None or not 0.0 <= float(lo) <= float(hi) <= 1.0:
+        raise ManifestError(f"calibration: clip {документ.get('clip')} не пара внутри [0, 1]")
+
+
+def _подобранные(thresholds: Path | None, calibration: Path | None) -> dict[str, Path]:
+    """Оба файла или ни одного: подобранные пороги с плейсхолдерной шкалой (и наоборот)
+    оставили бы отметку «не откалибровано», а выпуск — бессмысленным."""
+    if thresholds is None and calibration is None:
+        return {}
+    if thresholds is None or calibration is None:
+        raise ManifestError("--thresholds и --calibration передаются оба или ни одного")
+    check_tuned_thresholds(_обязательный_json(thresholds, "нет файла порогов"))
+    check_tuned_calibration(_обязательный_json(calibration, "нет файла шкалы"))
+    return {"thresholds": thresholds, "calibration": calibration}
 
 
 def _контракт(detector_report: Mapping[str, Any]) -> dict[str, Any]:
@@ -252,12 +300,20 @@ def stage(
     *,
     index_dir: str | None = None,
     precision: str = "int8",
+    thresholds: Path | None = None,
+    calibration: Path | None = None,
 ) -> Path:
     """Разложить файлы прогона в `out` и написать рядом манифест. Вернуть его путь.
 
     Четыре файла копируются из прогона, ещё два — `thresholds.json` и `calibration.json`
-    (§13.5, §13.6) — пишутся плейсхолдерами на месте: копировать их неоткуда, пока нет
-    негативов и калибровочной таблицы.
+    (§13.5, §13.6) — пишутся плейсхолдерами на месте: копировать их неоткуда, пока не
+    переданы подобранные файлы.
+
+    `thresholds` и `calibration` — подобранные `thresholds.json`/`calibration.json` от
+    `training/tune_thresholds.py`. Их проверяют на годность и кладут поверх плейсхолдеров;
+    передаются только парой, потому что подобранные пороги с плейсхолдерной шкалой (и
+    наоборот) оставили бы сборку помеченной «не откалибровано». Годность сверяется до
+    сноса `out`, как и контракт детектора.
 
     Ждёт раскладку прогона обучения: `run/export/` с файлом классификатора и
     `export_report.json`, каталог индекса с `catalog_index.bin` и `catalog_meta.json`,
@@ -318,6 +374,9 @@ def stage(
     # сноса каталога и копирования, и неполный контракт оставил бы в дереве сборки четыре
     # модели без манифеста — ровно то состояние, против которого написан модуль.
     _контракт(отчёт_детектора)
+    # Годность подобранных файлов сверяется здесь, рядом с контрактом и до сноса `out`: иначе
+    # негодные пороги снесли бы прошлый набор и оставили дерево сборки ни с чем.
+    подобранные = _подобранные(thresholds, calibration)
 
     # Каталог сносится целиком, а не перезаписывается по именам: файл от прошлого прогона
     # с другим именем остался бы лежать в ассетах и уехал бы в APK.
@@ -328,6 +387,10 @@ def stage(
     for ключ, источник in источники.items():
         shutil.copy2(источник, цели[ключ])
     write_placeholders(out)
+    # Подобранные файлы кладутся поверх плейсхолдеров: без них сборка остаётся той же,
+    # что до калибровки, и отметка «не откалибровано» в приложении — честной.
+    for ключ, источник in подобранные.items():
+        shutil.copy2(источник, out / ИМЕНА[ключ])
 
     # Размеры и хеши считаются по копиям, а не по источникам: манифест описывает то, что
     # уедет на устройство, и оборванное копирование обязано разойтись с ним, а не совпасть.
@@ -361,6 +424,8 @@ def _parse_args() -> argparse.Namespace:
         default="int8",
         help="точность классификатора: какой .tflite разложить (умолчание int8, путь M-1)",
     )
+    парсер.add_argument("--thresholds", type=Path, default=None, help="подобранные пороги")
+    парсер.add_argument("--calibration", type=Path, default=None, help="подобранная шкала")
     return парсер.parse_args()
 
 
@@ -372,6 +437,8 @@ def main() -> None:
         аргументы.out,
         index_dir=аргументы.index,
         precision=аргументы.precision,
+        thresholds=аргументы.thresholds,
+        calibration=аргументы.calibration,
     )
     print(f"манифест: {путь}")
 

@@ -11,6 +11,7 @@ import pytest
 
 from scripts.stage_assets import (
     ИМЕНА,
+    ПЛЕЙСХОЛДЕР_ПОРОГОВ,
     ФАЙЛ_КЛАССИФИКАТОРА,
     ManifestError,
     build_manifest,
@@ -346,3 +347,101 @@ def test_stage_умолчание_точности_кладёт_int8(tmp_path: P
 
     записанный = json.loads(путь.read_text(encoding="utf-8"))
     assert записанный["files"]["classifier"]["name"] == "classifier_int8.tflite"
+
+
+ПОРОГИ_ПОДОБРАНЫ: dict[str, Any] = {
+    **ПЛЕЙСХОЛДЕР_ПОРОГОВ,
+    "tuned": True,
+    "sim_min": 0.55,
+    "margin_min": 0.03,
+    "tuned_on": {"val_n": 1500, "neg_n": 2400, "achieved_tpr": 0.6, "achieved_fpr": 0.08},
+}
+ШКАЛА_ПОДОБРАНА: dict[str, Any] = {
+    "version": 1,
+    "method": "isotonic_piecewise_linear",
+    "tuned": True,
+    "knots": [[0.55, 0.3], [0.7, 0.6], [0.9, 0.95]],
+    "clip": [0.01, 0.98],
+}
+
+
+def _json(путь: Path, документ: dict[str, Any]) -> Path:
+    путь.write_text(json.dumps(документ), encoding="utf-8")
+    return путь
+
+
+def test_stage_кладёт_подобранные_пороги_и_шкалу(tmp_path: Path) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    выход = tmp_path / "models"
+
+    stage(
+        прогон,
+        детектор,
+        выход,
+        thresholds=_json(tmp_path / "t.json", ПОРОГИ_ПОДОБРАНЫ),
+        calibration=_json(tmp_path / "c.json", ШКАЛА_ПОДОБРАНА),
+    )
+
+    assert json.loads((выход / "thresholds.json").read_text("utf-8")) == ПОРОГИ_ПОДОБРАНЫ
+    assert json.loads((выход / "calibration.json").read_text("utf-8")) == ШКАЛА_ПОДОБРАНА
+
+
+def test_stage_требует_оба_файла_вместе(tmp_path: Path) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    with pytest.raises(ManifestError, match="оба"):
+        stage(
+            прогон,
+            детектор,
+            tmp_path / "models",
+            thresholds=_json(tmp_path / "t.json", ПОРОГИ_ПОДОБРАНЫ),
+        )
+
+
+@pytest.mark.parametrize(
+    ("правка", "ошибка"),
+    [
+        ({"tuned": False}, "tuned"),
+        (
+            {"tuned_on": {"val_n": 0, "neg_n": 10, "achieved_tpr": 0.5, "achieved_fpr": 0.1}},
+            "val_n",
+        ),
+        ({"sim_min": 1.2}, "sim_min"),
+    ],
+)
+def test_stage_отвергает_негодные_пороги(
+    tmp_path: Path, правка: dict[str, Any], ошибка: str
+) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    выход = tmp_path / "models"
+    with pytest.raises(ManifestError, match=ошибка):
+        stage(
+            прогон,
+            детектор,
+            выход,
+            thresholds=_json(tmp_path / "t.json", {**ПОРОГИ_ПОДОБРАНЫ, **правка}),
+            calibration=_json(tmp_path / "c.json", ШКАЛА_ПОДОБРАНА),
+        )
+    assert not выход.exists()
+
+
+@pytest.mark.parametrize(
+    ("правка", "ошибка"),
+    [
+        ({"tuned": False}, "tuned"),
+        ({"knots": [[0.5, 0.3], [0.5, 0.6]]}, "возраст"),
+        ({"knots": [[0.5 + i / 100, i / 40] for i in range(33)]}, "32"),
+        ({"knots": [[0.5, 0.3], [0.9, 1.2]]}, r"\[0, 1\]"),
+    ],
+)
+def test_stage_отвергает_негодную_шкалу(
+    tmp_path: Path, правка: dict[str, Any], ошибка: str
+) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    with pytest.raises(ManifestError, match=ошибка):
+        stage(
+            прогон,
+            детектор,
+            tmp_path / "models",
+            thresholds=_json(tmp_path / "t.json", ПОРОГИ_ПОДОБРАНЫ),
+            calibration=_json(tmp_path / "c.json", {**ШКАЛА_ПОДОБРАНА, **правка}),
+        )
