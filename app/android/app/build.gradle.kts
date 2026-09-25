@@ -39,8 +39,8 @@ android {
         applicationId = "com.carlens.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4"
+        versionCode = 5
+        versionName = "0.4.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Поля объявляются в обоих случаях, а отсутствие манифеста роняет не конфигурацию,

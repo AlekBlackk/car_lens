@@ -39,6 +39,22 @@ vi.mock('../../android/models/catalog_meta.json', () => ({
   },
 }))
 
+// Ветвь «бренд» §6.4 срабатывает только при margin_min > 0. Выпущенные пороги 0.4.1 несут
+// margin_min = 0 (Task 10: разрыв top-1/top-2 не используется, ветвь на них мертва), поэтому
+// живой стык здесь проверяется на фиксированной калибровочной марже 0.05 — как и было
+// задумано этим тестом (см. комментарий у `топ2`). Мокается сам ассет, а не `THRESHOLDS`,
+// чтобы `pipeline.ts` собрал пороги из него при импорте — тем же приёмом, что мета выше.
+vi.mock('../../android/models/thresholds.json', () => ({
+  default: {
+    version: 1,
+    tuned: true,
+    sim_min: 0.42,
+    margin_min: 0.05,
+    min_observations: 3,
+    min_short_side_px: 120,
+  },
+}))
+
 const БОКС: Box = { x: 0, y: 0, w: 300, h: 300, conf: 0.9 }
 
 const топ2 = (первый: number, второй: number): Match[] => [

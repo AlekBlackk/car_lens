@@ -136,8 +136,8 @@ describe('ассеты сборки', () => {
     expect(CALIBRATION.knots.length).toBeGreaterThanOrEqual(2)
   })
 
-  test('плейсхолдеры честно помечены неоткалиброванными', () => {
-    expect(THRESHOLDS.tuned).toBe(false)
-    expect(CALIBRATION.tuned).toBe(false)
+  test('выпущенные ассеты помечены откалиброванными', () => {
+    expect(THRESHOLDS.tuned).toBe(true)
+    expect(CALIBRATION.tuned).toBe(true)
   })
 })
