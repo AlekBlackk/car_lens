@@ -219,7 +219,7 @@ def render_report(
     return "\n".join(строки)
 
 
-def _эмбеддинги(
+def embed_crops(
     модель: Path, пути: Sequence[Path], манифест: Mapping[str, Any], батч: int
 ) -> np.ndarray:
     from training.build_index import collect_embeddings_tflite
@@ -271,10 +271,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     негативы = read_split(аргументы.negatives)
 
     корень = аргументы.crops_root
-    э_эт = _эмбеддинги(
+    э_эт = embed_crops(
         классификатор, [корень / п for п in эталон["crop_path"]], манифест, аргументы.batch_size
     )
-    э_нег = _эмбеддинги(
+    э_нег = embed_crops(
         классификатор, [корень / п for п in негативы["crop_path"]], манифест, аргументы.batch_size
     )
     истина = эталон["class_idx"].to_numpy(dtype=np.int64)
