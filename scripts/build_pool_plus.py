@@ -77,6 +77,17 @@ def render_report(
     return "\n".join(строки)
 
 
+def parse_own_caps(values: Sequence[str]) -> dict[str, int]:
+    """`["mad_cars=150"]` → `{"mad_cars": 150}`; кривая запись роняет прогон до склейки."""
+    потолки: dict[str, int] = {}
+    for значение in values:
+        источник, знак, число = значение.partition("=")
+        if not (знак and источник and число.isdigit()):
+            raise SystemExit(f"--own-cap {значение}: ожидалось ИСТОЧНИК=N")
+        потолки[источник] = int(число)
+    return потолки
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     парсер = argparse.ArgumentParser(description="Склеить внешние источники с pool-clean")
     парсер.add_argument("--pool", type=Path, default=splits_dir() / "pool-clean.parquet")
@@ -88,6 +99,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="источники; у каждого обязан быть splits/ext-<источник>.parquet",
     )
     парсер.add_argument("--max-per-class", type=int, default=DEFAULT_MAX_PER_CLASS)
+    парсер.add_argument(
+        "--own-cap",
+        action="append",
+        default=[],
+        metavar="ИСТОЧНИК=N",
+        help="свой потолок источника на класс, сверх общего --max-per-class; можно повторять",
+    )
     парсер.add_argument("--seed", type=int, default=1337)
     парсер.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     аргументы = парсер.parse_args(argv)
@@ -108,7 +126,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         for и in аргументы.sources
     }
     внешние, отказы = merge_external(
-        кадры, max_per_class=аргументы.max_per_class, seed=аргументы.seed
+        кадры,
+        max_per_class=аргументы.max_per_class,
+        seed=аргументы.seed,
+        own_caps=parse_own_caps(аргументы.own_cap),
     )
     пул = read_split(аргументы.pool)
     write_split(внешние, splits_dir() / "pool-ext.parquet")

@@ -269,7 +269,11 @@ def build_external_frame(
 
 
 def merge_external(
-    frames: Mapping[str, pd.DataFrame], *, max_per_class: int, seed: int
+    frames: Mapping[str, pd.DataFrame],
+    *,
+    max_per_class: int,
+    seed: int,
+    own_caps: Mapping[str, int] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     """Склеить кадры источников: межисточниковый дедуп и потолок на класс (фильтры 7–8).
 
@@ -277,8 +281,13 @@ def merge_external(
     приоритетного (`duplicate_indices` оставляет самый ранний), и потолок заполняется им же
     первым. Внутри источника порядок задаёт `bucket_of(photo_id, seed)` — от порядка строк
     на входе результат не зависит.
+
+    `own_caps` — источники со своим потолком на класс: они идут сверху общего `max_per_class`
+    и не вытесняют кадры остальных. Пилот MAD-Cars (`bench/mad-cars-pilot.md`) показал, что
+    уличные кадры вместо пресс-фото при том же объёме не дают ничего.
     """
-    чужие = sorted(set(frames) - set(SOURCE_PRIORITY))
+    свои = dict(own_caps or {})
+    чужие = sorted((set(frames) | set(свои)) - set(SOURCE_PRIORITY))
     if чужие:
         raise ExternalIngestError(f"неизвестные источники: {', '.join(чужие)}")
     части = []
@@ -296,7 +305,10 @@ def merge_external(
     дубли = duplicate_indices([int(хеш) for хеш in всё["phash"]])
     отказы["dup_cross"] = len(дубли)
     всё = всё.drop(index=sorted(дубли))
-    сверх = всё.groupby("class_idx", sort=False).cumcount() >= max_per_class
+    # Общий потолок считается по источникам без своего: у них корзина одна, пустая строка.
+    корзина = всё["source"].where(всё["source"].isin(свои), "")
+    потолок = корзина.map(свои).fillna(max_per_class)
+    сверх = всё.groupby([всё["class_idx"], корзина], sort=False).cumcount() >= потолок
     отказы["cap"] = int(сверх.sum())
     итог = всё.loc[~сверх, list(COLUMNS)].reset_index(drop=True)
     return итог, {причина: n for причина, n in отказы.items() if n}

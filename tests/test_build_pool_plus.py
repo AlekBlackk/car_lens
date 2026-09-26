@@ -17,7 +17,7 @@ from pipeline.ingest.external import (
     read_gap_classes,
 )
 from pipeline.schema import COLUMNS
-from scripts.build_pool_plus import render_report
+from scripts.build_pool_plus import parse_own_caps, render_report
 
 
 def строка(photo_id: str, class_idx: int, phash: int) -> dict[str, Any]:
@@ -86,6 +86,32 @@ def test_mad_cars_идёт_после_ручного_сбора_и_до_прес
     )
     assert sorted(итог["source"]) == ["mad_cars", "manual"]
     assert отказы == {"cap": 2}
+
+
+def test_свой_потолок_источника_не_тратит_общий() -> None:
+    авто = [строка(f"autoevolution:{i}", 0, далёкий(i)) for i in range(3)]
+    улица = [строка(f"mad_cars:{i}", 0, далёкий(3 + i)) for i in range(3)]
+    итог, отказы = merge_external(
+        {"autoevolution": кадр(*авто), "mad_cars": кадр(*улица)},
+        max_per_class=2,
+        seed=1337,
+        own_caps={"mad_cars": 2},
+    )
+    # Пресс-фото заполняют общий потолок, уличные кадры идут сверху под своим.
+    assert sorted(итог["source"]) == ["autoevolution"] * 2 + ["mad_cars"] * 2
+    assert отказы == {"cap": 2}
+
+
+def test_свой_потолок_у_неизвестного_источника_отвергается() -> None:
+    with pytest.raises(ExternalIngestError, match="flickr"):
+        merge_external({}, max_per_class=150, seed=1337, own_caps={"flickr": 10})
+
+
+def test_свой_потолок_из_командной_строки() -> None:
+    assert parse_own_caps(["mad_cars=150"]) == {"mad_cars": 150}
+    assert parse_own_caps([]) == {}
+    with pytest.raises(SystemExit, match="ИСТОЧНИК=N"):
+        parse_own_caps(["mad_cars:150"])
 
 
 def test_потолок_не_зависит_от_порядка_строк() -> None:
