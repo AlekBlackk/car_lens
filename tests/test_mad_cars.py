@@ -9,7 +9,15 @@ import pytest
 
 from pipeline.catalog import Catalog, load_catalog
 from pipeline.ingest.external import ExternalIngestError
-from pipeline.ingest.mad_cars import SAMPLE_COLUMNS, read_mad_mapping, sample_frames
+from pipeline.ingest.mad_cars import (
+    SAMPLE_COLUMNS,
+    FetchReport,
+    fetch_frames,
+    frame_path,
+    read_excluded,
+    read_mad_mapping,
+    sample_frames,
+)
 
 YAML = """
 version: 1
@@ -116,3 +124,66 @@ def test_пары_без_соответствия_не_берутся() -> None:
         seed=1,
     )
     assert set(выборка["model_id"]) == {"audi__a4"}
+
+
+def выборка_из(*строки: tuple[str, str, str]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [(m, c, v, f"https://x/{c}/{v}.jpg") for m, c, v in строки], columns=list(SAMPLE_COLUMNS)
+    )
+
+
+def test_выброшенные_машины_читаются_множеством(tmp_path: Path) -> None:
+    путь = tmp_path / "excluded.csv"
+    путь.write_text("model_id,car_id,reason\naudi__a4,7,повёрнут\n", encoding="utf-8")
+    assert read_excluded(путь) == frozenset({"7"})
+
+
+def test_скачивание_пропускает_лежащие_и_удаляет_выброшенные(tmp_path: Path) -> None:
+    лежит = frame_path(tmp_path, "audi__a4", "1", "0")
+    лежит.parent.mkdir(parents=True)
+    лежит.write_bytes(b"jpg")
+    выброшенный = frame_path(tmp_path, "audi__a4", "9", "0")
+    выброшенный.write_bytes(b"jpg")
+    скачанные: list[str] = []
+
+    def скачать(url: str, куда: Path) -> None:
+        скачанные.append(url)
+        куда.write_bytes(b"jpg")
+
+    отчёт = fetch_frames(
+        выборка_из(("audi__a4", "1", "0"), ("audi__a4", "2", "5"), ("audi__a4", "9", "0")),
+        tmp_path,
+        frozenset({"9"}),
+        скачать,
+    )
+    assert отчёт == FetchReport(downloaded=1, present=1, removed=1, failed=[])
+    assert скачанные == ["https://x/2/5.jpg"]
+    assert not выброшенный.exists()
+
+
+def test_сбой_скачивания_не_оставляет_пустой_файл(tmp_path: Path) -> None:
+    def сломанное(url: str, куда: Path) -> None:
+        куда.write_bytes(b"")
+        raise OSError("503")
+
+    отчёт = fetch_frames(выборка_из(("audi__a4", "1", "0")), tmp_path, frozenset(), сломанное)
+    assert отчёт.failed == ["https://x/1/0.jpg"]
+    assert not frame_path(tmp_path, "audi__a4", "1", "0").exists()
+
+
+def test_лист_машин_три_кадра_в_строку(tmp_path: Path) -> None:
+    from PIL import Image
+
+    from scripts.mad_cars import CELL, render_car_sheet
+
+    машины = []
+    for n in range(3):
+        кадры = []
+        for v in range(3):
+            путь = tmp_path / f"{n}_{v}.jpg"
+            Image.new("RGB", (64, 36), "white").save(путь)
+            кадры.append(путь)
+        машины.append((str(100 + n), кадры))
+    лист = render_car_sheet(машины, first_number=0)
+    # Две колонки машин по 3 кадра; 3 машины → 2 ряда.
+    assert лист.size == (CELL[0] * 6, CELL[1] * 2)
