@@ -82,6 +82,7 @@ def test_допустимые_источники() -> None:
         "autoevolution",
         "skillfactory",
         "manual",
+        "mad_cars",
         "negatives",
     } == SOURCES
 

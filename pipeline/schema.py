@@ -36,6 +36,8 @@ SOURCES = frozenset(
         "autoevolution",
         "skillfactory",
         "manual",
+        # Yandex MAD-Cars: 360°-обходы машин из объявлений РФ, уличные кадры с уровня глаз.
+        "mad_cars",
         "negatives",
     }
 )

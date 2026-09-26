@@ -32,7 +32,10 @@ from pipeline.hashing import bucket_of, close_pairs
 from pipeline.schema import COLUMNS, empty_frame
 
 # Порядок — приоритет при склейке: съёмка с уровня глаз ценнее пресс-фото (фильтры 7–8).
-SOURCE_PRIORITY: tuple[str, ...] = ("manual", "skillfactory", "autoevolution")
+# MAD-Cars — сразу за ручным сбором: под общим потолком класса уличный кадр важнее пресс-фото.
+SOURCE_PRIORITY: tuple[str, ...] = ("manual", "mad_cars", "skillfactory", "autoevolution")
+# Источники, где папка и есть `model_id`: таблица соответствия им не нужна.
+FOLDER_SOURCES = frozenset({"manual", "mad_cars"})
 IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 MAPPING_COLUMNS = ("dir_path", "model_id")
 
@@ -114,13 +117,33 @@ def read_mapped(root: Path, mapping: Mapping[str, str]) -> list[ExternalPhoto]:
     return фото
 
 
-def read_manual(root: Path, catalog: Catalog) -> list[ExternalPhoto]:
-    """Ручной сбор: `root/<model_id>/*`. Неизвестная папка — опечатка, прогон падает."""
-    фото: list[ExternalPhoto] = []
-    for путь in sorted(папка for папка in root.iterdir() if папка.is_dir()):
+def _папки_моделей(root: Path, catalog: Catalog) -> list[Path]:
+    """Папки `root/<model_id>/`; неизвестная папка — опечатка, прогон падает."""
+    папки = sorted(папка for папка in root.iterdir() if папка.is_dir())
+    for путь in папки:
         if путь.name not in catalog:
             raise ExternalIngestError(f"{путь}: папка не model_id каталога")
-        фото.extend(ExternalPhoto(файл, путь.name, файл.name, None) for файл in _картинки(путь))
+    return папки
+
+
+def read_manual(root: Path, catalog: Catalog) -> list[ExternalPhoto]:
+    """Ручной сбор: `root/<model_id>/*`, каждое фото — своё объявление."""
+    return [
+        ExternalPhoto(файл, путь.name, файл.name, None)
+        for путь in _папки_моделей(root, catalog)
+        for файл in _картинки(путь)
+    ]
+
+
+def read_mad_cars(root: Path, catalog: Catalog) -> list[ExternalPhoto]:
+    """MAD-Cars: `root/<model_id>/<car_id>_<view_id>.jpg`, объявление — машина (`car_id`)."""
+    фото: list[ExternalPhoto] = []
+    for путь in _папки_моделей(root, catalog):
+        for файл in _картинки(путь):
+            машина, _, ракурс = файл.stem.partition("_")
+            if not (машина.isdigit() and ракурс.isdigit()):
+                raise ExternalIngestError(f"{файл}: имя не <car_id>_<view_id>")
+            фото.append(ExternalPhoto(файл, путь.name, машина, None))
     return фото
 
 

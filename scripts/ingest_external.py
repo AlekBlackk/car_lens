@@ -13,8 +13,10 @@ from pathlib import Path
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog, member_index
 from pipeline.ingest.external import (
+    FOLDER_SOURCES,
     SOURCE_PRIORITY,
     build_external_frame,
+    read_mad_cars,
     read_manual,
     read_mapped,
     read_mapping,
@@ -35,13 +37,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Проверки аргументов — до загрузки каталога и детектора: ошибка в команде не должна
     # стоить минуты на импорт ultralytics.
-    if аргументы.source == "manual" and аргументы.mapping is not None:
-        raise SystemExit("у manual нет таблицы соответствия: папка и есть model_id")
-    if аргументы.source != "manual" and аргументы.mapping is None:
+    папочный = аргументы.source in FOLDER_SOURCES
+    if папочный and аргументы.mapping is not None:
+        raise SystemExit(f"у {аргументы.source} нет таблицы соответствия: папка и есть model_id")
+    if not папочный and аргументы.mapping is None:
         raise SystemExit(f"{аргументы.source}: нужна --mapping catalog/external/<источник>.csv")
 
     каталог = load_catalog(DEFAULT_CATALOG_PATH)
-    if аргументы.mapping is None:
+    if аргументы.source == "mad_cars":
+        фото = read_mad_cars(аргументы.root, каталог)
+    elif аргументы.mapping is None:
         фото = read_manual(аргументы.root, каталог)
     else:
         фото = read_mapped(аргументы.root, read_mapping(аргументы.mapping, каталог))

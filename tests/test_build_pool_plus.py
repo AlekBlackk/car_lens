@@ -74,6 +74,20 @@ def test_потолок_заполняется_по_приоритету() -> No
     assert list(итог.columns) == list(COLUMNS)
 
 
+def test_mad_cars_идёт_после_ручного_сбора_и_до_пресс_фото() -> None:
+    итог, отказы = merge_external(
+        {
+            "autoevolution": кадр(строка("autoevolution:a", 0, далёкий(0))),
+            "mad_cars": кадр(*[строка(f"mad_cars:{i}", 0, далёкий(1 + i)) for i in range(2)]),
+            "manual": кадр(строка("manual:m", 0, далёкий(3))),
+        },
+        max_per_class=2,
+        seed=1337,
+    )
+    assert sorted(итог["source"]) == ["mad_cars", "manual"]
+    assert отказы == {"cap": 2}
+
+
 def test_потолок_не_зависит_от_порядка_строк() -> None:
     строки = [строка(f"autoevolution:{i}", 0, далёкий(i)) for i in range(6)]
     перемешанные = строки.copy()
@@ -125,6 +139,7 @@ def test_отчёт_считает_по_классам_и_источникам(�
         frozenset({каталог.classes[0].class_id}),
     )
     первый = каталог.classes[0].class_id
-    assert f"| `{первый}` | да | 2 | 1 | 0 | 1 | 4 |" in текст
+    # Колонки источников — в порядке SOURCE_PRIORITY: manual, mad_cars, skillfactory, autoevolution.
+    assert f"| `{первый}` | да | 2 | 1 | 0 | 0 | 1 | 4 |" in текст
     assert "| manual | 5 | 1 | no_vehicle 4 |" in текст
     assert "cap 2" in текст

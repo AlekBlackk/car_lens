@@ -15,6 +15,7 @@ from pipeline.ingest.external import (
     ExternalPhoto,
     ExternalResult,
     build_external_frame,
+    read_mad_cars,
     read_manual,
     read_mapped,
     read_mapping,
@@ -117,6 +118,29 @@ def test_ручной_сбор_читается_по_model_id(tmp_path: Path, к
     # У ручного сбора каждое фото — своё объявление: экземпляры разные по правилу сбора.
     assert [ф.group for ф in фото] == ["2.jpg", "1.webp"]
     assert all(ф.raw_model_string is None for ф in фото)
+
+
+def test_mad_cars_группирует_кадры_по_машине(tmp_path: Path, каталог: Catalog) -> None:
+    корень = tmp_path / "mad"
+    шум(корень / "audi__a5" / "17_0.jpg", 1)
+    шум(корень / "audi__a5" / "17_42.jpg", 2)
+    шум(корень / "audi__a5" / "905_3.jpg", 3)
+
+    фото = read_mad_cars(корень, каталог)
+
+    # Три ракурса одной машины — одно объявление: иначе они разошлись бы как разные экземпляры.
+    assert [(ф.model_id, ф.path.name, ф.group) for ф in фото] == [
+        ("audi__a5", "17_0.jpg", "17"),
+        ("audi__a5", "17_42.jpg", "17"),
+        ("audi__a5", "905_3.jpg", "905"),
+    ]
+    assert all(ф.raw_model_string is None for ф in фото)
+
+
+def test_mad_cars_без_номера_машины_в_имени_роняет_прогон(tmp_path: Path, каталог: Catalog) -> None:
+    шум(tmp_path / "mad" / "audi__a5" / "фото.jpg", 1)
+    with pytest.raises(ExternalIngestError, match="<car_id>_<view_id>"):
+        read_mad_cars(tmp_path / "mad", каталог)
 
 
 def test_неизвестная_папка_ручного_сбора_роняет_прогон(tmp_path: Path, каталог: Catalog) -> None:
@@ -239,3 +263,5 @@ def test_cli_manual_без_таблицы_а_набор_с_таблицей(tmp_
         main(["--source", "autoevolution", "--root", str(tmp_path)])
     with pytest.raises(SystemExit, match="у manual нет таблицы"):
         main(["--source", "manual", "--root", str(tmp_path), "--mapping", "x.csv"])
+    with pytest.raises(SystemExit, match="у mad_cars нет таблицы"):
+        main(["--source", "mad_cars", "--root", str(tmp_path), "--mapping", "x.csv"])
