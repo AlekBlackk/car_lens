@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from pipeline.holdout_relevance import SET_FULL, SET_RELEVANT, SET_RELEVANT_LEVEL
@@ -64,3 +66,13 @@ def test_без_предупреждения_если_unsure_мало() -> None:
         provenance={},
     )
     assert "unsure больше 5%" not in отчёт
+
+
+def test_ответы_по_кадрам_пишутся_csv(tmp_path: Path) -> None:
+    from training.eval_relevance import PREDICTION_COLUMNS, write_predictions
+
+    путь = tmp_path / "pred.csv"
+    write_predictions(путь, ["a", "b"], np.array([1, 2]), np.array([1, 0]), np.array([0.9, 0.4]))
+    кадр = pd.read_csv(путь, dtype={"photo_id": str})
+    assert list(кадр.columns) == list(PREDICTION_COLUMNS)
+    assert кадр["top1"].tolist() == [1, 0]

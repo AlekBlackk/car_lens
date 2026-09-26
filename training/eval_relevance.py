@@ -14,6 +14,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from pipeline.holdout_relevance import (
     SET_FULL,
@@ -54,6 +55,19 @@ _СТРОКИ = (
     ("coverage", "покрытие при порогах 0.4.1", "—"),
     ("error", "неверных среди показанных", "—"),
 )
+
+
+PREDICTION_COLUMNS = ("photo_id", "class_idx", "top1", "sim1")
+
+
+def write_predictions(
+    path: Path, photo_ids: Sequence[str], truth: np.ndarray, top1: np.ndarray, sim1: np.ndarray
+) -> None:
+    """Ответ модели по кадру: вход `scripts.compare_relevance` для парного сравнения."""
+    pd.DataFrame(
+        {"photo_id": list(photo_ids), "class_idx": truth, "top1": top1, "sim1": sim1},
+        columns=list(PREDICTION_COLUMNS),
+    ).to_csv(path, index=False)
 
 
 def read_parity(path: Path) -> dict[str, float]:
@@ -122,6 +136,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     парсер.add_argument("--expect-auroc", type=float, default=None)
     парсер.add_argument("--expect-fpr95", type=float, default=None)
     парсер.add_argument("--report", type=Path, default=Path("bench/acceptance-relevance.md"))
+    парсер.add_argument(
+        "--predictions", type=Path, default=None, help="CSV ответов по кадрам для парного сравнения"
+    )
     парсер.add_argument("--batch-size", type=int, default=32)
     аргументы = парсер.parse_args(argv)
 
@@ -150,7 +167,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         классификатор, [корень / п for п in негативы["crop_path"]], манифест, аргументы.batch_size
     )
     истина = эталон["class_idx"].to_numpy(dtype=np.int64)
-    знакомые = scores_from(*top2_with_sims(э_эт, центроиды), истина, бренды)
+    пары_эт = top2_with_sims(э_эт, центроиды)
+    знакомые = scores_from(*пары_эт, истина, бренды)
+    if аргументы.predictions is not None:
+        write_predictions(
+            аргументы.predictions, эталон["photo_id"].tolist(), истина, пары_эт[0], пары_эт[1]
+        )
     чужие = scores_from(*top2_with_sims(э_нег, центроиды), None, бренды)
     топ5 = np.array(ranked_by_centroids(э_эт, центроиды, 5), dtype=np.int64)
 
