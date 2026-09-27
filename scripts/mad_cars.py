@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
@@ -43,7 +44,7 @@ def download_url(url: str, путь: Path) -> None:
             with urllib.request.urlopen(url, timeout=60) as ответ:
                 путь.write_bytes(ответ.read())
             return
-        except OSError:
+        except (OSError, http.client.HTTPException):
             if попытка == 2:
                 raise
 
@@ -66,7 +67,8 @@ def render_car_sheet(
         x0 = 0 if i < половина else CELL[0] * 3
         y0 = CELL[1] * (i % половина)
         for j, путь in enumerate(кадры[:3]):
-            миниатюра = Image.open(путь).convert("RGB")
+            with Image.open(путь) as исходник:
+                миниатюра = исходник.convert("RGB")
             миниатюра.thumbnail((CELL[0], CELL[1] - 16))
             лист.paste(миниатюра, (x0 + CELL[0] * j, y0))
             рисовать.text(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pandas as pd
@@ -169,6 +170,44 @@ def test_сбой_скачивания_не_оставляет_пустой_фа
     отчёт = fetch_frames(выборка_из(("audi__a4", "1", "0")), tmp_path, frozenset(), сломанное)
     assert отчёт.failed == ["https://x/1/0.jpg"]
     assert not frame_path(tmp_path, "audi__a4", "1", "0").exists()
+
+
+def test_скачивание_повторяет_попытку_при_обрыве_тела(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import http.client
+
+    from scripts import mad_cars
+
+    class ОтветОбрыв:
+        def __enter__(self) -> ОтветОбрыв:
+            return self
+
+        def __exit__(self, *исключение: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            raise http.client.IncompleteRead(b"")
+
+    class ОтветЦелый:
+        def __enter__(self) -> ОтветЦелый:
+            return self
+
+        def __exit__(self, *исключение: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"jpg"
+
+    ответы: Iterator[ОтветОбрыв | ОтветЦелый] = iter([ОтветОбрыв(), ОтветЦелый()])
+
+    def подставной_urlopen(url: str, timeout: int) -> ОтветОбрыв | ОтветЦелый:
+        return next(ответы)
+
+    monkeypatch.setattr("urllib.request.urlopen", подставной_urlopen)
+    путь = tmp_path / "out.jpg"
+    mad_cars.download_url("https://x/1/0.jpg", путь)
+    assert путь.read_bytes() == b"jpg"
 
 
 def test_лист_машин_три_кадра_в_строку(tmp_path: Path) -> None:

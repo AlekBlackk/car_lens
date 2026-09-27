@@ -56,6 +56,15 @@ def paired_rows(
     if лишние:
         raise ValueError(f"выгрузки расходятся по photo_id: {len(лишние)} {лишние[:5]}")
     кадр = base.merge(new, on=["photo_id", "class_idx"], suffixes=("_base", "_new"))
+    if not (len(кадр) == len(base) == len(new)):
+        raise ValueError(
+            f"merge по photo_id/class_idx дал {len(кадр)} строк вместо {len(base)} в base и "
+            f"{len(new)} в new: дубль photo_id в одной выгрузке или расхождение class_idx у "
+            "общего кадра"
+        )
+    дубли = sorted(set(кадр["photo_id"][кадр["photo_id"].duplicated()]))
+    if дубли:
+        raise ValueError(f"повторяется photo_id после merge: {len(дубли)} {дубли[:5]}")
     кадр = кадр.merge(relevance[["photo_id", "verdict"]], on="photo_id")
     кадр = кадр[кадр["verdict"] == "relevant"]
     база = кадр["top1_base"] == кадр["class_idx"]

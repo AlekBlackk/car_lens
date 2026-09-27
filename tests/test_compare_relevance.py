@@ -45,7 +45,25 @@ def test_строки_по_слабым_и_сильным_классам() -> No
 
 
 def test_разные_наборы_кадров_роняют_сравнение() -> None:
-    with pytest.raises(ValueError, match="photo_id"):
+    with pytest.raises(ValueError, match=r"2 \['a', 'b'\]"):
         paired_rows(
             ответы(("a", 0, 0)), ответы(("b", 0, 0)), разметка(("a", "relevant")), weak_below=0.6
         )
+
+
+def test_дубль_photo_id_роняет_сравнение() -> None:
+    """Дубль в одной выгрузке размножил бы строки после merge — вместе base=2/new=1 не сойдётся."""
+    база = ответы(("a", 0, 0), ("a", 0, 1))
+    новая = ответы(("a", 0, 0))
+    размечено = разметка(("a", "relevant"))
+    with pytest.raises(ValueError, match="дубль photo_id"):
+        paired_rows(база, новая, размечено, weak_below=0.6)
+
+
+def test_расхождение_class_idx_у_кадра_роняет_сравнение() -> None:
+    """Тот же photo_id, разный class_idx в base и new — inner merge тихо потерял бы кадр."""
+    база = ответы(("a", 0, 0), ("b", 0, 1))
+    новая = ответы(("a", 1, 0), ("b", 0, 1))
+    размечено = разметка(("a", "relevant"), ("b", "relevant"))
+    with pytest.raises(ValueError, match="расхождение class_idx"):
+        paired_rows(база, новая, размечено, weak_below=0.6)
