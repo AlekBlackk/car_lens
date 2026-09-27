@@ -19,14 +19,17 @@ from scripts.external_sheets import PER_SHEET, render_sheet
 def main(argv: Sequence[str] | None = None) -> int:
     парсер = argparse.ArgumentParser(description="Листы просмотра негативов")
     парсер.add_argument("--out", type=Path, default=data_root() / "negatives-review")
+    парсер.add_argument("--split", default="negatives", help="имя parquet в splits/")
     аргументы = парсер.parse_args(argv)
 
-    кадр = read_split(splits_dir() / "negatives.parquet")
+    кадр = read_split(splits_dir() / f"{аргументы.split}.parquet")
     кадр = кадр.assign(вид=[neg_kind_of(str(л)) for л in кадр["listing_id"]])
     аргументы.out.mkdir(parents=True, exist_ok=True)
     корень = harvest_dir() / "crops"
     for вид in NEG_KINDS:
-        строки = кадр[кадр["вид"] == вид].sort_values("photo_id").reset_index(drop=True)
+        строки = (
+            кадр[кадр["вид"] == вид].sort_values(["listing_id", "photo_id"]).reset_index(drop=True)
+        )
         for лист, начало in enumerate(range(0, len(строки), PER_SHEET)):
             кусок = строки.iloc[начало : начало + PER_SHEET]
             имя = f"{вид}_{лист:02d}"
