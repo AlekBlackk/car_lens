@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import http.client
 import urllib.request
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -12,12 +13,22 @@ import pandas as pd
 from PIL import Image, ImageDraw
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
-from pipeline.ingest.mad_cars import fetch_frames, read_excluded, read_mad_mapping, sample_frames
+from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, load_alias_table
+from pipeline.ingest.mad_cars import (
+    fetch_frames,
+    read_excluded,
+    read_mad_disputed,
+    read_mad_mapping,
+    sample_frames,
+    sample_negative_frames,
+    select_off_catalog_pairs,
+)
 from pipeline.paths import data_root
 
 DEFAULT_ROOT = data_root() / "external" / "mad_cars"
 DEFAULT_MAPPING = Path("catalog/external/mad_cars.csv")
 DEFAULT_EXCLUDED = Path("catalog/external/mad_cars_excluded.csv")
+DEFAULT_DISPUTED = Path("catalog/external/mad_cars_disputed.csv")
 CELL = (250, 150)
 CARS_PER_SHEET = 16
 
@@ -34,6 +45,36 @@ def _sample(аргументы: argparse.Namespace) -> int:
     print(
         f"выборка: {выборка['model_id'].nunique()} классов, {выборка['car_id'].nunique()} "
         f"машин, {len(выборка)} кадров → {аргументы.out}"
+    )
+    return 0
+
+
+def _negatives_sample(аргументы: argparse.Namespace) -> int:
+    каталог = load_catalog(DEFAULT_CATALOG_PATH)
+    точные = read_mad_mapping(аргументы.mapping, каталог)
+    спорные = read_mad_disputed(аргументы.disputed, каталог)
+    # Машина без марки и модели может оказаться машиной каталога, чужой её не назовёшь.
+    манифест = pd.read_csv(
+        аргументы.manifest, dtype=str, usecols=["brand", "model", "car_id", "view_id", "url"]
+    ).dropna(subset=["brand", "model"])
+    чужие, отброшены = select_off_catalog_pairs(
+        zip(манифест["brand"], манифест["model"], strict=True),
+        точные.keys(),
+        спорные,
+        load_alias_table(DEFAULT_ALIASES_PATH),
+    )
+    выборка = sample_negative_frames(
+        манифест,
+        чужие,
+        cars_per_model=аргументы.cars_per_model,
+        total=аргументы.total,
+        seed=аргументы.seed,
+    )
+    выборка.to_csv(аргументы.out, index=False)
+    причины = Counter(причина.split(":")[0] for причина in отброшены.values())
+    print(
+        f"чужих моделей {len(чужие)}, отброшено {dict(sorted(причины.items()))}; выборка: "
+        f"{выборка['model_id'].nunique()} моделей, {len(выборка)} машин → {аргументы.out}"
     )
     return 0
 
@@ -116,6 +157,15 @@ def build_parser() -> argparse.ArgumentParser:
     выборка.add_argument("--seed", type=int, required=True)
     выборка.add_argument("--out", type=Path, required=True)
     выборка.set_defaults(run=_sample)
+    негативы = команды.add_parser("negatives-sample", help="чужие машины для замера отказа")
+    негативы.add_argument("--manifest", type=Path, default=DEFAULT_ROOT / "mad.csv")
+    негативы.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING)
+    негативы.add_argument("--disputed", type=Path, default=DEFAULT_DISPUTED)
+    негативы.add_argument("--cars-per-model", type=int, default=10)
+    негативы.add_argument("--total", type=int, default=2000)
+    негативы.add_argument("--seed", type=int, required=True)
+    негативы.add_argument("--out", type=Path, required=True)
+    негативы.set_defaults(run=_negatives_sample)
     скачать = команды.add_parser("fetch", help="докачать выборку, удалить выброшенные машины")
     скачать.add_argument("--sample", type=Path, required=True)
     скачать.add_argument("--root", type=Path, default=DEFAULT_ROOT / "full")

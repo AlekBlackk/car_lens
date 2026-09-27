@@ -16,8 +16,11 @@ from pipeline.ingest.mad_cars import (
     fetch_frames,
     frame_path,
     read_excluded,
+    read_mad_disputed,
     read_mad_mapping,
     sample_frames,
+    sample_negative_frames,
+    select_off_catalog_pairs,
 )
 
 YAML = """
@@ -226,3 +229,141 @@ def test_лист_машин_три_кадра_в_строку(tmp_path: Path) -
     лист = render_car_sheet(машины, first_number=0)
     # Две колонки машин по 3 кадра; 3 машины → 2 ряда.
     assert лист.size == (CELL[0] * 6, CELL[1] * 2)
+
+
+def спорные(tmp_path: Path, строки: str) -> Path:
+    путь = tmp_path / "disputed.csv"
+    путь.write_text("mad_brand,mad_model,model_id,reason\n" + строки, encoding="utf-8")
+    return путь
+
+
+ИГЛЫ = {"audi__a4": ("a4",), "audi__a6": ("a6",)}
+
+
+def test_спорные_пары_читаются(tmp_path: Path, каталог: Catalog) -> None:
+    путь = спорные(tmp_path, "audi,s4,audi__a4,спортивная версия\n")
+    assert read_mad_disputed(путь, каталог) == frozenset({("audi", "s4")})
+
+
+def test_спорная_пара_без_причины_роняет_загрузку(tmp_path: Path, каталог: Catalog) -> None:
+    with pytest.raises(ExternalIngestError, match="без причины"):
+        read_mad_disputed(спорные(tmp_path, "audi,s4,audi__a4, \n"), каталог)
+
+
+def test_чужой_класс_в_спорных_роняет_загрузку(tmp_path: Path, каталог: Catalog) -> None:
+    with pytest.raises(ExternalIngestError, match="audi__a8"):
+        read_mad_disputed(спорные(tmp_path, "audi,s8,audi__a8,версия\n"), каталог)
+
+
+def test_чужими_остаются_пары_без_соответствия_и_иглы() -> None:
+    пары = [("audi", "a4"), ("audi", "s4"), ("audi", "a6_allroad"), ("audi", "q7")]
+    чужие, отброшены = select_off_catalog_pairs(
+        пары, {("audi", "a4")}, frozenset({("audi", "s4")}), ИГЛЫ
+    )
+    assert чужие == [("audi", "q7")]
+    assert отброшены == {
+        ("audi", "a4"): "exact",
+        ("audi", "s4"): "disputed",
+        ("audi", "a6_allroad"): "needle:audi__a6",
+    }
+
+
+def test_спорной_пары_нет_в_mad_cars_отбор_падает() -> None:
+    with pytest.raises(ExternalIngestError, match="audi/s4"):
+        select_off_catalog_pairs([("audi", "q7")], set(), frozenset({("audi", "s4")}), ИГЛЫ)
+
+
+def test_негативы_средний_кадр_обхода_и_потолок_на_модель() -> None:
+    кадр = манифест(("audi", "q7", "1", 5), ("audi", "q7", "2", 4), ("audi", "q7", "3", 2))
+    выборка = sample_negative_frames(кадр, [("audi", "q7")], cars_per_model=2, total=100, seed=1)
+    assert list(выборка.columns) == list(SAMPLE_COLUMNS)
+    assert len(выборка) == 2
+    assert set(выборка["model_id"]) == {"audi__q7"}
+    середины = {"1": "2", "2": "2", "3": "1"}
+    for машина, ракурс in zip(выборка["car_id"], выборка["view_id"], strict=True):
+        assert ракурс == середины[машина]
+
+
+def test_негативы_общий_потолок_и_независимость_от_порядка() -> None:
+    кадр = манифест(*[("audi", f"m{i}", str(i), 3) for i in range(30)])
+    пары = [("audi", f"m{i}") for i in range(30)]
+    прямой = sample_negative_frames(кадр, пары, cars_per_model=10, total=7, seed=5)
+    обратный = sample_negative_frames(
+        кадр.iloc[::-1].reset_index(drop=True),
+        list(reversed(пары)),
+        cars_per_model=10,
+        total=7,
+        seed=5,
+    )
+    assert len(прямой) == 7
+    pd.testing.assert_frame_equal(прямой, обратный)
+
+
+def test_негативы_берут_только_чужие_пары() -> None:
+    кадр = манифест(("audi", "a4", "1", 3), ("audi", "q7", "2", 3))
+    выборка = sample_negative_frames(кадр, [("audi", "q7")], cars_per_model=10, total=10, seed=1)
+    assert list(выборка["car_id"]) == ["2"]
+
+
+def test_подкоманда_negatives_sample_пишет_выборку(
+    tmp_path: Path, каталог: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import scripts.mad_cars as cli
+
+    monkeypatch.setattr(cli, "load_catalog", lambda _путь: каталог)
+    monkeypatch.setattr(cli, "load_alias_table", lambda _путь: ИГЛЫ)
+    манифест(("audi", "a4", "1", 3), ("audi", "q7", "2", 3)).to_csv(
+        tmp_path / "mad.csv", index=False
+    )
+    выход = tmp_path / "neg.csv"
+
+    код = cli.main(
+        [
+            "negatives-sample",
+            "--manifest",
+            str(tmp_path / "mad.csv"),
+            "--mapping",
+            str(таблица(tmp_path, "audi,a4,audi__a4\n")),
+            "--disputed",
+            str(спорные(tmp_path, "")),
+            "--seed",
+            "1",
+            "--out",
+            str(выход),
+        ]
+    )
+
+    assert код == 0
+    выборка = pd.read_csv(выход, dtype=str)
+    assert list(выборка["model_id"]) == ["audi__q7"]
+
+
+def test_подкоманда_negatives_sample_пропускает_машины_без_марки(
+    tmp_path: Path, каталог: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # В настоящем mad.csv 8 машин с пустыми brand и model: чужой такую не назовёшь.
+    import scripts.mad_cars as cli
+
+    monkeypatch.setattr(cli, "load_catalog", lambda _путь: каталог)
+    monkeypatch.setattr(cli, "load_alias_table", lambda _путь: ИГЛЫ)
+    манифест(("", "", "1", 3), ("audi", "q7", "2", 3)).to_csv(tmp_path / "mad.csv", index=False)
+    выход = tmp_path / "neg.csv"
+
+    код = cli.main(
+        [
+            "negatives-sample",
+            "--manifest",
+            str(tmp_path / "mad.csv"),
+            "--mapping",
+            str(таблица(tmp_path, "audi,a4,audi__a4\n")),
+            "--disputed",
+            str(спорные(tmp_path, "")),
+            "--seed",
+            "1",
+            "--out",
+            str(выход),
+        ]
+    )
+
+    assert код == 0
+    assert list(pd.read_csv(выход, dtype=str)["car_id"]) == ["2"]

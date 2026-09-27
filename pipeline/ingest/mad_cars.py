@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import csv
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,10 +17,12 @@ import pandas as pd
 
 from pipeline.catalog import Catalog
 from pipeline.ingest.external import ExternalIngestError
+from pipeline.negatives import catalog_needle_hits
 
 MAPPING_COLUMNS = ("mad_brand", "mad_model", "model_id")
 SAMPLE_COLUMNS = ("model_id", "car_id", "view_id", "url")
 EXCLUDED_COLUMNS = ("model_id", "car_id", "reason")
+DISPUTED_COLUMNS = ("mad_brand", "mad_model", "model_id", "reason")
 FRAMES_PER_CAR = 3
 
 
@@ -73,6 +75,89 @@ def sample_frames(
                 кадр_обхода = обход.iloc[позиция]
                 ракурс, url = str(кадр_обхода["view_id"]), str(кадр_обхода["url"])
                 строки.append((модель, str(машина), ракурс, url))
+    return pd.DataFrame(строки, columns=list(SAMPLE_COLUMNS))
+
+
+def read_mad_disputed(path: Path, catalog: Catalog) -> frozenset[tuple[str, str]]:
+    """Спорные пары: соседнее поколение, рестайл или кузов класса. Причина обязательна."""
+    кадр = pd.read_csv(path, dtype=str, keep_default_na=False)
+    нет = sorted(set(DISPUTED_COLUMNS) - set(кадр.columns))
+    if нет:
+        raise ExternalIngestError(f"{path}: нет колонок {', '.join(нет)}")
+    for номер, (модель, причина) in enumerate(
+        zip(кадр["model_id"], кадр["reason"], strict=True), start=2
+    ):
+        if модель not in catalog:
+            raise ExternalIngestError(f"{path}:{номер}: {модель} нет в каталоге")
+        if not причина.strip():
+            raise ExternalIngestError(f"{path}:{номер}: спорная пара без причины")
+    return frozenset(zip(кадр["mad_brand"], кадр["mad_model"], strict=True))
+
+
+def select_off_catalog_pairs(
+    pairs: Iterable[tuple[str, str]],
+    exact: Collection[tuple[str, str]],
+    disputed: frozenset[tuple[str, str]],
+    needles: Mapping[str, Sequence[str]],
+) -> tuple[list[tuple[str, str]], dict[tuple[str, str], str]]:
+    """Пары MAD-Cars вне каталога и причины отброса остальных.
+
+    Спорная пара, которой нет в MAD-Cars, роняет отбор: опечатка в списке тихо вернула бы
+    соседнее поколение класса в чужие машины. Игла ищется в строке «марка модель» тем же
+    фильтром, что у прежних негативов: лишний выброшенный негатив дешевле своей машины.
+    """
+    все = sorted(set(pairs))
+    пропали = sorted(disputed - set(все))
+    if пропали:
+        raise ExternalIngestError(
+            "спорных пар нет в MAD-Cars: " + ", ".join("/".join(п) for п in пропали)
+        )
+    чужие: list[tuple[str, str]] = []
+    отброшены: dict[tuple[str, str], str] = {}
+    for пара in все:
+        совпали = catalog_needle_hits(" ".join(пара), needles)
+        if пара in exact:
+            отброшены[пара] = "exact"
+        elif пара in disputed:
+            отброшены[пара] = "disputed"
+        elif совпали:
+            отброшены[пара] = "needle:" + "|".join(совпали)
+        else:
+            чужие.append(пара)
+    return чужие, отброшены
+
+
+def sample_negative_frames(
+    manifest: pd.DataFrame,
+    pairs: Collection[tuple[str, str]],
+    *,
+    cars_per_model: int,
+    total: int,
+    seed: int,
+) -> pd.DataFrame:
+    """До `cars_per_model` машин на чужую модель, средний кадр обхода, всего до `total`.
+
+    В колонке `model_id` — папка модели MAD-Cars `<brand>__<model>`: раскладка та же, что у
+    `fetch_frames`, но это не `model_id` каталога. От порядка строк входа не зависит.
+    """
+    свои = set(pairs)
+    пары = zip(manifest["brand"], manifest["model"], strict=True)
+    кадр = manifest[[пара in свои for пара in пары]]
+    кадр = кадр.assign(папка=кадр["brand"] + "__" + кадр["model"])
+    генератор = np.random.default_rng(seed)
+    строки: list[tuple[str, str, str, str]] = []
+    for папка, модель in кадр.groupby("папка", sort=True):
+        машины = sorted(модель["car_id"].unique(), key=int)
+        взять = min(cars_per_model, len(машины))
+        for машина in sorted(генератор.choice(машины, size=взять, replace=False), key=int):
+            обход = модель[модель["car_id"] == машина].sort_values(
+                "view_id", key=lambda s: s.astype(int)
+            )
+            середина = обход.iloc[len(обход) // 2]
+            строки.append((str(папка), str(машина), str(середина["view_id"]), str(середина["url"])))
+    if len(строки) > total:
+        оставить = sorted(генератор.choice(len(строки), size=total, replace=False))
+        строки = [строки[i] for i in оставить]
     return pd.DataFrame(строки, columns=list(SAMPLE_COLUMNS))
 
 
