@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from pipeline.catalog import Catalog, class_index, member_index
-from pipeline.clean import DEFAULT_PHASH_HAMMING, duplicate_indices, phash_of
+from pipeline.clean import DEFAULT_PHASH_HAMMING, phash_of
 from pipeline.crop import Detector, crop_image, select_primary
 from pipeline.hashing import bucket_of, close_pairs
 from pipeline.schema import COLUMNS, empty_frame
@@ -160,6 +160,16 @@ def _близкие(кандидаты: Sequence[int], опорные: Sequence[
             yield i, j - граница
 
 
+def _дубли_в_классе(хеши: Sequence[int], классы: Sequence[object]) -> set[int]:
+    """Индексы дублей: близкий pHash — дубль, только если у пары один класс.
+
+    Из группы остаётся самый ранний, как в `duplicate_indices`. Сверка класса нужна потому,
+    что разные модели в одном ракурсе на одинаковом фоне дают близкий pHash: в приёме MAD-Cars
+    86% «дублей» оказались разными машинами (`bench/acceptance-mad-full.md`, «Отклонения»).
+    """
+    return {j for i, j in close_pairs(хеши, DEFAULT_PHASH_HAMMING) if классы[i] == классы[j]}
+
+
 def build_external_frame(
     photos: Iterable[ExternalPhoto],
     detector: Detector,
@@ -174,7 +184,8 @@ def build_external_frame(
 
     `holdout_hashes` — pHash всех кадров `holdout_ru`: близость к любому из них выбрасывает
     кадр без оглядки на класс. `pool` — пары `(class_id, phash)` обучающего пула: там
-    выбрасывается только совпадение в своём классе.
+    выбрасывается только совпадение в своём классе. Дубль внутри источника — тоже только в
+    своём классе; побайтная копия файла выбрасывается под любым классом.
     """
     индекс = class_index(catalog)
     класс_модели = member_index(catalog)
@@ -251,7 +262,7 @@ def build_external_frame(
         )
 
     # Причина — первая сработавшая: дубль внутри источника, утечка в эталон, повтор пула.
-    отброшены: dict[int, str] = dict.fromkeys(duplicate_indices(хеши), "dup_source")
+    отброшены: dict[int, str] = dict.fromkeys(_дубли_в_классе(хеши, классы), "dup_source")
     for i, _ in _близкие(хеши, holdout_hashes):
         отброшены.setdefault(i, "holdout_leak")
     for i, j in _близкие(хеши, [хеш for _, хеш in pool]):
@@ -277,8 +288,8 @@ def merge_external(
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     """Склеить кадры источников: межисточниковый дедуп и потолок на класс (фильтры 7–8).
 
-    Источники обходятся в порядке `SOURCE_PRIORITY`: из близкой пары остаётся кадр более
-    приоритетного (`duplicate_indices` оставляет самый ранний), и потолок заполняется им же
+    Источники обходятся в порядке `SOURCE_PRIORITY`: из близкой пары одного класса остаётся
+    кадр более приоритетного (`_дубли_в_классе` оставляет самый ранний), и потолок заполняется им же
     первым. Внутри источника порядок задаёт `bucket_of(photo_id, seed)` — от порядка строк
     на входе результат не зависит.
 
@@ -302,7 +313,7 @@ def merge_external(
 
     всё = pd.concat(части, ignore_index=True)
     отказы: Counter[str] = Counter()
-    дубли = duplicate_indices([int(хеш) for хеш in всё["phash"]])
+    дубли = _дубли_в_классе([int(хеш) for хеш in всё["phash"]], list(всё["class_idx"]))
     отказы["dup_cross"] = len(дубли)
     всё = всё.drop(index=sorted(дубли))
     # Общий потолок считается по источникам без своего: у них корзина одна, пустая строка.

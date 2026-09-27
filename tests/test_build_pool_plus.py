@@ -63,6 +63,20 @@ def test_из_близкой_пары_остаётся_приоритетный_
     assert отказы == {"dup_cross": 1}
 
 
+def test_близкая_пара_разных_классов_не_дубль() -> None:
+    # Пресс-фото и уличный кадр разных моделей в одном ракурсе: pHash близок, машины разные.
+    итог, отказы = merge_external(
+        {
+            "autoevolution": кадр(строка("autoevolution:a", 0, далёкий(0))),
+            "mad_cars": кадр(строка("mad_cars:m", 1, далёкий(0) ^ 1)),
+        },
+        max_per_class=150,
+        seed=1337,
+    )
+    assert sorted(итог["photo_id"]) == ["autoevolution:a", "mad_cars:m"]
+    assert отказы == {}
+
+
 def test_потолок_заполняется_по_приоритету() -> None:
     авто = [строка(f"autoevolution:{i}", 0, далёкий(i)) for i in range(4)]
     ручные = [строка(f"manual:{i}", 0, далёкий(4 + i)) for i in range(2)]

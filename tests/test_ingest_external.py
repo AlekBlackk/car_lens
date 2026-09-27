@@ -183,6 +183,15 @@ def одно(tmp_path: Path, зерно: int, модель: str = "audi__a5", и
     return ExternalPhoto(путь, модель, путь.name, None)
 
 
+def перекодировать(исходник: Path, куда: Path) -> Path:
+    """Тот же массив в другом кодеке: байты другие, pHash почти тот же."""
+    поле = cv2.imread(str(исходник))
+    assert поле is not None
+    куда.parent.mkdir(parents=True, exist_ok=True)
+    assert cv2.imwrite(str(куда), поле)
+    return куда
+
+
 def test_кадр_проходит_схему_и_несёт_поля(tmp_path: Path, каталог: Catalog) -> None:
     итог = принять([одно(tmp_path, 1, "volkswagen__golf")], каталог, tmp_path / "crops")
 
@@ -217,11 +226,7 @@ def test_дубли_внутри_источника(tmp_path: Path, катало
     первое = одно(tmp_path, 1, имя="a.jpg")
     побайтно = tmp_path / "in" / "audi__a5" / "b.jpg"
     побайтно.write_bytes(первое.path.read_bytes())
-    # Тот же массив в другом кодеке: байты другие, pHash почти тот же.
-    поле = cv2.imread(str(первое.path))
-    assert поле is not None
-    перекодировано = tmp_path / "in" / "audi__a5" / "c.png"
-    assert cv2.imwrite(str(перекодировано), поле)
+    перекодировано = перекодировать(первое.path, tmp_path / "in" / "audi__a5" / "c.png")
     фото = [первое] + [
         ExternalPhoto(путь, "audi__a5", путь.name, None) for путь in (побайтно, перекодировано)
     ]
@@ -233,6 +238,35 @@ def test_дубли_внутри_источника(tmp_path: Path, катало
     assert итог.rejected == {"dup_source": 2}
     # Кропы отброшенных удалены: на диске ровно то, что в кадре.
     assert len(list((tmp_path / "crops").rglob("*.jpg"))) == 1
+
+
+def test_близкие_кадры_разных_классов_внутри_источника_не_дубли(
+    tmp_path: Path, каталог: Catalog
+) -> None:
+    # Разные машины на одном стенде в одном ракурсе дают близкий pHash; дубль — только в
+    # своём классе, как у совпадения с пулом.
+    первое = одно(tmp_path, 1)
+    похожее = перекодировать(первое.path, tmp_path / "in" / "volkswagen__golf" / "b.png")
+    фото = [первое, ExternalPhoto(похожее, "volkswagen__golf", похожее.name, None)]
+
+    итог = принять(фото, каталог, tmp_path / "crops")
+
+    assert sorted(итог.frame["model_id"]) == ["audi__a5", "volkswagen__golf"]
+    assert итог.rejected == {}
+
+
+def test_побайтная_копия_в_чужом_классе_остаётся_дублем(tmp_path: Path, каталог: Catalog) -> None:
+    # Один и тот же файл под двумя классами — не две машины, а конфликт меток.
+    первое = одно(tmp_path, 1)
+    копия = tmp_path / "in" / "volkswagen__golf" / "b.jpg"
+    копия.parent.mkdir(parents=True)
+    копия.write_bytes(первое.path.read_bytes())
+    фото = [первое, ExternalPhoto(копия, "volkswagen__golf", копия.name, None)]
+
+    итог = принять(фото, каталог, tmp_path / "crops")
+
+    assert list(итог.frame["model_id"]) == ["audi__a5"]
+    assert итог.rejected == {"dup_source": 1}
 
 
 def test_утечка_в_эталон_без_оглядки_на_класс(tmp_path: Path, каталог: Catalog) -> None:
