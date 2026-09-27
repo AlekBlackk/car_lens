@@ -9,10 +9,13 @@ from training.calibration import Scores, select_pair
 from training.eval_open_set import (
     NONCAR,
     STREET,
+    ModelResult,
+    OpenSetFold,
     OpenSetPoint,
     binding_constraint,
     cross_fit_open_set,
     open_set_point,
+    render_open_set_report,
     select_open_set_pair,
     split_by_group,
 )
@@ -89,3 +92,26 @@ def test_отложенная_сторона_меряется_на_другой_
         a.chosen.margin_min,
     )
     assert a.held_out == ожидание
+
+
+def test_отчёт_несёт_стороны_итог_телефон_и_разделимость() -> None:
+    точка = OpenSetPoint(0.84, 0.015, 0.72, 0.05, 1000, {STREET: 0.14, NONCAR: 0.03})
+    результат = ModelResult(
+        label="0.5",
+        classifier_sha256="31e3f13c",
+        folds=[OpenSetFold("A", точка, точка), OpenSetFold("B", None, None)],
+        final=точка,
+        phone=точка,
+        reference_fpr_at_phone=0.149,
+        separability={STREET: (0.81, 0.77), NONCAR: (0.95, 0.30)},
+    )
+
+    текст = render_open_set_report([результат], {"off_catalog_street": 1900}, {"seed": "20260927"})
+
+    assert "## Модель 0.5" in текст
+    assert "| A | подбор | 0.84 | 0.015 | 0.720 | 0.050 | 0.140 | 0.030 |" in текст
+    assert "| B | подбор | — | — | — | — | — | — |" in текст
+    assert f"узкое ограничение: FPR {STREET}" in текст
+    assert "справочный off_catalog в точке телефона: FPR 0.149" in текст
+    assert f"| {STREET} | 0.810 | 0.770 |" in текст
+    assert "- off_catalog_street: 1900" in текст

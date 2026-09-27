@@ -7,12 +7,37 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import argparse
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
-from training.calibration import MARGIN_GRID, SIM_GRID, Scores, operating_point
+from pipeline.holdout_relevance import SET_RELEVANT, load_relevance, subsets
+from pipeline.index_format import read_index, verify_meta
+from pipeline.knn import top2_with_sims
+from pipeline.negatives import neg_kind_of
+from pipeline.paths import harvest_dir, splits_dir
+from pipeline.pool_audit import file_sha256
+from pipeline.schema import read_split
+from training.calibration import (
+    MARGIN_GRID,
+    SIM_GRID,
+    Scores,
+    auroc,
+    fpr_at_tpr,
+    operating_point,
+    split_halves,
+)
+from training.tune_thresholds import (
+    check_holdout_slots,
+    embed_crops,
+    scores_from,
+    write_generated_section,
+)
 
 MAX_ERROR = 0.15
 MAX_FPR = 0.15
@@ -145,3 +170,203 @@ def cross_fit_open_set(
         отложенная = open_set_point(known.subset(~свои), проверка, точка.sim_min, точка.margin_min)
         стороны.append(OpenSetFold(имя, точка, отложенная))
     return стороны
+
+
+@dataclass(frozen=True, slots=True)
+class ModelResult:
+    label: str
+    classifier_sha256: str
+    folds: list[OpenSetFold]
+    final: OpenSetPoint | None
+    phone: OpenSetPoint
+    reference_fpr_at_phone: float
+    separability: dict[str, tuple[float, float]]
+
+
+def _точка_md(точка: OpenSetPoint | None) -> str:
+    if точка is None:
+        return "— | — | — | — | — | —"
+    return (
+        f"{точка.sim_min:.2f} | {точка.margin_min:.3f} | {точка.coverage:.3f} | "
+        f"{точка.error:.3f} | {точка.fpr[STREET]:.3f} | {точка.fpr[NONCAR]:.3f}"
+    )
+
+
+def render_open_set_report(
+    results: Sequence[ModelResult], counts: Mapping[str, int], provenance: Mapping[str, str]
+) -> str:
+    строки = ["## Происхождение", ""]
+    строки += [f"- {ключ}: `{значение}`" for ключ, значение in provenance.items()]
+    строки += ["", "## Выборки", ""]
+    строки += [f"- {ключ}: {значение}" for ключ, значение in counts.items()]
+    шапка = f"| sim_min | margin_min | покрытие | ошибка | FPR {STREET} | FPR {NONCAR} |"
+    for р in results:
+        строки += [
+            "",
+            f"## Модель {р.label}",
+            "",
+            f"Классификатор `{р.classifier_sha256}`. Знакомые — релевантный набор.",
+            "",
+            "| сторона | где " + шапка,
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        for с in р.folds:
+            строки.append(f"| {с.tuned_on} | подбор | {_точка_md(с.chosen)} |")
+            строки.append(f"| {с.tuned_on} | проверка | {_точка_md(с.held_out)} |")
+        узкое = "—" if р.final is None else binding_constraint(р.final)
+        строки += [
+            "",
+            "Итог на всём наборе:",
+            "",
+            шапка,
+            "|---|---|---|---|---|---|",
+            f"| {_точка_md(р.final)} |",
+            "",
+            f"Итог — узкое ограничение: {узкое}.",
+            "",
+            "Рабочая точка телефона:",
+            "",
+            шапка,
+            "|---|---|---|---|---|---|",
+            f"| {_точка_md(р.phone)} |",
+            "",
+            f"Проверка кода — справочный off_catalog в точке телефона: FPR "
+            f"{р.reference_fpr_at_phone:.3f}.",
+            "",
+            "| группа | AUROC (sim1) | FPR@TPR95 |",
+            "|---|---|---|",
+        ]
+        строки += [f"| {г} | {a:.3f} | {f:.3f} |" for г, (a, f) in р.separability.items()]
+    строки.append("")
+    return "\n".join(строки)
+
+
+def measure_model(
+    label: str,
+    models: Path,
+    expected_sha: str,
+    known: pd.DataFrame,
+    street: pd.DataFrame,
+    reference: pd.DataFrame,
+    *,
+    crops_root: Path,
+    seed: int,
+    batch_size: int,
+) -> ModelResult:
+    манифест = json.loads((models / "models_manifest.json").read_text("utf-8"))
+    классификатор = models / манифест["files"]["classifier"]["name"]
+    sha = file_sha256(классификатор)
+    if sha != expected_sha:
+        raise SystemExit(f"{label}: sha256 классификатора {sha}, ожидался {expected_sha}")
+    байты_меты = (models / "catalog_meta.json").read_bytes()
+    заголовок, центроиды = read_index(models / "catalog_index.bin")
+    verify_meta(заголовок, байты_меты)
+    мета = json.loads(байты_меты)
+    check_holdout_slots(list(known["model_id"]), list(known["class_idx"]), мета)
+    бренды = [класс["brand"] for класс in мета["classes"]]
+    пороги = json.loads((models / "thresholds.json").read_text("utf-8"))
+
+    def оценки(кадр: pd.DataFrame, истина: np.ndarray | None) -> Scores:
+        пути = [crops_root / п for п in кадр["crop_path"]]
+        эмбеддинги = embed_crops(классификатор, пути, манифест, batch_size)
+        return scores_from(*top2_with_sims(эмбеддинги, центроиды), истина, бренды)
+
+    истина = known["class_idx"].to_numpy(dtype=np.int64)
+    знакомые = оценки(known, истина)
+    улица = оценки(street, None)
+    справка = оценки(reference, None)
+    виды = np.array([neg_kind_of(str(л)) for л in street["listing_id"]])
+    маски = {г: np.isin(виды, GROUP_KINDS[г]) for г in (STREET, NONCAR)}
+    группы = {г: улица.subset(м) for г, м in маски.items()}
+    половины = {
+        STREET: split_by_group(street["listing_id"].to_numpy()[маски[STREET]], seed),
+        NONCAR: split_halves(виды[маски[NONCAR]], seed),
+    }
+    стороны = cross_fit_open_set(знакомые, группы, split_halves(истина, seed), половины)
+    sim_min, margin_min = float(пороги["sim_min"]), float(пороги["margin_min"])
+    по_видам = {вид: улица.subset(виды == вид) for вид in ("truck_bus", "detector_fp")}
+    разделимость = {
+        имя: (auroc(знакомые.sim1, s.sim1), fpr_at_tpr(знакомые.sim1, s.sim1))
+        for имя, s in {**группы, **по_видам, REFERENCE_KIND: справка}.items()
+        if len(s.sim1)
+    }
+    return ModelResult(
+        label=label,
+        classifier_sha256=sha,
+        folds=стороны,
+        final=select_open_set_pair(знакомые, группы),
+        phone=open_set_point(знакомые, группы, sim_min, margin_min),
+        reference_fpr_at_phone=operating_point(знакомые, справка, sim_min, margin_min).fpr,
+        separability=разделимость,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    парсер = argparse.ArgumentParser(description="Замер открытого множества на уличных негативах")
+    парсер.add_argument(
+        "--model",
+        nargs=3,
+        action="append",
+        required=True,
+        metavar=("LABEL", "DIR", "SHA256"),
+        help="метка, каталог ассетов, sha256 классификатора",
+    )
+    парсер.add_argument("--holdout", type=Path, default=splits_dir() / "holdout_ru.parquet")
+    парсер.add_argument("--relevance", type=Path, default=Path("catalog/holdout_relevance.csv"))
+    парсер.add_argument("--street", type=Path, default=splits_dir() / "negatives-street.parquet")
+    парсер.add_argument("--reference", type=Path, default=splits_dir() / "negatives.parquet")
+    парсер.add_argument("--crops-root", type=Path, default=harvest_dir() / "crops")
+    парсер.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    парсер.add_argument("--batch-size", type=int, default=32)
+    парсер.add_argument("--report", type=Path, default=Path("bench/open-set-street.md"))
+    аргументы = парсер.parse_args(argv)
+
+    эталон = read_split(аргументы.holdout)
+    эталон = эталон[~эталон["is_multi_car"].astype(bool)].reset_index(drop=True)
+    маска = subsets(эталон["photo_id"].tolist(), load_relevance(аргументы.relevance))
+    эталон = эталон[маска[SET_RELEVANT]].reset_index(drop=True)
+    улица = read_split(аргументы.street)
+    справка = read_split(аргументы.reference)
+    справка = справка[
+        [neg_kind_of(str(л)) == REFERENCE_KIND for л in справка["listing_id"]]
+    ].reset_index(drop=True)
+
+    результаты = [
+        measure_model(
+            метка,
+            Path(каталог),
+            sha,
+            эталон,
+            улица,
+            справка,
+            crops_root=аргументы.crops_root,
+            seed=аргументы.seed,
+            batch_size=аргументы.batch_size,
+        )
+        for метка, каталог, sha in аргументы.model
+    ]
+    виды = [neg_kind_of(str(л)) for л in улица["listing_id"]]
+    счётчики = {"знакомые (релевантный набор)": len(эталон)}
+    счётчики.update({вид: виды.count(вид) for вид in sorted(set(виды))})
+    счётчики["справочный off_catalog"] = len(справка)
+    происхождение = {
+        "holdout_sha256": file_sha256(аргументы.holdout),
+        "relevance_sha256": file_sha256(аргументы.relevance),
+        "negatives_street_sha256": file_sha256(аргументы.street),
+        "negatives_reference_sha256": file_sha256(аргументы.reference),
+        "seed": str(аргументы.seed),
+        "max_error / max_fpr": f"{MAX_ERROR} / {MAX_FPR}",
+        "sim_grid / margin_grid": f"{SIM_GRID[0]}…{SIM_GRID[-1]} / {MARGIN_GRID[0]}…"
+        f"{MARGIN_GRID[-1]}",
+    }
+    write_generated_section(
+        аргументы.report, render_open_set_report(результаты, счётчики, происхождение)
+    )
+    for р in результаты:
+        итог = "нет допустимой пары" if р.final is None else f"покрытие {р.final.coverage:.3f}"
+        print(f"{р.label}: {итог}; телефон FPR {р.phone.fpr}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
