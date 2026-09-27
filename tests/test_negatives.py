@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
@@ -10,12 +11,14 @@ import pytest
 
 from pipeline.crop import Detection
 from pipeline.negatives import (
+    CocoTruth,
     Exclusions,
     NegativeCandidate,
     NegativesError,
     OffCatalogGroup,
     build_negative_frame,
     catalog_needle_hits,
+    coco_box_kind,
     neg_kind_of,
     read_exclusions,
     reject_candidates,
@@ -255,3 +258,85 @@ def test_отбраковки_находят_файл_по_индексу(tmp_pa
     assert [к.path for к in кандидаты] == [сырое]
     assert кандидаты[0].off_catalog is False
     assert без_файла == 1  # запись 3 есть в индексе, файла нет; запись 2 — чужая причина
+
+
+ГРУЗОВИК_РАЗМЕТКА = (120.0, 110.0, 300.0, 180.0)
+
+
+def test_бокс_на_грузовике_из_разметки_это_truck_bus() -> None:
+    правда = CocoTruth(truck_bus=(ГРУЗОВИК_РАЗМЕТКА,), car=())
+    assert coco_box_kind(АВТОБУС, правда) == "truck_bus"
+
+
+def test_перекрытие_с_легковушкой_побеждает_грузовик() -> None:
+    # УАЗ-пикап в разметке — car, детектор нашёл его грузовиком: машина каталога.
+    правда = CocoTruth(truck_bus=(ГРУЗОВИК_РАЗМЕТКА,), car=(ГРУЗОВИК_РАЗМЕТКА,))
+    assert coco_box_kind(АВТОБУС, правда) is None
+
+
+def test_бокс_на_картинке_без_транспорта_это_ложное_срабатывание() -> None:
+    assert coco_box_kind(МАШИНА, CocoTruth(truck_bus=(), car=())) == "detector_fp"
+
+
+def test_бокс_мимо_разметки_на_картинке_с_транспортом_не_берётся() -> None:
+    правда = CocoTruth(truck_bus=((600.0, 400.0, 50.0, 50.0),), car=())
+    assert coco_box_kind(МАШИНА, правда) is None
+
+
+def test_уличная_чужая_машина_пишется_своим_видом(tmp_path: Path) -> None:
+    фото = _фото(tmp_path / "src" / "s.jpg", 55)
+    кандидат = NegativeCandidate(
+        фото, True, "mad_cars/bmw__x3", "bmw__x3", primary_kind="off_catalog_street"
+    )
+
+    итог = build_negative_frame(
+        [кандидат],
+        _ДетекторПоПути([[МАШИНА]]),
+        tmp_path / "crops",
+        off_catalog_cap=10,
+        excluded_photos=frozenset(),
+    )
+
+    assert итог.kept == {"off_catalog_street": 1}
+    assert neg_kind_of(str(итог.frame.iloc[0]["listing_id"])) == "off_catalog_street"
+
+
+def test_кандидат_coco_режется_по_разметке(tmp_path: Path) -> None:
+    фото = _фото(tmp_path / "src" / "c.jpg", 33)
+    правда = CocoTruth(truck_bus=(ГРУЗОВИК_РАЗМЕТКА,), car=())
+    кандидат = NegativeCandidate(фото, False, "coco/c.jpg", "c.jpg", coco=правда)
+
+    итог = build_negative_frame(
+        [кандидат, replace(кандидат, path=_фото(tmp_path / "src" / "d.jpg", 34))],
+        _ДетекторПоПути([[АВТОБУС, КРОШКА], [КРОШКА]]),
+        tmp_path / "crops",
+        off_catalog_cap=10,
+        excluded_photos=frozenset(),
+    )
+
+    # Бокс мимо разметки не берётся; причина пишется, только если с картинки не взято ничего.
+    assert итог.kept == {"truck_bus": 1}
+    assert итог.rejected == {"coco_unmatched": 1}
+
+
+def test_потолок_по_виду_бокса_останавливает_обход(tmp_path: Path) -> None:
+    пусто = CocoTruth(truck_bus=(), car=())
+    кандидаты = [
+        NegativeCandidate(
+            _фото(tmp_path / "src" / f"{н}.jpg", 60 + н), False, f"coco/{н}", str(н), coco=пусто
+        )
+        for н in range(3)
+    ]
+    детектор = _ДетекторПоПути([[МАШИНА]] * 3)
+
+    итог = build_negative_frame(
+        кандидаты,
+        детектор,
+        tmp_path / "crops",
+        off_catalog_cap=10,
+        excluded_photos=frozenset(),
+        box_caps={"detector_fp": 2},
+    )
+
+    assert итог.kept == {"detector_fp": 2}
+    assert len(детектор._очередь) == 1  # третья картинка даже не открывалась

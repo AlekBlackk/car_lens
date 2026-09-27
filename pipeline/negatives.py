@@ -28,6 +28,7 @@ from pipeline.clean import phash_of
 from pipeline.crop import VEHICLE_CLASSES, Detection, Detector, crop_image, select_primary
 from pipeline.harvest.aliases import matches_needle, normalize_filename
 from pipeline.harvest.cache import cache_path
+from pipeline.ingest.build import iou
 from pipeline.schema import COLUMNS, empty_frame
 
 
@@ -120,7 +121,7 @@ def sample_candidates(
     return кандидаты
 
 
-NEG_KINDS = ("off_catalog", "detector_fp", "truck_bus")
+NEG_KINDS = ("off_catalog", "off_catalog_street", "detector_fp", "truck_bus")
 # Кроп короче 120 px телефон не классифицирует — показывает «Подойдите ближе» (§6.4), и
 # порог сходства такой кадр не видит никогда.
 MIN_SHORT_SIDE_PX = 120
@@ -130,6 +131,40 @@ MIN_SHORT_SIDE_PX = 120
 REJECT_REASONS = frozenset({"no_vehicle", "not_a_car_photo"})
 # COCO 2 — car; 5 и 7 — bus и truck (§4.1).
 _ЛЕГКОВОЙ = 2
+# Бокс детектора считается тем же объектом, что бокс разметки COCO, от этого перекрытия.
+IOU_MATCH = 0.5
+
+Box = tuple[float, float, float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class CocoTruth:
+    """Разметка картинки COCO в пикселях `(x, y, w, h)`: грузовики и автобусы, легковушки."""
+
+    truck_bus: tuple[Box, ...]
+    car: tuple[Box, ...]
+
+
+def _xyxy(x: float, y: float, w: float, h: float) -> tuple[int, int, int, int]:
+    return (int(x), int(y), int(x + w), int(y + h))
+
+
+def coco_box_kind(box: Detection, truth: CocoTruth) -> str | None:
+    """Вид бокса детектора по разметке COCO; `None` — бокс не берётся.
+
+    Легковушка проверяется первой: машина каталога в негативах занизила бы порог своего
+    класса, а пикапы и фургоны COCO бывают размечены как car. Картинка без разметки
+    транспорта даёт ложное срабатывание; бокс мимо разметки на картинке с транспортом
+    неоднозначен и не берётся.
+    """
+    бокс = _xyxy(box.x, box.y, box.w, box.h)
+    if any(iou(бокс, _xyxy(*р)) >= IOU_MATCH for р in truth.car):
+        return None
+    if any(iou(бокс, _xyxy(*р)) >= IOU_MATCH for р in truth.truck_bus):
+        return "truck_bus"
+    if not truth.truck_bus and not truth.car:
+        return "detector_fp"
+    return None
 
 
 def neg_kind_of(listing_id: str) -> str:
@@ -142,12 +177,18 @@ def neg_kind_of(listing_id: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class NegativeCandidate:
-    """Фото-источник. `off_catalog` — один главный бокс; иначе — каждый транспортный бокс."""
+    """Фото-источник.
+
+    `off_catalog` — один главный бокс вида `primary_kind`; иначе — каждый транспортный бокс,
+    вид по классу детектора, а при `coco` — по разметке COCO (`coco_box_kind`).
+    """
 
     path: Path
     off_catalog: bool
     origin: str
     raw_name: str
+    primary_kind: str = "off_catalog"
+    coco: CocoTruth | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,10 +207,15 @@ def _боксы(
         решение = select_primary(детекции, ширина, высота)
         if решение.box is None:
             return [], решение.reject_reason or "no_vehicle"
-        return [("off_catalog", решение.box, решение.area_frac)], None
+        return [(кандидат.primary_kind, решение.box, решение.area_frac)], None
     транспорт = [д for д in детекции if д.cls in VEHICLE_CLASSES]
     if not транспорт:
         return [], "no_vehicle"
+    if кандидат.coco is not None:
+        правда = кандидат.coco
+        виды = [(coco_box_kind(д, правда), д) for д in транспорт]
+        взятые = [(вид, д, д.area / площадь) for вид, д in виды if вид is not None]
+        return взятые, (None if взятые else "coco_unmatched")
     return [
         ("detector_fp" if д.cls == _ЛЕГКОВОЙ else "truck_bus", д, д.area / площадь)
         for д in транспорт
@@ -183,14 +229,22 @@ def build_negative_frame(
     *,
     off_catalog_cap: int,
     excluded_photos: frozenset[str],
+    box_caps: Mapping[str, int] | None = None,
 ) -> NegativesResult:
-    """Кандидаты → строки `negatives.parquet` и кропы под `crops_root/negatives/<вид>/`."""
+    """Кандидаты → строки `negatives.parquet` и кропы под `crops_root/negatives/<вид>/`.
+
+    `box_caps` — потолок по виду бокса; когда заполнены все, обход кандидатов прекращается:
+    ленивый поток COCO не качает лишнего.
+    """
     оставлено: Counter[str] = Counter()
     отказы: Counter[str] = Counter()
     записи: list[dict[str, Any]] = []
     отпечатки: set[str] = set()
+    потолки = dict(box_caps or {})
     for кандидат in candidates:
-        if кандидат.off_catalog and оставлено["off_catalog"] >= off_catalog_cap:
+        if потолки and all(оставлено[вид] >= n for вид, n in потолки.items()):
+            break
+        if кандидат.off_catalog and оставлено[кандидат.primary_kind] >= off_catalog_cap:
             continue
         байты = кандидат.path.read_bytes()
         отпечаток = hashlib.sha256(байты).hexdigest()[:16]
@@ -209,6 +263,9 @@ def build_negative_frame(
         if причина is not None:
             отказы[причина] += 1
         for номер, (вид, бокс, доля) in enumerate(боксы):
+            if вид in потолки and оставлено[вид] >= потолки[вид]:
+                отказы["cap"] += 1
+                continue
             photo_id = f"negatives:{отпечаток}:{номер}"
             if photo_id in excluded_photos:
                 отказы["excluded"] += 1
