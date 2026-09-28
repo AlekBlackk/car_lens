@@ -161,6 +161,44 @@ def sample_negative_frames(
     return pd.DataFrame(строки, columns=list(SAMPLE_COLUMNS))
 
 
+def _кадры_пула(число: int) -> list[int]:
+    """Позиции `N // 4`, `N // 2`, `3N // 4`; при коротком обходе — без повторов."""
+    return sorted({(число * четверть) // 4 for четверть in (1, 2, 3)})
+
+
+def sample_reject_pool_frames(
+    manifest: pd.DataFrame,
+    pairs: Collection[tuple[str, str]],
+    measured_models: Collection[str],
+    *,
+    cars_per_model: int,
+    seed: int,
+) -> pd.DataFrame:
+    """Кадры пула отказных прототипов: чужие модели вне замерной выборки.
+
+    `measured_models` — папки `<brand>__<model>` выборки замера: прототип, собранный на
+    модели замера, мерился бы на её же соседях, и оценка вышла бы оптимистичной. До
+    `cars_per_model` машин на модель, три кадра обхода на машину — разные ракурсы.
+    От порядка строк входа не зависит.
+    """
+    чужие = {f"{марка}__{модель}" for марка, модель in pairs} - set(measured_models)
+    кадр = manifest.assign(папка=manifest["brand"] + "__" + manifest["model"])
+    кадр = кадр[кадр["папка"].isin(чужие)]
+    генератор = np.random.default_rng(seed)
+    строки: list[tuple[str, str, str, str]] = []
+    for папка, модель in кадр.groupby("папка", sort=True):
+        машины = sorted(модель["car_id"].unique(), key=int)
+        взять = min(cars_per_model, len(машины))
+        for машина in sorted(генератор.choice(машины, size=взять, replace=False), key=int):
+            обход = модель[модель["car_id"] == машина].sort_values(
+                "view_id", key=lambda s: s.astype(int)
+            )
+            for позиция in _кадры_пула(len(обход)):
+                ракурс = обход.iloc[позиция]
+                строки.append((str(папка), str(машина), str(ракурс["view_id"]), str(ракурс["url"])))
+    return pd.DataFrame(строки, columns=list(SAMPLE_COLUMNS))
+
+
 @dataclass(frozen=True, slots=True)
 class FetchReport:
     downloaded: int

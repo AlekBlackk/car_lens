@@ -20,6 +20,7 @@ from pipeline.ingest.mad_cars import (
     read_mad_mapping,
     sample_frames,
     sample_negative_frames,
+    sample_reject_pool_frames,
     select_off_catalog_pairs,
 )
 
@@ -367,3 +368,80 @@ def test_подкоманда_negatives_sample_пропускает_машины
 
     assert код == 0
     assert list(pd.read_csv(выход, dtype=str)["car_id"]) == ["2"]
+
+
+def test_пул_не_берёт_модели_замера() -> None:
+    кадр = манифест(("audi", "q7", "1", 4), ("audi", "q5", "2", 4))
+    пул = sample_reject_pool_frames(
+        кадр, [("audi", "q7"), ("audi", "q5")], {"audi__q7"}, cars_per_model=10, seed=1
+    )
+    assert set(пул["model_id"]) == {"audi__q5"}
+
+
+def test_пул_три_кадра_на_четвертях_обхода() -> None:
+    кадр = манифест(("audi", "q7", "1", 8), ("audi", "q7", "2", 2), ("audi", "q7", "3", 1))
+    пул = sample_reject_pool_frames(кадр, [("audi", "q7")], set(), cars_per_model=10, seed=1)
+    ракурсы = {м: sorted(г["view_id"].astype(int)) for м, г in пул.groupby("car_id")}
+    assert ракурсы == {"1": [2, 4, 6], "2": [0, 1], "3": [0]}
+    assert list(пул.columns) == list(SAMPLE_COLUMNS)
+
+
+def test_пул_потолок_машин_на_модель() -> None:
+    кадр = манифест(*[("audi", "q7", str(i), 4) for i in range(15)])
+    пул = sample_reject_pool_frames(кадр, [("audi", "q7")], set(), cars_per_model=10, seed=3)
+    assert пул["car_id"].nunique() == 10
+    assert len(пул) == 30
+
+
+def test_пул_не_зависит_от_порядка_строк() -> None:
+    кадр = манифест(*[("audi", f"m{i}", str(i), 5) for i in range(12)])
+    пары = [("audi", f"m{i}") for i in range(12)]
+    прямой = sample_reject_pool_frames(кадр, пары, {"audi__m0"}, cars_per_model=10, seed=5)
+    обратный = sample_reject_pool_frames(
+        кадр.iloc[::-1].reset_index(drop=True),
+        list(reversed(пары)),
+        {"audi__m0"},
+        cars_per_model=10,
+        seed=5,
+    )
+    pd.testing.assert_frame_equal(прямой, обратный)
+
+
+def test_подкоманда_reject_pool_sample_исключает_замер(
+    tmp_path: Path, каталог: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import scripts.mad_cars as cli
+
+    monkeypatch.setattr(cli, "load_catalog", lambda _путь: каталог)
+    monkeypatch.setattr(cli, "load_alias_table", lambda _путь: ИГЛЫ)
+    манифест(("audi", "a4", "1", 3), ("audi", "q7", "2", 3), ("audi", "q5", "3", 3)).to_csv(
+        tmp_path / "mad.csv", index=False
+    )
+    замер = tmp_path / "measured.csv"
+    pd.DataFrame([("audi__q7", "2", "1", "u")], columns=list(SAMPLE_COLUMNS)).to_csv(
+        замер, index=False
+    )
+    выход = tmp_path / "pool.csv"
+
+    код = cli.main(
+        [
+            "reject-pool-sample",
+            "--manifest",
+            str(tmp_path / "mad.csv"),
+            "--mapping",
+            str(таблица(tmp_path, "audi,a4,audi__a4\n")),
+            "--disputed",
+            str(спорные(tmp_path, "")),
+            "--measured",
+            str(замер),
+            "--seed",
+            "1",
+            "--out",
+            str(выход),
+        ]
+    )
+
+    assert код == 0
+    пул = pd.read_csv(выход, dtype=str)
+    assert set(пул["model_id"]) == {"audi__q5"}
+    assert list(пул["view_id"]) == ["0", "1", "2"]
