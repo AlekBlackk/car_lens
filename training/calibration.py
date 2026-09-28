@@ -18,6 +18,10 @@ import pandas as pd
 REJECT, BRAND, MODEL = 0, 1, 2
 SIM_GRID = np.round(np.arange(0.30, 0.9001, 0.01), 2)
 MARGIN_GRID = np.round(np.arange(0.0, 0.1501, 0.005), 3)
+# Ветка отказного прототипа (спека 2026-09-28 §3): −∞ выключает её без особого случая —
+# разность сходств никогда не меньше −∞, и решения совпадают с 0.5 побайтно.
+REJECT_OFF = float("-inf")
+REJECT_GRID = np.concatenate([[REJECT_OFF], np.round(np.arange(-0.05, 0.1001, 0.01), 2)])
 CLIP = (0.01, 0.98)
 # Не подбираются: офлайн нет ни треков (наблюдения), ни кропов короче 120 px (§7 спеки).
 MIN_OBSERVATIONS = 3
@@ -30,13 +34,17 @@ class CalibrationError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class Scores:
-    """Всё, что решение §6.4 знает о кадре, и истина. У негативов оба `*_hit` — False."""
+    """Всё, что решение §6.4 знает о кадре, и истина. У негативов оба `*_hit` — False.
+
+    `sim_reject` — лучшее сходство с отказными прототипами; `None` — прототипов нет.
+    """
 
     sim1: np.ndarray
     sim2: np.ndarray
     same_brand: np.ndarray
     class_hit: np.ndarray
     brand_hit: np.ndarray
+    sim_reject: np.ndarray | None = None
 
     def subset(self, mask: np.ndarray) -> Scores:
         return Scores(
@@ -45,15 +53,24 @@ class Scores:
             self.same_brand[mask],
             self.class_hit[mask],
             self.brand_hit[mask],
+            None if self.sim_reject is None else self.sim_reject[mask],
         )
 
 
-def decide(scores: Scores, sim_min: float, margin_min: float) -> np.ndarray:
-    """Порядок проверок `decide.ts`: sim, затем разрыв; сравнения строгие, как там."""
+def decide(
+    scores: Scores, sim_min: float, margin_min: float, reject_margin: float = REJECT_OFF
+) -> np.ndarray:
+    """Порядок проверок `decide.ts`: sim, отказной прототип, разрыв; сравнения строгие.
+
+    Все три отказа дают одно и то же `REJECT`, поэтому порядок присваиваний ниже важен только
+    для «марки»: прототип обязан отменять её, а не наоборот.
+    """
     решения = np.full(len(scores.sim1), MODEL, dtype=np.int8)
     близко = (scores.sim1 - scores.sim2) < margin_min
     решения[близко & scores.same_brand] = BRAND
     решения[близко & ~scores.same_brand] = REJECT
+    if scores.sim_reject is not None:
+        решения[(scores.sim1 - scores.sim_reject) < reject_margin] = REJECT
     решения[scores.sim1 < sim_min] = REJECT
     return решения
 
@@ -68,17 +85,22 @@ class Operating:
     error: float
     fpr: float
     shown: int
+    reject_margin: float = REJECT_OFF
 
 
 def operating_point(
-    known: Scores, negatives: Scores, sim_min: float, margin_min: float
+    known: Scores,
+    negatives: Scores,
+    sim_min: float,
+    margin_min: float,
+    reject_margin: float = REJECT_OFF,
 ) -> Operating:
-    решения = decide(known, sim_min, margin_min)
+    решения = decide(known, sim_min, margin_min, reject_margin)
     показаны = решения != REJECT
     верно = np.where(решения == MODEL, known.class_hit, known.brand_hit)
     показано = int(показаны.sum())
     ошибка = float((показаны & ~верно).sum() / показано) if показано else 0.0
-    принято = decide(negatives, sim_min, margin_min) != REJECT
+    принято = decide(negatives, sim_min, margin_min, reject_margin) != REJECT
     return Operating(
         sim_min=float(sim_min),
         margin_min=float(margin_min),
@@ -86,6 +108,7 @@ def operating_point(
         error=ошибка,
         fpr=float(принято.mean()) if len(принято) else 0.0,
         shown=показано,
+        reject_margin=float(reject_margin),
     )
 
 
@@ -209,21 +232,32 @@ def fpr_at_tpr(positive: np.ndarray, negative: np.ndarray, tpr: float = 0.95) ->
 
 
 def thresholds_doc(point: Operating, val_n: int, neg_n: int) -> dict[str, Any]:
-    """`thresholds.json` §13.5; `achieved_tpr` — доля знакомых, получивших любой ответ."""
-    return {
+    """`thresholds.json` §13.5; `achieved_tpr` — доля знакомых, получивших любой ответ.
+
+    `reject_margin` пишется только при включённой ветке: без поля приложение ведёт себя как
+    0.5, и плейсхолдер порогов остаётся той же формы.
+    """
+    документ: dict[str, Any] = {
         "version": 1,
         "tuned": True,
         "sim_min": point.sim_min,
         "margin_min": point.margin_min,
-        "min_observations": MIN_OBSERVATIONS,
-        "min_short_side_px": MIN_SHORT_SIDE_PX,
-        "tuned_on": {
-            "val_n": val_n,
-            "neg_n": neg_n,
-            "achieved_tpr": round(point.coverage, 4),
-            "achieved_fpr": round(point.fpr, 4),
-        },
     }
+    if np.isfinite(point.reject_margin):
+        документ["reject_margin"] = point.reject_margin
+    документ.update(
+        {
+            "min_observations": MIN_OBSERVATIONS,
+            "min_short_side_px": MIN_SHORT_SIDE_PX,
+            "tuned_on": {
+                "val_n": val_n,
+                "neg_n": neg_n,
+                "achieved_tpr": round(point.coverage, 4),
+                "achieved_fpr": round(point.fpr, 4),
+            },
+        }
+    )
+    return документ
 
 
 def calibration_doc(

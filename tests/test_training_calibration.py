@@ -12,6 +12,8 @@ from training.calibration import (
     BRAND,
     MODEL,
     REJECT,
+    REJECT_GRID,
+    REJECT_OFF,
     CalibrationError,
     Operating,
     Scores,
@@ -198,3 +200,73 @@ def test_документы_в_форме_ассетов() -> None:
     assert set(калибровка) == set(ПЛЕЙСХОЛДЕР_КАЛИБРОВКИ)
     assert калибровка["tuned"] is True
     assert калибровка["clip"] == [0.01, 0.98]
+
+
+def _с_прототипом(sim1, sim2, same_brand, sim_reject) -> Scores:  # type: ignore[no-untyped-def]
+    n = len(sim1)
+    return Scores(
+        sim1=np.asarray(sim1, dtype=np.float64),
+        sim2=np.asarray(sim2, dtype=np.float64),
+        same_brand=np.asarray(same_brand, dtype=bool),
+        class_hit=np.zeros(n, dtype=bool),
+        brand_hit=np.zeros(n, dtype=bool),
+        sim_reject=np.asarray(sim_reject, dtype=np.float64),
+    )
+
+
+ОБЩИЕ_С_TS = _с_прототипом(
+    sim1=[0.30, 0.75, 0.75, 0.75, 0.75],
+    sim2=[0.10, 0.25, 0.25, 0.74, 0.74],
+    same_brand=[False, False, False, True, True],
+    sim_reject=[0.90, 0.6875, 0.625, 0.0, 0.6875],
+)
+
+
+def test_ветка_прототипа_зеркалит_decide_ts() -> None:
+    решения = decide(ОБЩИЕ_С_TS, sim_min=0.42, margin_min=0.05, reject_margin=0.125)
+    assert решения.tolist() == [REJECT, REJECT, MODEL, BRAND, REJECT]
+
+
+def test_выключенная_ветка_решает_как_без_прототипов() -> None:
+    без = Scores(
+        ОБЩИЕ_С_TS.sim1,
+        ОБЩИЕ_С_TS.sim2,
+        ОБЩИЕ_С_TS.same_brand,
+        ОБЩИЕ_С_TS.class_hit,
+        ОБЩИЕ_С_TS.brand_hit,
+    )
+    выключена = decide(ОБЩИЕ_С_TS, 0.42, 0.05, REJECT_OFF)
+    assert выключена.tolist() == decide(без, 0.42, 0.05).tolist()
+    assert decide(без, 0.42, 0.05, reject_margin=0.125).tolist() == выключена.tolist()
+
+
+def test_подмножество_несёт_прототип() -> None:
+    часть = ОБЩИЕ_С_TS.subset(np.array([False, True, False, False, True]))
+    assert часть.sim_reject is not None
+    assert часть.sim_reject.tolist() == [0.6875, 0.6875]
+
+
+def test_сетка_прототипа_начинается_с_выключенной_ветки() -> None:
+    assert REJECT_GRID[0] == REJECT_OFF
+    assert REJECT_GRID[1:].tolist() == [round(-0.05 + 0.01 * i, 2) for i in range(16)]
+
+
+def test_рабочая_точка_несёт_порог_прототипа() -> None:
+    свои = _с_прототипом([0.75, 0.75], [0.25, 0.25], [False, False], [0.0, 0.7])
+    свои = Scores(
+        свои.sim1, свои.sim2, свои.same_brand, np.ones(2, bool), np.ones(2, bool), свои.sim_reject
+    )
+    чужие = _с_прототипом([0.75], [0.25], [False], [0.74])
+    точка = operating_point(свои, чужие, 0.42, 0.05, reject_margin=0.125)
+    assert точка.reject_margin == 0.125
+    assert точка.coverage == 0.5
+    assert точка.fpr == 0.0
+
+
+def test_документ_порогов_пишет_прототип_только_при_конечном_пороге() -> None:
+    с_веткой = Operating(0.8, 0.01, 0.8, 0.05, 0.1, shown=10, reject_margin=0.03)
+    без_ветки = Operating(0.8, 0.01, 0.8, 0.05, 0.1, shown=10)
+    документ = thresholds_doc(с_веткой, val_n=10, neg_n=10)
+    assert документ["reject_margin"] == 0.03
+    assert list(документ)[:5] == ["version", "tuned", "sim_min", "margin_min", "reject_margin"]
+    assert "reject_margin" not in thresholds_doc(без_ветки, val_n=10, neg_n=10)

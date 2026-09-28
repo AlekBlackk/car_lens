@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from pipeline.knn import ranked_by_centroids, top2_with_sims, top5_by_centroids
+from pipeline.knn import max_sim, ranked_by_centroids, top2_with_sims, top5_by_centroids
 
 
 def test_top5_ставит_свой_класс_первым() -> None:
@@ -158,3 +158,12 @@ def test_top2_согласован_с_ранжированием() -> None:
     ранги = ranked_by_centroids(эмбеддинги, центроиды, k=2)
 
     assert [[int(a), int(b)] for a, b in zip(top1, top2, strict=True)] == ранги
+
+
+def test_max_sim_берёт_лучший_центроид_любого_класса() -> None:
+    центроиды = np.zeros((2, 2, 3), dtype=np.float32)
+    центроиды[0, 0] = [1.0, 0.0, 0.0]
+    центроиды[0, 1] = [0.0, 1.0, 0.0]
+    центроиды[1, 1] = [0.6, 0.8, 0.0]
+    запросы = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+    assert max_sim(запросы, центроиды).tolist() == [1.0, 0.0]

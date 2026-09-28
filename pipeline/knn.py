@@ -72,6 +72,16 @@ def top2_with_sims(
     )
 
 
+def max_sim(embeddings: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+    """Лучшее сходство с любым центроидом индекса — `r` отказных прототипов.
+
+    Классы здесь не различаются: прототипу неважно, какой из отказных «классов» ближе, важно
+    лишь, насколько. То же число считает `CatalogIndex.maxSim` на устройстве.
+    """
+    плоские = centroids.reshape(-1, centroids.shape[-1])
+    return np.asarray((embeddings @ плоские.T).max(axis=1), dtype=np.float64)
+
+
 def top5_by_centroids(embeddings: np.ndarray, centroids: np.ndarray) -> list[list[int]]:
     """top-5 классов: имя, на которое опираются M-1.3 и сверка паритета M-1.4 (§13.2)."""
     return ranked_by_centroids(embeddings, centroids, TOP_K)
