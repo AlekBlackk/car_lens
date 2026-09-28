@@ -94,6 +94,23 @@ def read_mad_disputed(path: Path, catalog: Catalog) -> frozenset[tuple[str, str]
     return frozenset(zip(кадр["mad_brand"], кадр["mad_model"], strict=True))
 
 
+def off_catalog_reason(
+    pair: tuple[str, str],
+    exact: Collection[tuple[str, str]],
+    disputed: frozenset[tuple[str, str]],
+    needles: Mapping[str, Sequence[str]],
+) -> str | None:
+    """Причина не считать пару чужой (`exact`, `disputed`, `needle:<ids>`) или None."""
+    if pair in exact:
+        return "exact"
+    if pair in disputed:
+        return "disputed"
+    совпали = catalog_needle_hits(" ".join(pair), needles)
+    if совпали:
+        return "needle:" + "|".join(совпали)
+    return None
+
+
 def select_off_catalog_pairs(
     pairs: Iterable[tuple[str, str]],
     exact: Collection[tuple[str, str]],
@@ -115,15 +132,11 @@ def select_off_catalog_pairs(
     чужие: list[tuple[str, str]] = []
     отброшены: dict[tuple[str, str], str] = {}
     for пара in все:
-        совпали = catalog_needle_hits(" ".join(пара), needles)
-        if пара in exact:
-            отброшены[пара] = "exact"
-        elif пара in disputed:
-            отброшены[пара] = "disputed"
-        elif совпали:
-            отброшены[пара] = "needle:" + "|".join(совпали)
-        else:
+        причина = off_catalog_reason(пара, exact, disputed, needles)
+        if причина is None:
             чужие.append(пара)
+        else:
+            отброшены[пара] = причина
     return чужие, отброшены
 
 
