@@ -10,21 +10,23 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from pipeline.holdout_relevance import SET_RELEVANT, load_relevance, subsets
 from pipeline.index_format import read_index, verify_meta
-from pipeline.knn import top2_with_sims
+from pipeline.knn import max_sim, top2_with_sims
 from pipeline.negatives import neg_kind_of
 from pipeline.paths import harvest_dir, splits_dir
 from pipeline.pool_audit import file_sha256
 from pipeline.schema import read_split
 from training.calibration import (
     MARGIN_GRID,
+    REJECT_OFF,
     SIM_GRID,
     Scores,
     auroc,
@@ -49,6 +51,14 @@ GROUP_KINDS: dict[str, tuple[str, ...]] = {
 }
 REFERENCE_KIND = "off_catalog"
 DEFAULT_SEED = 20260927
+NO_REJECT = np.array([REJECT_OFF])
+# Предел FPR — один на все группы или свой у каждой: точка «не хуже 0.5» держит FPR каждой
+# группы на уровне телефона 0.5, а не общий потолок.
+FprLimits = float | Mapping[str, float]
+
+
+def _предел(max_fpr: FprLimits, группа: str) -> float:
+    return float(max_fpr[группа]) if isinstance(max_fpr, Mapping) else float(max_fpr)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +71,7 @@ class OpenSetPoint:
     error: float
     shown: int
     fpr: dict[str, float]
+    reject_margin: float = REJECT_OFF
 
 
 def _проверить_группы(groups: Mapping[str, Scores]) -> None:
@@ -71,10 +82,14 @@ def _проверить_группы(groups: Mapping[str, Scores]) -> None:
 
 
 def open_set_point(
-    known: Scores, groups: Mapping[str, Scores], sim_min: float, margin_min: float
+    known: Scores,
+    groups: Mapping[str, Scores],
+    sim_min: float,
+    margin_min: float,
+    reject_margin: float = REJECT_OFF,
 ) -> OpenSetPoint:
     точки = {
-        имя: operating_point(known, негативы, sim_min, margin_min)
+        имя: operating_point(known, негативы, sim_min, margin_min, reject_margin)
         for имя, негативы in groups.items()
     }
     любая = next(iter(точки.values()))
@@ -85,6 +100,7 @@ def open_set_point(
         error=любая.error,
         shown=любая.shown,
         fpr={имя: точка.fpr for имя, точка in точки.items()},
+        reject_margin=float(reject_margin),
     )
 
 
@@ -93,35 +109,41 @@ def select_open_set_pair(
     groups: Mapping[str, Scores],
     *,
     max_error: float = MAX_ERROR,
-    max_fpr: float = MAX_FPR,
+    max_fpr: FprLimits = MAX_FPR,
     sim_grid: np.ndarray = SIM_GRID,
     margin_grid: np.ndarray = MARGIN_GRID,
+    reject_grid: np.ndarray = NO_REJECT,
 ) -> OpenSetPoint | None:
     """Пара с наибольшим покрытием, держащая ошибку и FPR всех групп; тай-брейк — сетка.
 
     Порядок обхода и замена только на строго большее покрытие — как в `select_pair`: при
-    равенстве остаётся меньший `sim_min`, затем меньший `margin_min`.
+    равенстве остаётся меньший `sim_min`, затем меньший `margin_min`, затем меньший
+    `reject_margin` — первым в `REJECT_GRID` стоит выключенная ветка, и прототип выбирается,
+    только когда он даёт больше покрытия.
     """
     _проверить_группы(groups)
     лучшая: OpenSetPoint | None = None
     for sim_min in sim_grid:
         for margin_min in margin_grid:
-            точка = open_set_point(known, groups, float(sim_min), float(margin_min))
-            if точка.shown == 0 or точка.error > max_error:
-                continue
-            if any(fpr > max_fpr for fpr in точка.fpr.values()):
-                continue
-            if лучшая is None or точка.coverage > лучшая.coverage:
-                лучшая = точка
+            for reject_margin in reject_grid:
+                точка = open_set_point(
+                    known, groups, float(sim_min), float(margin_min), float(reject_margin)
+                )
+                if точка.shown == 0 or точка.error > max_error:
+                    continue
+                if any(fpr > _предел(max_fpr, имя) for имя, fpr in точка.fpr.items()):
+                    continue
+                if лучшая is None or точка.coverage > лучшая.coverage:
+                    лучшая = точка
     return лучшая
 
 
 def binding_constraint(
-    point: OpenSetPoint, *, max_error: float = MAX_ERROR, max_fpr: float = MAX_FPR
+    point: OpenSetPoint, *, max_error: float = MAX_ERROR, max_fpr: FprLimits = MAX_FPR
 ) -> str:
     """Ограничение с наименьшим запасом до предела: оно и держит покрытие."""
     запасы = {"ошибка": max_error - point.error}
-    запасы.update({f"FPR {имя}": max_fpr - fpr for имя, fpr in point.fpr.items()})
+    запасы.update({f"FPR {имя}": _предел(max_fpr, имя) - fpr for имя, fpr in point.fpr.items()})
     return min(запасы, key=lambda имя: запасы[имя])
 
 
@@ -151,7 +173,8 @@ def cross_fit_open_set(
     groups_a: Mapping[str, np.ndarray],
     *,
     max_error: float = MAX_ERROR,
-    max_fpr: float = MAX_FPR,
+    max_fpr: FprLimits = MAX_FPR,
+    reject_grid: np.ndarray = NO_REJECT,
 ) -> list[OpenSetFold]:
     """Подбор на одной половине, замер той же пары на другой; обе стороны."""
     стороны: list[OpenSetFold] = []
@@ -162,12 +185,22 @@ def cross_fit_open_set(
             г: s.subset(~groups_a[г] if сторона_a else groups_a[г]) for г, s in groups.items()
         }
         точка = select_open_set_pair(
-            known.subset(свои), учёба, max_error=max_error, max_fpr=max_fpr
+            known.subset(свои),
+            учёба,
+            max_error=max_error,
+            max_fpr=max_fpr,
+            reject_grid=reject_grid,
         )
         if точка is None:
             стороны.append(OpenSetFold(имя, None, None))
             continue
-        отложенная = open_set_point(known.subset(~свои), проверка, точка.sim_min, точка.margin_min)
+        отложенная = open_set_point(
+            known.subset(~свои),
+            проверка,
+            точка.sim_min,
+            точка.margin_min,
+            точка.reject_margin,
+        )
         стороны.append(OpenSetFold(имя, точка, отложенная))
     return стороны
 
@@ -241,6 +274,81 @@ def render_open_set_report(
     return "\n".join(строки)
 
 
+@dataclass(frozen=True, slots=True)
+class ModelAssets:
+    """Ассеты модели, сверенные по sha классификатора и sha меты индекса."""
+
+    label: str
+    classifier: Path
+    classifier_sha256: str
+    manifest: dict[str, Any]
+    centroids: np.ndarray
+    meta: dict[str, Any]
+    brands: list[str | None]
+    thresholds: dict[str, Any]
+
+
+def load_model_assets(label: str, models: Path, expected_sha: str) -> ModelAssets:
+    манифест = json.loads((models / "models_manifest.json").read_text("utf-8"))
+    классификатор = models / манифест["files"]["classifier"]["name"]
+    sha = file_sha256(классификатор)
+    if sha != expected_sha:
+        raise SystemExit(f"{label}: sha256 классификатора {sha}, ожидался {expected_sha}")
+    байты_меты = (models / "catalog_meta.json").read_bytes()
+    заголовок, центроиды = read_index(models / "catalog_index.bin")
+    verify_meta(заголовок, байты_меты)
+    мета = json.loads(байты_меты)
+    return ModelAssets(
+        label=label,
+        classifier=классификатор,
+        classifier_sha256=sha,
+        manifest=манифест,
+        centroids=центроиды,
+        meta=мета,
+        brands=[класс["brand"] for класс in мета["classes"]],
+        thresholds=json.loads((models / "thresholds.json").read_text("utf-8")),
+    )
+
+
+def model_scores(
+    assets: ModelAssets,
+    frame: pd.DataFrame,
+    truth: np.ndarray | None,
+    *,
+    crops_root: Path,
+    batch_size: int,
+    reject_centroids: np.ndarray | None = None,
+) -> Scores:
+    """Оценки кадров; с прототипами — ещё и `sim_reject` по тем же эмбеддингам."""
+    пути = [crops_root / п for п in frame["crop_path"]]
+    эмбеддинги = embed_crops(assets.classifier, пути, assets.manifest, batch_size)
+    оценки = scores_from(*top2_with_sims(эмбеддинги, assets.centroids), truth, assets.brands)
+    if reject_centroids is None:
+        return оценки
+    return replace(оценки, sim_reject=max_sim(эмбеддинги, reject_centroids))
+
+
+@dataclass(frozen=True, slots=True)
+class StreetGroups:
+    kinds: np.ndarray
+    groups: dict[str, Scores]
+    halves: dict[str, np.ndarray]
+
+
+def street_groups(street: pd.DataFrame, scores: Scores, seed: int) -> StreetGroups:
+    """Группы негативов по видам и их деление: чужие машины — моделями, не-машины — по виду."""
+    виды = np.array([neg_kind_of(str(л)) for л in street["listing_id"]])
+    маски = {г: np.isin(виды, GROUP_KINDS[г]) for г in (STREET, NONCAR)}
+    return StreetGroups(
+        kinds=виды,
+        groups={г: scores.subset(м) for г, м in маски.items()},
+        halves={
+            STREET: split_by_group(street["listing_id"].to_numpy()[маски[STREET]], seed),
+            NONCAR: split_halves(виды[маски[NONCAR]], seed),
+        },
+    )
+
+
 def measure_model(
     label: str,
     models: Path,
@@ -253,49 +361,30 @@ def measure_model(
     seed: int,
     batch_size: int,
 ) -> ModelResult:
-    манифест = json.loads((models / "models_manifest.json").read_text("utf-8"))
-    классификатор = models / манифест["files"]["classifier"]["name"]
-    sha = file_sha256(классификатор)
-    if sha != expected_sha:
-        raise SystemExit(f"{label}: sha256 классификатора {sha}, ожидался {expected_sha}")
-    байты_меты = (models / "catalog_meta.json").read_bytes()
-    заголовок, центроиды = read_index(models / "catalog_index.bin")
-    verify_meta(заголовок, байты_меты)
-    мета = json.loads(байты_меты)
-    check_holdout_slots(list(known["model_id"]), list(known["class_idx"]), мета)
-    бренды = [класс["brand"] for класс in мета["classes"]]
-    пороги = json.loads((models / "thresholds.json").read_text("utf-8"))
-
-    def оценки(кадр: pd.DataFrame, истина: np.ndarray | None) -> Scores:
-        пути = [crops_root / п for п in кадр["crop_path"]]
-        эмбеддинги = embed_crops(классификатор, пути, манифест, batch_size)
-        return scores_from(*top2_with_sims(эмбеддинги, центроиды), истина, бренды)
-
+    активы = load_model_assets(label, models, expected_sha)
+    check_holdout_slots(list(known["model_id"]), list(known["class_idx"]), активы.meta)
     истина = known["class_idx"].to_numpy(dtype=np.int64)
-    знакомые = оценки(known, истина)
-    улица = оценки(street, None)
-    справка = оценки(reference, None)
-    виды = np.array([neg_kind_of(str(л)) for л in street["listing_id"]])
-    маски = {г: np.isin(виды, GROUP_KINDS[г]) for г in (STREET, NONCAR)}
-    группы = {г: улица.subset(м) for г, м in маски.items()}
-    половины = {
-        STREET: split_by_group(street["listing_id"].to_numpy()[маски[STREET]], seed),
-        NONCAR: split_halves(виды[маски[NONCAR]], seed),
-    }
-    стороны = cross_fit_open_set(знакомые, группы, split_halves(истина, seed), половины)
-    sim_min, margin_min = float(пороги["sim_min"]), float(пороги["margin_min"])
-    по_видам = {вид: улица.subset(виды == вид) for вид in ("truck_bus", "detector_fp")}
+    знакомые = model_scores(активы, known, истина, crops_root=crops_root, batch_size=batch_size)
+    улица = model_scores(активы, street, None, crops_root=crops_root, batch_size=batch_size)
+    справка = model_scores(активы, reference, None, crops_root=crops_root, batch_size=batch_size)
+    уличные = street_groups(street, улица, seed)
+    стороны = cross_fit_open_set(
+        знакомые, уличные.groups, split_halves(истина, seed), уличные.halves
+    )
+    sim_min = float(активы.thresholds["sim_min"])
+    margin_min = float(активы.thresholds["margin_min"])
+    по_видам = {вид: улица.subset(уличные.kinds == вид) for вид in ("truck_bus", "detector_fp")}
     разделимость = {
         имя: (auroc(знакомые.sim1, s.sim1), fpr_at_tpr(знакомые.sim1, s.sim1))
-        for имя, s in {**группы, **по_видам, REFERENCE_KIND: справка}.items()
+        for имя, s in {**уличные.groups, **по_видам, REFERENCE_KIND: справка}.items()
         if len(s.sim1)
     }
     return ModelResult(
         label=label,
-        classifier_sha256=sha,
+        classifier_sha256=активы.classifier_sha256,
         folds=стороны,
-        final=select_open_set_pair(знакомые, группы),
-        phone=open_set_point(знакомые, группы, sim_min, margin_min),
+        final=select_open_set_pair(знакомые, уличные.groups),
+        phone=open_set_point(знакомые, уличные.groups, sim_min, margin_min),
         reference_fpr_at_phone=operating_point(знакомые, справка, sim_min, margin_min).fpr,
         separability=разделимость,
     )

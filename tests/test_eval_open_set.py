@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
-from training.calibration import Scores, select_pair
+from training.calibration import REJECT_OFF, Scores, select_pair
 from training.eval_open_set import (
+    NO_REJECT,
     NONCAR,
     STREET,
     ModelResult,
@@ -115,3 +118,78 @@ def test_отчёт_несёт_стороны_итог_телефон_и_раз�
     assert "справочный off_catalog в точке телефона: FPR 0.149" in текст
     assert f"| {STREET} | 0.810 | 0.770 |" in текст
     assert "- off_catalog_street: 1900" in текст
+
+
+С_ВЕТКОЙ = np.array([REJECT_OFF, 0.05])
+
+
+def с_прототипом(оценки: Scores, *r: float) -> Scores:
+    return replace(оценки, sim_reject=np.array(r))
+
+
+def test_прототип_открывает_пару_которой_без_него_нет() -> None:
+    свои = с_прототипом(знакомые(0.6, 0.7, 0.8, 0.9), 0.1, 0.1, 0.1, 0.1)
+    группы = {
+        STREET: с_прототипом(чужие(0.85, 0.95), 0.84, 0.94),
+        NONCAR: с_прототипом(чужие(0.5), 0.1),
+    }
+
+    assert select_open_set_pair(свои, группы, sim_grid=СЕТКА, margin_grid=НОЛЬ) is None
+    точка = select_open_set_pair(
+        свои, группы, sim_grid=СЕТКА, margin_grid=НОЛЬ, reject_grid=С_ВЕТКОЙ
+    )
+
+    assert точка is not None
+    assert (точка.sim_min, точка.reject_margin, точка.coverage) == (0.70, 0.05, 0.75)
+    assert точка.fpr == {STREET: 0.0, NONCAR: 0.0}
+
+
+def test_при_равном_покрытии_выбирается_выключенная_ветка() -> None:
+    свои = с_прототипом(знакомые(0.6, 0.7, 0.8, 0.9), 0.1, 0.1, 0.1, 0.1)
+    группы = {STREET: с_прототипом(чужие(0.55), 0.1), NONCAR: с_прототипом(чужие(0.5), 0.1)}
+
+    точка = select_open_set_pair(
+        свои, группы, sim_grid=СЕТКА, margin_grid=НОЛЬ, reject_grid=С_ВЕТКОЙ
+    )
+
+    assert точка is not None and точка.reject_margin == REJECT_OFF
+
+
+def test_пределы_задаются_по_группам() -> None:
+    свои = знакомые(0.9, 0.9)
+    группы = {STREET: чужие(0.5), NONCAR: чужие(0.95)}
+
+    assert select_open_set_pair(свои, группы) is None
+    точка = select_open_set_pair(свои, группы, max_fpr={STREET: 0.15, NONCAR: 1.0})
+    assert точка is not None and точка.fpr[NONCAR] == 1.0
+
+
+def test_узкое_ограничение_по_пределам_групп() -> None:
+    точка = OpenSetPoint(0.8, 0.0, 0.7, 0.05, 10, {STREET: 0.10, NONCAR: 0.08})
+    assert binding_constraint(точка, max_fpr={STREET: 0.113, NONCAR: 0.086}) == f"FPR {NONCAR}"
+
+
+def test_отложенная_сторона_меряется_с_порогом_прототипа() -> None:
+    свои = с_прототипом(знакомые(0.8, 0.9, 0.8, 0.9), 0.1, 0.1, 0.1, 0.1)
+    группы = {
+        STREET: с_прототипом(чужие(0.95, 0.95), 0.94, 0.94),
+        NONCAR: с_прототипом(чужие(0.4, 0.45), 0.1, 0.1),
+    }
+    своя_a = np.array([True, True, False, False])
+    половины = {STREET: np.array([True, False]), NONCAR: np.array([True, False])}
+
+    стороны = cross_fit_open_set(свои, группы, своя_a, половины, reject_grid=С_ВЕТКОЙ)
+
+    a = стороны[0]
+    assert a.chosen is not None and a.held_out is not None
+    assert a.chosen.reject_margin == 0.05
+    assert a.held_out.reject_margin == 0.05
+    assert a.held_out.fpr[STREET] == 0.0
+
+
+def test_без_сетки_прототипа_поведение_прежнее() -> None:
+    assert NO_REJECT.tolist() == [REJECT_OFF]
+    свои = знакомые(0.6, 0.7, 0.8, 0.9)
+    группы = {STREET: чужие(0.55, 0.75), NONCAR: чужие(0.5)}
+    точка = select_open_set_pair(свои, группы, sim_grid=СЕТКА, margin_grid=НОЛЬ)
+    assert точка is not None and точка.reject_margin == REJECT_OFF
