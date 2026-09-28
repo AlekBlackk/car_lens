@@ -390,6 +390,14 @@ def measure_model(
     )
 
 
+def relevant_known(holdout: Path, relevance: Path) -> pd.DataFrame:
+    """Знакомые — релевантный набор `holdout_ru` без многомашинных кадров (правило §5.2)."""
+    эталон = read_split(holdout)
+    эталон = эталон[~эталон["is_multi_car"].astype(bool)].reset_index(drop=True)
+    маска = subsets(эталон["photo_id"].tolist(), load_relevance(relevance))
+    return эталон[маска[SET_RELEVANT]].reset_index(drop=True)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     парсер = argparse.ArgumentParser(description="Замер открытого множества на уличных негативах")
     парсер.add_argument(
@@ -410,10 +418,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     парсер.add_argument("--report", type=Path, default=Path("bench/open-set-street.md"))
     аргументы = парсер.parse_args(argv)
 
-    эталон = read_split(аргументы.holdout)
-    эталон = эталон[~эталон["is_multi_car"].astype(bool)].reset_index(drop=True)
-    маска = subsets(эталон["photo_id"].tolist(), load_relevance(аргументы.relevance))
-    эталон = эталон[маска[SET_RELEVANT]].reset_index(drop=True)
+    эталон = relevant_known(аргументы.holdout, аргументы.relevance)
     улица = read_split(аргументы.street)
     справка = read_split(аргументы.reference)
     справка = справка[
