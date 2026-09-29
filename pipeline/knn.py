@@ -76,7 +76,8 @@ def max_sim(embeddings: np.ndarray, centroids: np.ndarray) -> np.ndarray:
     """Лучшее сходство с любым центроидом индекса — `r` отказных прототипов.
 
     Классы здесь не различаются: прототипу неважно, какой из отказных «классов» ближе, важно
-    лишь, насколько. То же число считает `CatalogIndex.maxSim` на устройстве.
+    лишь, насколько. Это число считал бы на устройстве `CatalogIndex.maxSim`, но его не писали:
+    прототипы не доставлены, гейт `bench/open-set-reject.md` не пройден.
     """
     плоские = centroids.reshape(-1, centroids.shape[-1])
     return np.asarray((embeddings @ плоские.T).max(axis=1), dtype=np.float64)

@@ -237,6 +237,13 @@ def render_reject_report(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Замер 0.5 против 0.5 с отказными прототипами, проверка гейта доставки, раздел отчёта.
+
+    `thresholds.json` и `calibration.json` пишутся в `--out-dir` (по умолчанию — в
+    `calibration/reject_<время>` под корнем данных) только при пройденном гейте. Ветки
+    отказного прототипа в приложении нет (задачи 11–13 плана не выполнялись): без неё эти
+    ассеты в `app/android/models` не класть.
+    """
     парсер = argparse.ArgumentParser(description="Замер отказных прототипов против 0.5")
     парсер.add_argument("--models", type=Path, default=Path("app/android/models"))
     парсер.add_argument("--expected-sha", required=True, help="sha256 классификатора")
