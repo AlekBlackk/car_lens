@@ -30,7 +30,7 @@ import cv2
 import numpy as np
 
 from export.to_tflite import _run_tflite
-from pipeline.crop import Detection, crop_image, select_primary
+from pipeline.crop import Detection, crop_image, iou, select_primary
 from pipeline.index_format import read_index
 from pipeline.knn import top5_by_centroids
 from pipeline.paths import raw_dir, splits_dir
@@ -104,23 +104,13 @@ def letterbox(
     return холст, масштаб, отступ_x, отступ_y
 
 
-def _iou(первый: Detection, второй: Detection) -> float:
-    x0 = max(первый.x, второй.x)
-    y0 = max(первый.y, второй.y)
-    x1 = min(первый.x + первый.w, второй.x + второй.w)
-    y1 = min(первый.y + первый.h, второй.y + второй.h)
-    пересечение = max(0.0, x1 - x0) * max(0.0, y1 - y0)
-    объединение = первый.area + второй.area - пересечение
-    return 0.0 if объединение <= 0 else пересечение / объединение
-
-
 def _nms(боксы: list[Detection], порог: float, максимум: int) -> list[Detection]:
     """Жадный NMS — тот же алгоритм и тот же порядок, что в `Boxes.nms` на Kotlin."""
     оставленные: list[Detection] = []
     for кандидат in sorted(боксы, key=lambda d: d.conf, reverse=True):
         if len(оставленные) >= максимум:
             break
-        if all(_iou(оставленный, кандидат) <= порог for оставленный in оставленные):
+        if all(iou(оставленный, кандидат) <= порог for оставленный in оставленные):
             оставленные.append(кандидат)
     return оставленные
 

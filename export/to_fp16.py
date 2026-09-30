@@ -1,4 +1,4 @@
-"""Веса классификатора в fp16 поверх готового fp32-графа (M4, бюджет размера §5.2).
+"""Веса классификатора и детектора в fp16 поверх готового fp32-графа (M4, бюджет размера §5.2).
 
 Граф остаётся float32 на входе и выходе: веса лежат в файле половинной точностью и
 разворачиваются в fp32 операцией `DEQUANTIZE` перед арифметикой. Контракт §4.5 не
@@ -9,8 +9,8 @@
 
 Модуль работает с файлом, а не с чекпоинтом: PyTorch и калибровка не нужны, результат
 детерминирован. Что fp16 не портит решения на настоящих кадрах, проверяет
-`export.verify_parity`, а не самопроверка здесь: она на шумовых входах и ловит только
-сломанный граф.
+`export.verify_parity` для классификатора и `export.detector_parity` для детектора, а не
+самопроверка здесь: она на шумовых входах и ловит только сломанный граф.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from export.to_tflite import ExportError, _проверить_контракт, 
 
 FP32_NAME = "classifier_fp32.tflite"
 FP16_NAME = "classifier_fp16.tflite"
+DETECTOR_FP16_NAME = "detector_fp16.tflite"
 
 SELF_CHECK_SAMPLES = 16
 SELF_CHECK_SEED = 1337
@@ -60,7 +61,7 @@ def convert_fp16(src: Path, dst: Path) -> None:
 
 
 def _прогнать(path: Path, вход: np.ndarray) -> np.ndarray:
-    """Эмбеддинги `.tflite` с float32-границами по одному примеру (batch зафиксирован)."""
+    """Выходы `.tflite` с float32-границами по одному примеру (batch зафиксирован)."""
     интерпретатор = Interpreter(model_path=str(path))
     интерпретатор.allocate_tensors()
     подробности_входа = интерпретатор.get_input_details()[0]
@@ -75,7 +76,11 @@ def _прогнать(path: Path, вход: np.ndarray) -> np.ndarray:
 
 
 def self_check(fp32_path: Path, fp16_path: Path) -> dict[str, float]:
-    """Косинус fp16 к fp32 на шумовых входах: ловит сломанный граф, а не потерю точности."""
+    """Косинус fp16 к fp32 на шумовых входах: ловит сломанный граф, а не потерю точности.
+
+    Выход любой формы сравнивается целиком, одним вектором на пример: эмбеддинг
+    классификатора и карта `[каналы, якоря]` детектора проходят одним путём.
+    """
     форма = [int(x) for x in Interpreter(model_path=str(fp32_path)).get_input_details()[0]["shape"]]
     вход = (
         np.random.default_rng(SELF_CHECK_SEED)
@@ -84,6 +89,10 @@ def self_check(fp32_path: Path, fp16_path: Path) -> dict[str, float]:
     )
     эталон = _прогнать(fp32_path, вход)
     полученное = _прогнать(fp16_path, вход)
+    if эталон.shape != полученное.shape:
+        raise ExportError(f"форма выхода fp16 {полученное.shape} не совпала с fp32 {эталон.shape}")
+    эталон = эталон.reshape(len(эталон), -1)
+    полученное = полученное.reshape(len(полученное), -1)
     if not (bool(np.isfinite(эталон).all()) and bool(np.isfinite(полученное).all())):
         raise ExportError("неконечные эмбеддинги: nan или inf в выходе графа")
     нормы = np.linalg.norm(эталон, axis=1) * np.linalg.norm(полученное, axis=1)
@@ -106,15 +115,27 @@ def _versions() -> dict[str, str]:
 
 
 def _parse_args() -> argparse.Namespace:
-    парсер = argparse.ArgumentParser(description="fp16-веса классификатора поверх fp32-графа")
-    парсер.add_argument(
-        "--export", type=Path, required=True, help="каталог экспорта с classifier_fp32.tflite"
+    парсер = argparse.ArgumentParser(description="fp16-веса поверх fp32-графа")
+    режим = парсер.add_mutually_exclusive_group(required=True)
+    режим.add_argument(
+        "--export", type=Path, help="каталог экспорта классификатора с classifier_fp32.tflite"
+    )
+    режим.add_argument(
+        "--detector", type=Path, help="detector_fp32.tflite с detector_report.json рядом"
     )
     return парсер.parse_args()
 
 
-def main() -> None:
-    каталог = _parse_args().export
+def _записать(отчёт: dict[str, Any], куда: Path) -> None:
+    куда.write_text(json.dumps(отчёт, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(отчёт, ensure_ascii=False, indent=2))
+
+
+def _описание(путь: Path) -> dict[str, Any]:
+    return {"name": путь.name, "sha256": sha256_of_file(путь), "bytes": путь.stat().st_size}
+
+
+def _classifier(каталог: Path) -> None:
     исходный = каталог / FP32_NAME
     результат = каталог / FP16_NAME
     отчёт_экспорта = json.loads((каталог / "export_report.json").read_text("utf-8"))
@@ -127,25 +148,56 @@ def main() -> None:
     _проверить_контракт(
         подробности, результат, int(манифест["img_size"]), int(манифест["embedding_dim"])
     )
-    отчёт = {
-        "source": {
-            "name": FP32_NAME,
-            "sha256": sha256_of_file(исходный),
-            "bytes": исходный.stat().st_size,
+    _записать(
+        {
+            "source": _описание(исходный),
+            "fp16": {**_описание(результат), "runtime": подробности},
+            "self_check": self_check(исходный, результат),
+            "versions": _versions(),
         },
-        "fp16": {
-            "name": FP16_NAME,
-            "sha256": sha256_of_file(результат),
-            "bytes": результат.stat().st_size,
-            "runtime": подробности,
-        },
-        "self_check": self_check(исходный, результат),
-        "versions": _versions(),
-    }
-    (каталог / "fp16_report.json").write_text(
-        json.dumps(отчёт, ensure_ascii=False, indent=2), encoding="utf-8"
+        каталог / "fp16_report.json",
     )
-    print(json.dumps(отчёт, ensure_ascii=False, indent=2))
+
+
+def _граница(интерпретатор: Interpreter, выход: bool) -> tuple[tuple[int, ...], str]:
+    подробности = интерпретатор.get_output_details() if выход else интерпретатор.get_input_details()
+    return tuple(int(x) for x in подробности[0]["shape"]), np.dtype(подробности[0]["dtype"]).name
+
+
+def _detector(исходный: Path) -> None:
+    """fp16-детектор рядом с fp32: та же форма входа и выхода, тот же контракт §7.1.
+
+    Контракт детектора (`detector_report.json`) не пересчитывается: он описывает границы
+    графа, а они у fp16-графа те же — это и проверяется ниже, а не предполагается.
+    """
+    отчёт_детектора = json.loads(исходный.with_name("detector_report.json").read_text("utf-8"))
+    if sha256_of_file(исходный) != отчёт_детектора["graph_sha256"]:
+        raise ExportError(f"{исходный}: sha256 не совпал с detector_report.json — файл подменён")
+    результат = исходный.with_name(DETECTOR_FP16_NAME)
+
+    convert_fp16(исходный, результат)
+    эталон = Interpreter(model_path=str(исходный))
+    полученный = Interpreter(model_path=str(результат))
+    for выход in (False, True):
+        if _граница(эталон, выход) != _граница(полученный, выход):
+            raise ExportError(f"{результат}: границы графа разошлись с fp32")
+    _записать(
+        {
+            "source": _описание(исходный),
+            "fp16": _описание(результат),
+            "self_check": self_check(исходный, результат),
+            "versions": _versions(),
+        },
+        исходный.with_name("detector_fp16_report.json"),
+    )
+
+
+def main() -> None:
+    аргументы = _parse_args()
+    if аргументы.export is not None:
+        _classifier(аргументы.export)
+    else:
+        _detector(аргументы.detector)
 
 
 if __name__ == "__main__":

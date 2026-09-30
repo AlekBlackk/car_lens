@@ -54,3 +54,22 @@ def test_границы_fp16_графа_остаются_float32(tmp_path: Path)
     интерпретатор.allocate_tensors()
     assert интерпретатор.get_input_details()[0]["dtype"] == np.float32
     assert интерпретатор.get_output_details()[0]["dtype"] == np.float32
+
+
+def test_самопроверка_сравнивает_многомерный_выход(tmp_path: Path) -> None:
+    """Выход детектора — карта `[каналы, якоря]`, а не вектор: сравнение идёт целиком."""
+    import litert_torch
+    import torch
+
+    from export.to_fp16 import convert_fp16, self_check
+
+    torch.manual_seed(0)
+    модель = torch.nn.Sequential(
+        torch.nn.Flatten(), torch.nn.Linear(3 * 16 * 16, 8 * 20), torch.nn.Unflatten(1, (8, 20))
+    ).eval()
+    fp32 = tmp_path / "detector_fp32.tflite"
+    fp16 = tmp_path / "detector_fp16.tflite"
+    litert_torch.convert(модель, (torch.zeros(*ВХОД),)).export(str(fp32))
+    convert_fp16(fp32, fp16)
+
+    assert self_check(fp32, fp16)["cosine_min"] > 0.9999

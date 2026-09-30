@@ -41,14 +41,16 @@ from export.provenance import check_provenance
 )
 # Классификатор — единственный файл, чьё имя зависит от точности: int8 (путь M-1), fp32
 # (русская модель, §Task 3) или fp16 (веса половинной точности, M4). Имя выбирает флаг
-# `--precision`, поэтому в `ИМЕНА` его нет — его подставляет `stage`.
+# `--precision`, поэтому в `ИМЕНА` его нет — его подставляет `stage`. Так же и детектор.
 ФАЙЛ_КЛАССИФИКАТОРА = {
     "int8": "classifier_int8.tflite",
     "fp32": "classifier_fp32.tflite",
     "fp16": "classifier_fp16.tflite",
 }
+# Детектор — второй файл с точностью в имени (fp16-веса, M4). Файл передаётся путём, а имя
+# в манифесте выбирает `--detector-precision`: расхождение имени файла и флага — отказ.
+ФАЙЛ_ДЕТЕКТОРА = {"fp32": "detector_fp32.tflite", "fp16": "detector_fp16.tflite"}
 ИМЕНА = {
-    "detector": "detector_fp32.tflite",
     "index": "catalog_index.bin",
     "meta": "catalog_meta.json",
     "thresholds": "thresholds.json",
@@ -301,6 +303,7 @@ def stage(
     *,
     index_dir: str | None = None,
     precision: str = "int8",
+    detector_precision: str = "fp32",
     thresholds: Path | None = None,
     calibration: Path | None = None,
 ) -> Path:
@@ -323,7 +326,9 @@ def stage(
 
     `precision` выбирает, какой классификатор разложить и под каким именем записать в
     манифест: `int8` (`classifier_int8.tflite`, путь M-1) или `fp32`
-    (`classifier_fp32.tflite`). Остальные пять имён точности не зависят.
+    (`classifier_fp32.tflite`). `detector_precision` так же выбирает имя детектора, а сам
+    файл передаётся путём `detector` и обязан носить это имя. Остальные четыре имени от
+    точности не зависят.
 
     `index_dir` — путь к каталогу индекса: относительный считается от `run`, абсолютный
     берётся как есть. `None` означает «спросить у `parity.json`»: путь берётся оттуда и
@@ -334,9 +339,19 @@ def stage(
     сначала, а отказать потом значило бы оставить в дереве сборки полурассинхронизированный
     набор, которым инструментальные тесты воспользуются как настоящим.
     """
-    # Имя классификатора зависит от точности; остальные пять фиксированы. Локальная карта
-    # используется всюду вместо глобальной `ИМЕНА`: источник, цели копирования, манифест.
-    имена = {**ИМЕНА, "classifier": ФАЙЛ_КЛАССИФИКАТОРА[precision]}
+    # Имена классификатора и детектора зависят от точности; остальные четыре фиксированы.
+    # Локальная карта используется всюду вместо глобальной `ИМЕНА`: источник, цели
+    # копирования, манифест.
+    имена = {
+        **ИМЕНА,
+        "classifier": ФАЙЛ_КЛАССИФИКАТОРА[precision],
+        "detector": ФАЙЛ_ДЕТЕКТОРА[detector_precision],
+    }
+    if detector.name != имена["detector"]:
+        raise SystemExit(
+            f"{detector}: имя файла не {имена['detector']} — точность детектора "
+            f"{detector_precision} и файл разошлись"
+        )
     отчёт_экспорта = _обязательный_json(
         run / "export" / "export_report.json",
         "сначала `python -m export.to_tflite` — без манифеста экспорта происхождение не сверить",
@@ -412,7 +427,9 @@ def stage(
 def _parse_args() -> argparse.Namespace:
     парсер = argparse.ArgumentParser(description="Раскладка моделей прогона в дерево сборки")
     парсер.add_argument("--run", type=Path, required=True, help="каталог прогона обучения")
-    парсер.add_argument("--detector", type=Path, required=True, help="detector_fp32.tflite")
+    парсер.add_argument(
+        "--detector", type=Path, required=True, help="detector_fp32.tflite или detector_fp16.tflite"
+    )
     # Без значения по умолчанию: каталог назначения сносится целиком, и угадывать его за
     # пользователя нельзя. Штатный вызов — `--out app/android/models` (§10 дизайна).
     парсер.add_argument("--out", type=Path, required=True, help="каталог ассетов сборки")
@@ -424,6 +441,12 @@ def _parse_args() -> argparse.Namespace:
         choices=sorted(ФАЙЛ_КЛАССИФИКАТОРА),
         default="int8",
         help="точность классификатора: какой .tflite разложить (умолчание int8, путь M-1)",
+    )
+    парсер.add_argument(
+        "--detector-precision",
+        choices=sorted(ФАЙЛ_ДЕТЕКТОРА),
+        default="fp32",
+        help="точность детектора: под каким именем файл уходит в манифест (умолчание fp32)",
     )
     парсер.add_argument("--thresholds", type=Path, default=None, help="подобранные пороги")
     парсер.add_argument("--calibration", type=Path, default=None, help="подобранная шкала")
@@ -438,6 +461,7 @@ def main() -> None:
         аргументы.out,
         index_dir=аргументы.index,
         precision=аргументы.precision,
+        detector_precision=аргументы.detector_precision,
         thresholds=аргументы.thresholds,
         calibration=аргументы.calibration,
     )

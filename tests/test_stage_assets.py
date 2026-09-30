@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ import pytest
 from scripts.stage_assets import (
     ИМЕНА,
     ПЛЕЙСХОЛДЕР_ПОРОГОВ,
+    ФАЙЛ_ДЕТЕКТОРА,
     ФАЙЛ_КЛАССИФИКАТОРА,
     ManifestError,
     build_manifest,
@@ -69,7 +71,11 @@ from scripts.stage_assets import (
 def _имена(precision: str = "int8") -> dict[str, str]:
     # Имя классификатора зависит от точности, остальные пять берутся из модуля. Локальная
     # копия словаря разошлась бы с `stage`/`build_manifest` на первом же добавлении файла.
-    return {**ИМЕНА, "classifier": ФАЙЛ_КЛАССИФИКАТОРА[precision]}
+    return {
+        **ИМЕНА,
+        "classifier": ФАЙЛ_КЛАССИФИКАТОРА[precision],
+        "detector": ФАЙЛ_ДЕТЕКТОРА["fp32"],
+    }
 
 
 def _файлы(tmp_path: Path, precision: str = "int8") -> dict[str, Path]:
@@ -107,7 +113,7 @@ def test_манифест_несёт_четыре_группы(tmp_path: Path) -
 
 def test_каждый_файл_описан_размером_и_хешем(tmp_path: Path) -> None:
     манифест = _собрать(tmp_path)
-    assert set(манифест["files"]) == set(ИМЕНА) | {"classifier"}
+    assert set(манифест["files"]) == set(ИМЕНА) | {"classifier", "detector"}
     for запись in манифест["files"].values():
         assert set(запись) == {"name", "size", "sha256"}
         assert len(запись["sha256"]) == 64
@@ -351,6 +357,29 @@ def test_stage_fp16_разкладывает_модель_под_именем_т
     assert "classifier_int8.tflite" not in имена
     записанный = json.loads(путь.read_text(encoding="utf-8"))
     assert записанный["files"]["classifier"]["name"] == "classifier_fp16.tflite"
+
+
+def test_stage_fp16_детектор_кладётся_под_именем_точности(tmp_path: Path) -> None:
+    """`--detector-precision fp16` пишет `detector_fp16.tflite` в ассеты и в манифест."""
+    прогон, детектор_fp32 = _разложить_прогон(tmp_path, мета=МЕТА)
+    детектор = детектор_fp32.with_name("detector_fp16.tflite")
+    детектор.write_bytes(b"yolo16")
+    куда = tmp_path / "models"
+
+    путь = stage(прогон, детектор, куда, detector_precision="fp16")
+
+    имена = sorted(п.name for п in куда.iterdir())
+    assert "detector_fp16.tflite" in имена
+    assert "detector_fp32.tflite" not in имена
+    записанный = json.loads(путь.read_text(encoding="utf-8"))
+    assert записанный["files"]["detector"]["name"] == "detector_fp16.tflite"
+
+
+def test_stage_роняет_на_файле_детектора_не_той_точности(tmp_path: Path) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+
+    with pytest.raises(SystemExit, match=re.escape("detector_fp16.tflite")):
+        stage(прогон, детектор, tmp_path / "models", detector_precision="fp16")
 
 
 def test_stage_умолчание_точности_кладёт_int8(tmp_path: Path) -> None:
