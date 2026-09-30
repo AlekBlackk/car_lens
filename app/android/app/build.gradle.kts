@@ -39,9 +39,16 @@ android {
         applicationId = "com.carlens.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.5"
+        versionCode = 7
+        versionName = "0.5.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // `reactNativeArchitectures` управляет только нативной сборкой RN-библиотек, а
+        // готовые `.so` из AAR (TFLite, Hermes) без фильтра упаковываются под все ABI.
+        // Список берётся из того же свойства, чтобы ABI задавались одним местом.
+        ndk {
+            abiFilters += providers.gradleProperty("reactNativeArchitectures").get().split(",")
+        }
 
         // Поля объявляются в обоих случаях, а отсутствие манифеста роняет не конфигурацию,
         // а задачу `checkModelsManifest` ниже: Gradle конфигурирует все подпроекты перед
