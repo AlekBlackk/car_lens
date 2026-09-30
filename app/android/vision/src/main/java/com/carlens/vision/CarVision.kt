@@ -43,10 +43,10 @@ data class AssetSpec(
      *
      * Отдельно от `allowGpu`: детектор на GPU считается давно и проверен паритетом, а
      * классификатор на GPU считает активации в fp16, и его пригодность держится на замере
-     * решений, а не тензоров (`GpuAgreementTest`). По умолчанию выключен, пока гейт
-     * `bench/gpu-classifier-preregistration.md` не пройден.
+     * решений, а не тензоров (`GpuAgreementTest`): гейт `bench/gpu-classifier-preregistration.md`
+     * пройден, по умолчанию включён (`bench/gpu-classifier.md`).
      */
-    val classifierGpu: Boolean = false,
+    val classifierGpu: Boolean = true,
 )
 
 /**
