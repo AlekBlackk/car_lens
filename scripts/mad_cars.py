@@ -38,6 +38,8 @@ DEFAULT_REJECT_POOL = Path("catalog/external/mad_cars_reject_pool.csv")
 DEFAULT_NEW_NAMES = Path("catalog/external/mad_cars_cat192_names.csv")
 CELL = (250, 150)
 CARS_PER_SHEET = 16
+CARS_PER_SINGLE_SHEET = 48
+SINGLE_SHEET_COLUMNS = 6
 
 
 def _sample(аргументы: argparse.Namespace) -> int:
@@ -193,16 +195,20 @@ def _fetch(аргументы: argparse.Namespace) -> int:
 
 
 def render_car_sheet(
-    машины: Sequence[tuple[str, Sequence[Path]]], first_number: int
+    машины: Sequence[tuple[str, Sequence[Path]]],
+    first_number: int,
+    *,
+    frames_per_car: int = 3,
+    columns: int = 2,
 ) -> Image.Image:
-    """Две колонки машин, по 3 кадра машины в строку; номер и `car_id` впаяны в кадр."""
-    половина = (len(машины) + 1) // 2
-    лист = Image.new("RGB", (CELL[0] * 6, CELL[1] * половина), (30, 30, 30))
+    """Колонки машин, по `frames_per_car` кадров машины в строку; номер и `car_id` впаяны в кадр."""
+    строк = (len(машины) + columns - 1) // columns
+    лист = Image.new("RGB", (CELL[0] * frames_per_car * columns, CELL[1] * строк), (30, 30, 30))
     рисовать = ImageDraw.Draw(лист)
     for i, (машина, кадры) in enumerate(машины):
-        x0 = 0 if i < половина else CELL[0] * 3
-        y0 = CELL[1] * (i % половина)
-        for j, путь in enumerate(кадры[:3]):
+        x0 = CELL[0] * frames_per_car * (i // строк)
+        y0 = CELL[1] * (i % строк)
+        for j, путь in enumerate(кадры[:frames_per_car]):
             with Image.open(путь) as исходник:
                 миниатюра = исходник.convert("RGB")
             миниатюра.thumbnail((CELL[0], CELL[1] - 16))
@@ -231,9 +237,24 @@ def _sheets(аргументы: argparse.Namespace) -> int:
     классы = аргументы.classes or sorted(п.name for п in аргументы.root.iterdir() if п.is_dir())
     for класс in классы:
         машины = _по_машинам(аргументы.root / класс)
-        for начало in range(0, len(машины), CARS_PER_SHEET):
-            лист = render_car_sheet(машины[начало : начало + CARS_PER_SHEET], first_number=начало)
-            лист.save(аргументы.out / f"{класс}_{начало // CARS_PER_SHEET}.jpg", quality=85)
+        if аргументы.single:
+            # Обзорный лист: средний кадр каждой машины, 48 машин на лист.
+            обзор = [(машина, [кадры[len(кадры) // 2]]) for машина, кадры in машины]
+            for начало in range(0, len(обзор), CARS_PER_SINGLE_SHEET):
+                лист = render_car_sheet(
+                    обзор[начало : начало + CARS_PER_SINGLE_SHEET],
+                    first_number=начало,
+                    frames_per_car=1,
+                    columns=SINGLE_SHEET_COLUMNS,
+                )
+                номер = начало // CARS_PER_SINGLE_SHEET
+                лист.save(аргументы.out / f"{класс}_{номер}.jpg", quality=85)
+        else:
+            for начало in range(0, len(машины), CARS_PER_SHEET):
+                лист = render_car_sheet(
+                    машины[начало : начало + CARS_PER_SHEET], first_number=начало
+                )
+                лист.save(аргументы.out / f"{класс}_{начало // CARS_PER_SHEET}.jpg", quality=85)
         for _, кадры in машины:
             for путь in кадры:
                 with Image.open(путь) as картинка:
@@ -293,6 +314,9 @@ def build_parser() -> argparse.ArgumentParser:
     листы.add_argument("--root", type=Path, default=DEFAULT_ROOT / "full")
     листы.add_argument("--out", type=Path, required=True)
     листы.add_argument("--classes", nargs="*", default=None)
+    листы.add_argument(
+        "--single", action="store_true", help="обзорные листы: по одному кадру, 48 машин на лист"
+    )
     листы.set_defaults(run=_sheets)
     return парсер
 

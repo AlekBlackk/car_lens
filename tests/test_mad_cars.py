@@ -309,6 +309,19 @@ def test_лист_машин_три_кадра_в_строку(tmp_path: Path) -
     assert лист.size == (CELL[0] * 6, CELL[1] * 2)
 
 
+def test_обзорный_лист_по_кадру_на_машину(tmp_path: Path) -> None:
+    from PIL import Image
+
+    from scripts.mad_cars import CELL, render_car_sheet
+
+    путь = tmp_path / "0_0.jpg"
+    Image.new("RGB", (64, 36), "white").save(путь)
+    машины = [(str(100 + n), [путь]) for n in range(7)]
+    лист = render_car_sheet(машины, first_number=0, frames_per_car=1, columns=3)
+    # Три колонки по одному кадру; 7 машин → 3 ряда.
+    assert лист.size == (CELL[0] * 3, CELL[1] * 3)
+
+
 def спорные(tmp_path: Path, строки: str) -> Path:
     путь = tmp_path / "disputed.csv"
     путь.write_text("mad_brand,mad_model,model_id,reason\n" + строки, encoding="utf-8")
