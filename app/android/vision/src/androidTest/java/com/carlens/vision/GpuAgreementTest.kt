@@ -1,5 +1,6 @@
 package com.carlens.vision
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
@@ -8,6 +9,7 @@ import org.junit.Test
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 
 /**
@@ -55,8 +57,7 @@ class GpuAgreementTest {
                     куда.write(байты.array())
                 }
                 записи.forEachIndexed { номер, запись ->
-                    val картинка = zip.getInputStream(запись).use { BitmapFactory.decodeStream(it) }
-                        ?: error("не читается ${запись.name}")
+                    val картинка = декодировать(zip, запись)
                     записать(наCpu.embedBitmapForTest(картинка), выходCpu)
                     записать(наGpu.embedBitmapForTest(картинка), выходGpu)
                     картинка.recycle()
@@ -70,5 +71,24 @@ class GpuAgreementTest {
             наCpu.close()
             наGpu.close()
         }
+    }
+
+    /**
+     * Декодирование с понижением, если длинная сторона больше `ПРЕДЕЛ_СТОРОНЫ`: часть исходников
+     * в наборе — снимки в десятки мегапикселей (до 12455×8283), которые `BitmapFactory` целиком
+     * не берёт. Понижение одинаково для CPU- и GPU-пути, на их согласие не влияет.
+     */
+    private fun декодировать(zip: ZipFile, запись: ZipEntry): Bitmap {
+        val границы = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        zip.getInputStream(запись).use { BitmapFactory.decodeStream(it, null, границы) }
+        var понижение = 1
+        while (maxOf(границы.outWidth, границы.outHeight) / понижение > ПРЕДЕЛ_СТОРОНЫ) понижение *= 2
+        val параметры = BitmapFactory.Options().apply { inSampleSize = понижение }
+        return zip.getInputStream(запись).use { BitmapFactory.decodeStream(it, null, параметры) }
+            ?: error("не читается ${запись.name} (${границы.outWidth}×${границы.outHeight}, понижение $понижение)")
+    }
+
+    private companion object {
+        const val ПРЕДЕЛ_СТОРОНЫ = 4096
     }
 }
