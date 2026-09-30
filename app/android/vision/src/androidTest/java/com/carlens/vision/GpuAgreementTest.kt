@@ -2,6 +2,7 @@ package com.carlens.vision
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.system.Os
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assume.assumeTrue
@@ -65,12 +66,35 @@ class GpuAgreementTest {
                 }
                 выходCpu.close()
                 выходGpu.close()
+                открытьДляЧтения(папка)
                 println("СОГЛАСИЕ готово ${записи.size} кропов, dim=$измерение")
             }
         } finally {
             наCpu.close()
             наGpu.close()
         }
+    }
+
+    /**
+     * Результаты создаёт приложение с правами 660, а `adb pull` идёт от имени shell и их не читает
+     * (`run-as` тестовому APK недоступен: он не debuggable). Доступ выдаёт сам владелец файлов.
+     */
+    private fun открытьДляЧтения(папка: File) {
+        for (имя in listOf("emb_cpu.f32", "emb_gpu.f32")) {
+            val файл = File(папка, имя)
+            if (файл.exists()) Os.chmod(файл.path, 420) // 0644
+        }
+    }
+
+    /** Повторно открыть результаты прошлого прогона, не считая их заново. */
+    @Test
+    fun открыть_результаты_для_adb_pull() {
+        val папка = File(
+            InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null),
+            "agree",
+        )
+        assumeTrue("нет $папка", папка.exists())
+        открытьДляЧтения(папка)
     }
 
     /**
