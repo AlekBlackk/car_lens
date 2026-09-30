@@ -39,8 +39,8 @@ android {
         applicationId = "com.carlens.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.5.3"
+        versionCode = 10
+        versionName = "0.5.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // `reactNativeArchitectures` управляет только нативной сборкой RN-библиотек, а
@@ -145,6 +145,10 @@ android {
             isMinifyEnabled = false
         }
     }
+    // `.so` лежат в APK сжатыми (`extractNativeLibs=true`): без сжатия они занимают 18.9 МБ
+    // против 6.7 МБ, а бюджет §5.2 (≤ 45 МБ) считается по файлу APK. Плата — установленное
+    // приложение тяжелее на распакованные библиотеки (~19 МБ); на скорость работы не влияет.
+    packaging { jniLibs { useLegacyPackaging = true } }
     sourceSets { getByName("main").assets.srcDir(rootProject.file("models")) }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
