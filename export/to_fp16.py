@@ -11,6 +11,13 @@
 детерминирован. Что fp16 не портит решения на настоящих кадрах, проверяет
 `export.verify_parity` для классификатора и `export.detector_parity` для детектора, а не
 самопроверка здесь: она на шумовых входах и ловит только сломанный граф.
+
+Второй режим — `fold_dequantize`: из fp16-графа получается fp32-граф с теми же значениями весов.
+Причина в скорости, а не в точности. `DEQUANTIZE` над fp16-весами XNNPACK на телефоне не
+сворачивает и рвёт граф классификатора на 50 разделов (29 из 185 узлов у делегата): кадр стоит
+198 мс против 105 у fp32 (`bench/latency.md`, 2026-09-30). Свёрнутый граф считается как fp32 и
+даёт числа, которые уже прошли гейт fp16; выигрыш размера остаётся только в APK, где файл сжимается
+(33.6 → 19.5 МБ), а не в самом файле.
 """
 
 from __future__ import annotations
@@ -22,14 +29,17 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from ai_edge_litert import schema_py_generated as schema
 from ai_edge_litert.interpreter import Interpreter
 from ai_edge_quantizer import quantizer
+from ai_edge_quantizer.utils import tfl_flatbuffer_utils
 
 from export.to_tflite import ExportError, _проверить_контракт, runtime_details, sha256_of_file
 
 FP32_NAME = "classifier_fp32.tflite"
 FP16_NAME = "classifier_fp16.tflite"
 DETECTOR_FP16_NAME = "detector_fp16.tflite"
+FOLDED_NAME = "classifier_fp16w.tflite"
 
 SELF_CHECK_SAMPLES = 16
 SELF_CHECK_SEED = 1337
@@ -58,6 +68,47 @@ def convert_fp16(src: Path, dst: Path) -> None:
     средство = quantizer.Quantizer(str(src))
     средство.load_quantization_recipe(_РЕЦЕПТ)
     средство.quantize().export_model(str(dst), overwrite=True)
+
+
+def fold_dequantize(src: Path, dst: Path) -> int:
+    """Записать в `dst` копию fp16-графа `src`, где `DEQUANTIZE` заменён константами fp32.
+
+    Значение каждой константы — fp16-вес, приведённый к fp32: арифметика графа не меняется,
+    исчезают только узлы, мешающие делегату. Вернуть число свёрнутых узлов.
+    """
+    модель = tfl_flatbuffer_utils.read_model(src)
+    свёрнуто = 0
+    for подграф in модель.subgraphs:
+        оставшиеся = []
+        for операция in подграф.operators:
+            код = модель.operatorCodes[операция.opcodeIndex]
+            # Старые файлы кладут код операции только в устаревшее поле.
+            if max(код.builtinCode, код.deprecatedBuiltinCode) != schema.BuiltinOperator.DEQUANTIZE:
+                оставшиеся.append(операция)
+                continue
+            вход = подграф.tensors[операция.inputs[0]]
+            выход = подграф.tensors[операция.outputs[0]]
+            данные = модель.buffers[вход.buffer].data
+            if (
+                вход.type != schema.TensorType.FLOAT16
+                or выход.type != schema.TensorType.FLOAT32
+                or данные is None
+            ):
+                # Не константа fp16 → fp32: сворачивать нечего, узел остаётся как был.
+                оставшиеся.append(операция)
+                continue
+            веса = np.frombuffer(bytes(данные), dtype=np.float16).astype(np.float32)
+            новый = schema.BufferT()
+            новый.data = np.frombuffer(веса.tobytes(), dtype=np.uint8)
+            модель.buffers.append(новый)
+            выход.buffer = len(модель.buffers) - 1
+            модель.buffers[вход.buffer].data = None
+            свёрнуто += 1
+        подграф.operators = оставшиеся
+    if свёрнуто == 0:
+        raise ExportError(f"{src}: нет ни одного DEQUANTIZE над fp16-константой — это не fp16-граф")
+    tfl_flatbuffer_utils.write_model(модель, dst)
+    return свёрнуто
 
 
 def _прогнать(path: Path, вход: np.ndarray) -> np.ndarray:
@@ -123,6 +174,11 @@ def _parse_args() -> argparse.Namespace:
     режим.add_argument(
         "--detector", type=Path, help="detector_fp32.tflite с detector_report.json рядом"
     )
+    режим.add_argument(
+        "--fold",
+        type=Path,
+        help="каталог с classifier_fp16.tflite и fp16_report.json: свернуть DEQUANTIZE",
+    )
     return парсер.parse_args()
 
 
@@ -156,6 +212,31 @@ def _classifier(каталог: Path) -> None:
             "versions": _versions(),
         },
         каталог / "fp16_report.json",
+    )
+
+
+def _fold(каталог: Path) -> None:
+    исходный = каталог / FP16_NAME
+    результат = каталог / FOLDED_NAME
+    отчёт_fp16 = json.loads((каталог / "fp16_report.json").read_text("utf-8"))
+    if sha256_of_file(исходный) != отчёт_fp16["fp16"]["sha256"]:
+        raise ExportError(f"{исходный}: sha256 не совпал с fp16_report.json — файл подменён")
+    отчёт_экспорта = json.loads((каталог / "export_report.json").read_text("utf-8"))
+    манифест = отчёт_экспорта["manifest"]
+
+    свёрнуто = fold_dequantize(исходный, результат)
+    подробности = runtime_details(результат)
+    _проверить_контракт(
+        подробности, результат, int(манифест["img_size"]), int(манифест["embedding_dim"])
+    )
+    _записать(
+        {
+            "source": _описание(исходный),
+            "folded": {**_описание(результат), "runtime": подробности, "folded_ops": свёрнуто},
+            "self_check": self_check(исходный, результат),
+            "versions": _versions(),
+        },
+        каталог / "fp16w_report.json",
     )
 
 
@@ -196,6 +277,8 @@ def main() -> None:
     аргументы = _parse_args()
     if аргументы.export is not None:
         _classifier(аргументы.export)
+    elif аргументы.fold is not None:
+        _fold(аргументы.fold)
     else:
         _detector(аргументы.detector)
 

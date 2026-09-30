@@ -75,6 +75,8 @@ PARITY_RUNTIME = {
     "classifier_fp32.tflite": "tflite_fp32",
     "classifier_int8.tflite": "tflite_int8",
     "classifier_fp16.tflite": "tflite_fp16",
+    # Те же значения весов, что у fp16, посчитанные как fp32: паритет fp16 обязан повториться.
+    "classifier_fp16w.bin": "tflite_fp16",
 }
 
 

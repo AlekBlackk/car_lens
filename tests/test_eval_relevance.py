@@ -57,6 +57,8 @@ def test_паритет_читается_из_рантайма_классифи�
         "top5_model": 0.8,
         "top1_brand": 0.9,
     }
+    # Свёрнутый fp16 (те же веса, граф fp32) повторяет числа паритета fp16.
+    assert read_parity(путь, "classifier_fp16w.bin") == read_parity(путь, "classifier_fp16.tflite")
 
 
 def test_паритет_не_угадывает_рантайм_незнакомого_классификатора(tmp_path: Path) -> None:

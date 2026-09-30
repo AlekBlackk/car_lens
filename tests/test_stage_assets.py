@@ -359,6 +359,29 @@ def test_stage_fp16_разкладывает_модель_под_именем_т
     assert записанный["files"]["classifier"]["name"] == "classifier_fp16.tflite"
 
 
+def test_stage_fp16w_берёт_tflite_из_экспорта_и_кладёт_под_именем_bin(tmp_path: Path) -> None:
+    """Под расширением `.bin` AGP сжимает модель в APK; в манифесте стоит имя ассета."""
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    (прогон / "export" / "classifier_fp16w.tflite").write_bytes(b"fp16w")
+    куда = tmp_path / "models"
+
+    путь = stage(прогон, детектор, куда, precision="fp16w")
+
+    имена = sorted(п.name for п in куда.iterdir())
+    assert "classifier_fp16w.bin" in имена
+    assert "classifier_fp16w.tflite" not in имена
+    assert (куда / "classifier_fp16w.bin").read_bytes() == b"fp16w"
+    записанный = json.loads(путь.read_text(encoding="utf-8"))
+    assert записанный["files"]["classifier"]["name"] == "classifier_fp16w.bin"
+
+
+def test_stage_fp16w_без_свёрнутого_файла_называет_имя_из_экспорта(tmp_path: Path) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+
+    with pytest.raises(SystemExit, match=re.escape("classifier_fp16w.tflite")):
+        stage(прогон, детектор, tmp_path / "models", precision="fp16w")
+
+
 def test_stage_fp16_детектор_кладётся_под_именем_точности(tmp_path: Path) -> None:
     """`--detector-precision fp16` пишет `detector_fp16.tflite` в ассеты и в манифест."""
     прогон, детектор_fp32 = _разложить_прогон(tmp_path, мета=МЕТА)
