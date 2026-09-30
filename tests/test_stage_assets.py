@@ -338,6 +338,21 @@ def test_stage_fp32_разкладывает_модель_под_именем_т
     assert записанный["files"]["classifier"]["name"] == "classifier_fp32.tflite"
 
 
+def test_stage_fp16_разкладывает_модель_под_именем_точности(tmp_path: Path) -> None:
+    """`--precision fp16` кладёт `classifier_fp16.tflite` и пишет это имя в манифест."""
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    (прогон / "export" / "classifier_fp16.tflite").write_bytes(b"fp16")
+    куда = tmp_path / "models"
+
+    путь = stage(прогон, детектор, куда, precision="fp16")
+
+    имена = sorted(п.name for п in куда.iterdir())
+    assert "classifier_fp16.tflite" in имена
+    assert "classifier_int8.tflite" not in имена
+    записанный = json.loads(путь.read_text(encoding="utf-8"))
+    assert записанный["files"]["classifier"]["name"] == "classifier_fp16.tflite"
+
+
 def test_stage_умолчание_точности_кладёт_int8(tmp_path: Path) -> None:
     """Без флага точности путь M-1 не меняется: разложен `classifier_int8.tflite`."""
     прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)

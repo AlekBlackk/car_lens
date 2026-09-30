@@ -271,6 +271,7 @@ dev = [
 ]
 export = [
     { name = "ai-edge-litert" },
+    { name = "ai-edge-quantizer" },
     { name = "albumentations" },
     { name = "litert-torch" },
     { name = "onnx" },
@@ -320,6 +321,7 @@ dev = [
 ]
 export = [
     { name = "ai-edge-litert", specifier = "==2.1.6" },
+    { name = "ai-edge-quantizer", specifier = "==0.8.0" },
     { name = "albumentations", specifier = "==2.0.8" },
     { name = "litert-torch", specifier = "==0.9.3" },
     { name = "onnx", specifier = "==1.21.0" },

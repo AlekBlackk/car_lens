@@ -134,7 +134,7 @@ def _parse_args() -> argparse.Namespace:
     # `TOP1_DROP_LIMIT_PP` при этом не трогается — меняется не он, а чью просадку блокировать.
     парсер.add_argument(
         "--precision",
-        choices=["int8", "fp32"],
+        choices=["int8", "fp32", "fp16"],
         default="int8",
         help="точность, которая едет на устройство: её просадку судит гейт",
     )
@@ -165,6 +165,12 @@ def main() -> None:
         )
     путь_fp32 = аргументы.export / "classifier_fp32.tflite"
     путь_int8 = аргументы.export / "classifier_int8.tflite"
+    # fp16 — необязательный четвёртый рантайм: файл появляется только после `export.to_fp16`.
+    # Когда он и есть то, что едет на устройство, его отсутствие — ошибка, а не пропуск.
+    путь_fp16 = аргументы.export / "classifier_fp16.tflite"
+    if аргументы.precision == "fp16" and not путь_fp16.is_file():
+        raise SystemExit(f"{путь_fp16}: файла нет — сначала `python -m export.to_fp16`")
+    есть_fp16 = путь_fp16.is_file()
     # Без этой проверки первым об отсутствии файла сообщил бы `sha256_of_file` — сырым
     # `FileNotFoundError` из середины сверки происхождения, где про причину не сказано
     # ничего. А причина у пропавшего INT8 ровно одна и известная.
@@ -267,14 +273,17 @@ def main() -> None:
         сырой_эталон, метки = _torch_embeddings(модель, загрузчик, устройство)
         сырой_fp32 = _tflite_embeddings(путь_fp32, загрузчик)
         сырой_int8 = _tflite_embeddings(путь_int8, загрузчик)
+        сырые_рантаймов = {
+            "pytorch": сырой_эталон,
+            "tflite_fp32": сырой_fp32,
+            "tflite_int8": сырой_int8,
+        }
+        if есть_fp16:
+            сырые_рантаймов["tflite_fp16"] = _tflite_embeddings(путь_fp16, загрузчик)
 
         по_рантаймам: dict[str, Metrics] = {}
         топы: dict[str, list[list[int]]] = {}
-        for ключ, сырые in (
-            ("pytorch", сырой_эталон),
-            ("tflite_fp32", сырой_fp32),
-            ("tflite_int8", сырой_int8),
-        ):
+        for ключ, сырые in сырые_рантаймов.items():
             # Норма считается один раз и служит сразу приговором и делителем. Без стража
             # деление отдаёт `nan` (или ноль, если норма переполнилась в `inf`),
             # `top5_by_centroids` возвращает по нему мусор, а `aggregate` печатает
@@ -320,6 +329,13 @@ def main() -> None:
                 "metrics_pp": metric_delta(по_рантаймам["pytorch"], по_рантаймам["tflite_int8"]),
             },
         }
+        if есть_fp16:
+            итоги["deltas"][имя]["fp16"] = {
+                "raw": asdict(raw_deltas(сырой_эталон, сырые_рантаймов["tflite_fp16"])),
+                "cosine": asdict(cosine_deltas(сырой_эталон, сырые_рантаймов["tflite_fp16"])),
+                "top1_churn": top1_churn(топы["pytorch"], топы["tflite_fp16"]),
+                "metrics_pp": metric_delta(по_рантаймам["pytorch"], по_рантаймам["tflite_fp16"]),
+            }
 
         расхождение_fp32 = итоги["deltas"][имя]["fp32"]["raw"]["max_abs"]
         if расхождение_fp32 > RAW_MAX_ABS:
@@ -329,18 +345,27 @@ def main() -> None:
             )
         просадка = итоги["deltas"][имя]["int8"]["metrics_pp"]["top1_model"]
         # Проверка графа (raw fp32 выше) безусловна: сломанный граф ломает и fp32. А вот
-        # просадка INT8 блокирует гейт только когда INT8 и едет на устройство.
-        if аргументы.precision == "int8" and просадка < TOP1_DROP_LIMIT_PP:
-            провалы.append(
-                f"{имя}: top1_model INT8 ниже базы на {abs(просадка):.2f} п.п. "
-                f"при допуске {abs(TOP1_DROP_LIMIT_PP)} п.п."
-            )
+        # просадка квантованной точности блокирует гейт только когда она и едет на устройство.
+        if аргументы.precision in ("int8", "fp16"):
+            дельты_точности = итоги["deltas"][имя][аргументы.precision]
+            просадка_точности = дельты_точности["metrics_pp"]["top1_model"]
+            if просадка_точности < TOP1_DROP_LIMIT_PP:
+                провалы.append(
+                    f"{имя}: top1_model {аргументы.precision} ниже базы на "
+                    f"{abs(просадка_точности):.2f} п.п. при допуске {abs(TOP1_DROP_LIMIT_PP)} п.п."
+                )
         print(
             f"{имя}: база {по_рантаймам['pytorch'].top1_model:.4f}, "
             f"fp32 {по_рантаймам['tflite_fp32'].top1_model:.4f}, "
             f"int8 {по_рантаймам['tflite_int8'].top1_model:.4f} "
             f"({просадка:+.2f} п.п.), churn {итоги['deltas'][имя]['int8']['top1_churn']:.3f}"
         )
+        if есть_fp16:
+            print(
+                f"{имя}: fp16 {по_рантаймам['tflite_fp16'].top1_model:.4f} "
+                f"({итоги['deltas'][имя]['fp16']['metrics_pp']['top1_model']:+.2f} п.п.), "
+                f"churn {итоги['deltas'][имя]['fp16']['top1_churn']:.3f}"
+            )
 
     итоги["thresholds"] = {
         "raw_max_abs": RAW_MAX_ABS,

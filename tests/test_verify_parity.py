@@ -48,5 +48,8 @@ def test_флаг_точности_разбирается(monkeypatch: pytest.Mo
     monkeypatch.setattr(sys, "argv", [*базовые, "--precision", "fp32"])
     assert _parse_args().precision == "fp32"
 
+    monkeypatch.setattr(sys, "argv", [*базовые, "--precision", "fp16"])
+    assert _parse_args().precision == "fp16"
+
     monkeypatch.setattr(sys, "argv", базовые)
     assert _parse_args().precision == "int8"

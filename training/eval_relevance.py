@@ -74,6 +74,7 @@ def write_predictions(
 PARITY_RUNTIME = {
     "classifier_fp32.tflite": "tflite_fp32",
     "classifier_int8.tflite": "tflite_int8",
+    "classifier_fp16.tflite": "tflite_fp16",
 }
 
 

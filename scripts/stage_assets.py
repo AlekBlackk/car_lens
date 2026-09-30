@@ -39,12 +39,13 @@ from export.provenance import check_provenance
     "score_layout",
     "max_det",
 )
-# Классификатор — единственный файл, чьё имя зависит от точности: int8 (путь M-1) или
-# fp32 (русская модель, §Task 3). Имя выбирает флаг `--precision`, поэтому в `ИМЕНА` его
-# нет — его подставляет `stage`.
+# Классификатор — единственный файл, чьё имя зависит от точности: int8 (путь M-1), fp32
+# (русская модель, §Task 3) или fp16 (веса половинной точности, M4). Имя выбирает флаг
+# `--precision`, поэтому в `ИМЕНА` его нет — его подставляет `stage`.
 ФАЙЛ_КЛАССИФИКАТОРА = {
     "int8": "classifier_int8.tflite",
     "fp32": "classifier_fp32.tflite",
+    "fp16": "classifier_fp16.tflite",
 }
 ИМЕНА = {
     "detector": "detector_fp32.tflite",
@@ -420,7 +421,7 @@ def _parse_args() -> argparse.Namespace:
     )
     парсер.add_argument(
         "--precision",
-        choices=["int8", "fp32"],
+        choices=sorted(ФАЙЛ_КЛАССИФИКАТОРА),
         default="int8",
         help="точность классификатора: какой .tflite разложить (умолчание int8, путь M-1)",
     )
