@@ -16,9 +16,11 @@ from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
 from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, load_alias_table
 from pipeline.ingest.mad_cars import (
     fetch_frames,
+    read_car_ids,
     read_excluded,
     read_mad_disputed,
     read_mad_mapping,
+    sample_eval_frames,
     sample_frames,
     sample_negative_frames,
     sample_reject_pool_frames,
@@ -31,6 +33,9 @@ DEFAULT_MAPPING = Path("catalog/external/mad_cars.csv")
 DEFAULT_EXCLUDED = Path("catalog/external/mad_cars_excluded.csv")
 DEFAULT_DISPUTED = Path("catalog/external/mad_cars_disputed.csv")
 DEFAULT_MEASURED = Path("catalog/external/mad_cars_negatives_sample.csv")
+DEFAULT_SAMPLE_05 = Path("catalog/external/mad_cars_sample.csv")
+DEFAULT_REJECT_POOL = Path("catalog/external/mad_cars_reject_pool.csv")
+DEFAULT_NEW_NAMES = Path("catalog/external/mad_cars_cat192_names.csv")
 CELL = (250, 150)
 CARS_PER_SHEET = 16
 
@@ -48,6 +53,71 @@ def _sample(аргументы: argparse.Namespace) -> int:
         f"выборка: {выборка['model_id'].nunique()} классов, {выборка['car_id'].nunique()} "
         f"машин, {len(выборка)} кадров → {аргументы.out}"
     )
+    return 0
+
+
+def _cat192_sample(аргументы: argparse.Namespace) -> int:
+    """Выборки каталога 192 (`bench/catalog-192-preregistration.md`): обучение и две проверки.
+
+    Ни одна машина не выполняет двух ролей: проверка и обучение не пересекаются, машины
+    замера отказа (негативы, пул прототипов) не берутся ни туда, ни туда, а проверка старых
+    классов не трогает выборку 0.5, на которой они учились.
+    """
+    таблица = read_mad_mapping(аргументы.mapping, load_catalog(DEFAULT_CATALOG_PATH))
+    новые = {
+        (строка["mad_brand"], строка["mad_model"])
+        for строка in pd.read_csv(аргументы.new_names, dtype=str).to_dict("records")
+    }
+    нет = sorted(новые - set(таблица))
+    if нет:
+        raise SystemExit(f"названий нет в таблице соответствия: {нет}")
+    манифест = pd.read_csv(
+        аргументы.manifest, dtype=str, usecols=["brand", "model", "car_id", "view_id", "url"]
+    ).dropna(subset=["brand", "model"])
+
+    замер = read_car_ids(аргументы.negatives, аргументы.reject_pool)
+    прежние = read_car_ids(аргументы.sample_05)
+    новая_таблица = {пара: класс for пара, класс in таблица.items() if пара in новые}
+    старая_таблица = {пара: класс for пара, класс in таблица.items() if пара not in новые}
+
+    проверка_новых = sample_eval_frames(
+        манифест,
+        новая_таблица,
+        cars_per_group=аргументы.eval_cars,
+        by_name=True,
+        seed=аргументы.seed,
+        exclude_cars=замер | прежние,
+    )
+    проверка_старых = sample_eval_frames(
+        манифест,
+        старая_таблица,
+        cars_per_group=аргументы.eval_cars,
+        by_name=False,
+        seed=аргументы.seed,
+        exclude_cars=замер | прежние,
+    )
+    занятые = замер | set(проверка_новых["car_id"]) | set(проверка_старых["car_id"])
+    # Классы обучения — классы новых названий: новые и четыре преемника (их кадры пересобираются).
+    классы = set(новая_таблица.values())
+    обучение = sample_frames(
+        манифест,
+        {пара: класс for пара, класс in таблица.items() if класс in классы},
+        cars_per_class=аргументы.train_cars,
+        seed=аргументы.seed,
+        exclude_cars=занятые,
+    )
+    аргументы.out_dir.mkdir(parents=True, exist_ok=True)
+    for имя, кадр in (
+        ("train", обучение),
+        ("eval_new", проверка_новых),
+        ("eval_old", проверка_старых),
+    ):
+        путь = аргументы.out_dir / f"mad_cars_cat192_{имя}.csv"
+        кадр.to_csv(путь, index=False)
+        print(
+            f"{имя}: {кадр['model_id'].nunique()} классов, {кадр['car_id'].nunique()} машин, "
+            f"{len(кадр)} кадров → {путь}"
+        )
     return 0
 
 
@@ -182,6 +252,20 @@ def build_parser() -> argparse.ArgumentParser:
     выборка.add_argument("--seed", type=int, required=True)
     выборка.add_argument("--out", type=Path, required=True)
     выборка.set_defaults(run=_sample)
+    каталог192 = команды.add_parser(
+        "cat192-sample", help="выборки каталога 192: обучение и проверки"
+    )
+    каталог192.add_argument("--manifest", type=Path, default=DEFAULT_ROOT / "mad.csv")
+    каталог192.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING)
+    каталог192.add_argument("--new-names", type=Path, default=DEFAULT_NEW_NAMES)
+    каталог192.add_argument("--sample-05", type=Path, default=DEFAULT_SAMPLE_05)
+    каталог192.add_argument("--negatives", type=Path, default=DEFAULT_MEASURED)
+    каталог192.add_argument("--reject-pool", type=Path, default=DEFAULT_REJECT_POOL)
+    каталог192.add_argument("--eval-cars", type=int, default=20)
+    каталог192.add_argument("--train-cars", type=int, default=100)
+    каталог192.add_argument("--seed", type=int, required=True)
+    каталог192.add_argument("--out-dir", type=Path, default=Path("catalog/external"))
+    каталог192.set_defaults(run=_cat192_sample)
     негативы = команды.add_parser("negatives-sample", help="чужие машины для замера отказа")
     негативы.add_argument("--manifest", type=Path, default=DEFAULT_ROOT / "mad.csv")
     негативы.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING)

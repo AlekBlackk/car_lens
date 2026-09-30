@@ -56,10 +56,16 @@ def sample_frames(
     *,
     cars_per_class: int,
     seed: int,
+    exclude_cars: Collection[str] = (),
 ) -> pd.DataFrame:
-    """До `cars_per_class` машин на класс, по 3 кадра; от порядка строк входа не зависит."""
+    """До `cars_per_class` машин на класс, по 3 кадра; от порядка строк входа не зависит.
+
+    `exclude_cars` — `car_id` машин, занятых другой ролью (замер, негативы): в выборку они не
+    попадают, а из оставшихся берётся тот же `cars_per_class`.
+    """
     пары = pd.Series(list(zip(manifest["brand"], manifest["model"], strict=True)))
     кадр = manifest.assign(model_id=пары.map(dict(mapping)).to_numpy()).dropna(subset=["model_id"])
+    кадр = кадр[~кадр["car_id"].isin(set(exclude_cars))]
     генератор = np.random.default_rng(seed)
     строки: list[tuple[str, str, str, str]] = []
     for модель in sorted(кадр["model_id"].unique()):
@@ -76,6 +82,61 @@ def sample_frames(
                 ракурс, url = str(кадр_обхода["view_id"]), str(кадр_обхода["url"])
                 строки.append((модель, str(машина), ракурс, url))
     return pd.DataFrame(строки, columns=list(SAMPLE_COLUMNS))
+
+
+def sample_eval_frames(
+    manifest: pd.DataFrame,
+    mapping: Mapping[tuple[str, str], str],
+    *,
+    cars_per_group: int,
+    by_name: bool,
+    seed: int,
+    exclude_cars: Collection[str] = (),
+) -> pd.DataFrame:
+    """Машины проверки: до `cars_per_group` на название MAD-Cars (`by_name`) или на класс.
+
+    На машину — три кадра обхода `N // 4`, `N // 2`, `3N // 4`: какой из них пойдёт в проверку,
+    решает приём (первый по `bucket_of`, переживший детектор и фильтры). В колонке `mad_name` —
+    `brand/model` названия машины: отчёт по новым классам считается по названиям, а не по классам.
+    От порядка строк входа не зависит.
+    """
+    пары = pd.Series(list(zip(manifest["brand"], manifest["model"], strict=True)))
+    кадр = manifest.assign(
+        model_id=пары.map(dict(mapping)).to_numpy(),
+        mad_name=(manifest["brand"] + "/" + manifest["model"]).to_numpy(),
+    ).dropna(subset=["model_id"])
+    кадр = кадр[~кадр["car_id"].isin(set(exclude_cars))]
+    ключ = "mad_name" if by_name else "model_id"
+    генератор = np.random.default_rng(seed)
+    строки: list[tuple[str, str, str, str, str]] = []
+    for _, группа in кадр.groupby(ключ, sort=True):
+        машины = sorted(группа["car_id"].unique(), key=int)
+        взять = min(cars_per_group, len(машины))
+        for машина in sorted(генератор.choice(машины, size=взять, replace=False), key=int):
+            обход = группа[группа["car_id"] == машина].sort_values(
+                "view_id", key=lambda s: s.astype(int)
+            )
+            for позиция in _кадры_пула(len(обход)):
+                ракурс = обход.iloc[позиция]
+                строки.append(
+                    (
+                        str(ракурс["model_id"]),
+                        str(машина),
+                        str(ракурс["view_id"]),
+                        str(ракурс["url"]),
+                        str(ракурс["mad_name"]),
+                    )
+                )
+    return pd.DataFrame(строки, columns=[*SAMPLE_COLUMNS, "mad_name"])
+
+
+def read_car_ids(*paths: Path) -> frozenset[str]:
+    """Объединение колонок `car_id` выборок-CSV: машины, которые уже заняты своей ролью."""
+    return frozenset(
+        str(машина)
+        for путь in paths
+        for машина in pd.read_csv(путь, dtype=str, usecols=["car_id"])["car_id"]
+    )
 
 
 def read_mad_disputed(path: Path, catalog: Catalog) -> frozenset[tuple[str, str]]:

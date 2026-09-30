@@ -15,9 +15,11 @@ from pipeline.ingest.mad_cars import (
     FetchReport,
     fetch_frames,
     frame_path,
+    read_car_ids,
     read_excluded,
     read_mad_disputed,
     read_mad_mapping,
+    sample_eval_frames,
     sample_frames,
     sample_negative_frames,
     sample_reject_pool_frames,
@@ -129,6 +131,81 @@ def test_пары_без_соответствия_не_берутся() -> None:
         seed=1,
     )
     assert set(выборка["model_id"]) == {"audi__a4"}
+
+
+def test_занятые_машины_в_выборку_не_попадают() -> None:
+    машины = [("audi", "a4", str(i), 3) for i in range(10)]
+    выборка = sample_frames(
+        манифест(*машины),
+        {("audi", "a4"): "audi__a4"},
+        cars_per_class=10,
+        seed=1,
+        exclude_cars={"0", "1", "2"},
+    )
+    assert set(выборка["car_id"]) == {str(i) for i in range(3, 10)}
+
+
+ТАБЛИЦА_ПРОВЕРКИ = {("audi", "a4"): "audi__a4", ("audi", "a4_allroad"): "audi__a4"}
+
+
+def test_проверка_по_названию_берёт_машины_каждого_названия() -> None:
+    машины = [("audi", "a4", str(i), 8) for i in range(10)] + [
+        ("audi", "a4_allroad", str(100 + i), 8) for i in range(10)
+    ]
+    выборка = sample_eval_frames(
+        манифест(*машины), ТАБЛИЦА_ПРОВЕРКИ, cars_per_group=3, by_name=True, seed=1
+    )
+    по_названиям = выборка.groupby("mad_name")["car_id"].nunique()
+    assert dict(по_названиям) == {"audi/a4": 3, "audi/a4_allroad": 3}
+    assert set(выборка["model_id"]) == {"audi__a4"}
+
+
+def test_проверка_по_классу_делит_потолок_между_названиями() -> None:
+    машины = [("audi", "a4", str(i), 8) for i in range(10)] + [
+        ("audi", "a4_allroad", str(100 + i), 8) for i in range(10)
+    ]
+    выборка = sample_eval_frames(
+        манифест(*машины), ТАБЛИЦА_ПРОВЕРКИ, cars_per_group=3, by_name=False, seed=1
+    )
+    assert выборка["car_id"].nunique() == 3
+
+
+def test_проверка_три_кадра_обхода_и_колонки() -> None:
+    выборка = sample_eval_frames(
+        манифест(("audi", "a4", "7", 8)),
+        {("audi", "a4"): "audi__a4"},
+        cars_per_group=5,
+        by_name=True,
+        seed=1,
+    )
+    assert list(выборка.columns) == [*SAMPLE_COLUMNS, "mad_name"]
+    assert list(выборка["view_id"]) == ["2", "4", "6"]
+
+
+def test_проверка_обходит_занятые_машины_и_не_зависит_от_порядка() -> None:
+    машины = [("audi", "a4", str(i), 8) for i in range(20)]
+    таблица_ = {("audi", "a4"): "audi__a4"}
+    первая = sample_eval_frames(
+        манифест(*машины), таблица_, cars_per_group=5, by_name=True, seed=3, exclude_cars={"0"}
+    )
+    вторая = sample_eval_frames(
+        манифест(*reversed(машины)),
+        таблица_,
+        cars_per_group=5,
+        by_name=True,
+        seed=3,
+        exclude_cars={"0"},
+    )
+    assert "0" not in set(первая["car_id"])
+    assert set(первая["car_id"]) == set(вторая["car_id"])
+
+
+def test_car_id_выборок_объединяются(tmp_path: Path) -> None:
+    первая, вторая = tmp_path / "a.csv", tmp_path / "b.csv"
+    строки = ["model_id,car_id,view_id,url"]
+    первая.write_text("\n".join([*строки, "x,1,0,u", "x,2,0,u"]), encoding="utf-8")
+    вторая.write_text("\n".join([*строки, "y,2,0,u", "y,3,0,u"]), encoding="utf-8")
+    assert read_car_ids(первая, вторая) == {"1", "2", "3"}
 
 
 def выборка_из(*строки: tuple[str, str, str]) -> pd.DataFrame:
