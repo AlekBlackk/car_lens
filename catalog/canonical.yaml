@@ -2,7 +2,11 @@
 #
 # model_id собирается как <слаг марки>__<слаг модели>, отдельным полем не хранится.
 # Единица приёмки — КЛАСС, а не модель (§13.2): пять платформенных групп внизу файла
-# дают пять классов на десять моделей. Итог — 150 классов на 155 моделях, 48 марок.
+# дают пять классов на десять моделей. Итог — 192 класса на 197 моделях, 49 марок.
+#
+# 150 классов — каталог 0.5; ещё 42 добавлены в 0.6 из MAD-Cars (модели с ≥ 100 машин вне
+# каталога, `bench/catalog-192-preregistration.md`). Преемники с новым именем живут классом
+# предшественника: K5 — в Optima, ix35 — в Tucson, M-Class — в GLE, GLK — в GLC, GLS — в GL.
 #
 # Состав набран по долям парка АВТОСТАТ (§3 дизайна `2026-08-25-m0-catalog-ru-design.md`),
 # разложен по квотам §4 и проверяется `tests/test_canonical_catalog.py`. Правка состава
@@ -38,6 +42,7 @@ brands:
       niva_2121: {display: Лада Нива Легенда (2121)}
       niva_2131: {display: Лада Нива Легенда 5-дверная (2131)}
       niva_travel: {display: Лада Нива Тревел}
+      "2105": {display: Лада 2105}
   UAZ:
     models:
       patriot: {display: УАЗ Патриот}
@@ -68,6 +73,7 @@ brands:
       highlander: {display: Toyota Highlander}
       avensis: {display: Toyota Avensis}
       mark_2: {display: Toyota Mark II}
+      prius: {display: Toyota Prius}
   Lexus:
     models:
       rx: {display: Lexus RX}
@@ -81,12 +87,17 @@ brands:
       juke: {display: Nissan Juke}
       murano: {display: Nissan Murano}
       terrano: {display: Nissan Terrano}
+      teana: {display: Nissan Teana}
+      note: {display: Nissan Note}
+      tiida: {display: Nissan Tiida}
+      primera: {display: Nissan Primera}
   Mitsubishi:
     models:
       outlander: {display: Mitsubishi Outlander}
       lancer: {display: Mitsubishi Lancer}
       pajero: {display: Mitsubishi Pajero}
       asx: {display: Mitsubishi ASX}
+      pajero_sport: {display: Mitsubishi Pajero Sport}
   Mazda:
     models:
       "3": {display: Mazda 3}
@@ -116,19 +127,23 @@ brands:
       sportage: {display: Kia Sportage}
       ceed: {display: Kia Ceed}
       sorento: {display: Kia Sorento}
-      optima: {display: Kia Optima}
+      optima: {display: Kia Optima / K5}
       soul: {display: Kia Soul}
       cerato: {display: Kia Cerato}
       spectra: {display: Kia Spectra}
+      carnival: {display: Kia Carnival}
+      picanto: {display: Kia Picanto}
   Hyundai:
     models:
       solaris: {display: Hyundai Solaris}
       creta: {display: Hyundai Creta}
-      tucson: {display: Hyundai Tucson}
+      tucson: {display: Hyundai Tucson / ix35}
       santa_fe: {display: Hyundai Santa Fe}
       accent: {display: Hyundai Accent}
       getz: {display: Hyundai Getz}
       elantra: {display: Hyundai Elantra}
+      sonata: {display: Hyundai Sonata}
+      i30: {display: Hyundai i30}
   Solaris:
     models:
       hs: {display: Solaris HS}
@@ -153,16 +168,22 @@ brands:
       golf: {display: Volkswagen Golf}
       touareg: {display: Volkswagen Touareg}
       transporter: {display: Volkswagen Transporter}
+      jetta: {display: Volkswagen Jetta}
   Skoda:
     models:
       octavia: {display: Škoda Octavia}
       rapid: {display: Škoda Rapid}
       fabia: {display: Škoda Fabia}
       kodiaq: {display: Škoda Kodiaq}
+      superb: {display: Škoda Superb}
+      yeti: {display: Škoda Yeti}
   Opel:
     models:
       astra: {display: Opel Astra}
       zafira: {display: Opel Zafira}
+      corsa: {display: Opel Corsa}
+      insignia: {display: Opel Insignia}
+      vectra: {display: Opel Vectra}
 
   # ------------------------------------------------------- немецкие премиум, 9
   # Доля парка невелика, но узнаваемости пользователь ждёт от этих марок в первую
@@ -171,18 +192,32 @@ brands:
     models:
       c_class: {display: Mercedes-Benz C-Class}
       e_class: {display: Mercedes-Benz E-Class}
-      gle: {display: Mercedes-Benz GLE}
+      gle: {display: Mercedes-Benz GLE / M-Class}
       sprinter: {display: Mercedes-Benz Sprinter}
+      s_class: {display: Mercedes-Benz S-Class}
+      gl: {display: Mercedes-Benz GL / GLS}
+      glc: {display: Mercedes-Benz GLC / GLK}
   BMW:
     models:
       "3_series": {display: BMW 3 Series}
       "5_series": {display: BMW 5 Series}
       x5: {display: BMW X5}
+      "1_series": {display: BMW 1 Series}
+      "7_series": {display: BMW 7 Series}
+      x1: {display: BMW X1}
+      x3: {display: BMW X3}
+      x4: {display: BMW X4}
+      x6: {display: BMW X6}
+      x7: {display: BMW X7}
   Audi:
     models:
       a4: {display: Audi A4}
       a6: {display: Audi A6}
       q5: {display: Audi Q5}
+      a3: {display: Audi A3}
+      a5: {display: Audi A5}
+      q3: {display: Audi Q3}
+      q7: {display: Audi Q7}
 
   # ------------------------------------------------------------ французские, 11
   # Renault 6.7% парка иномарок, вровень с Nissan. Logan и Duster — одни из самых
@@ -194,6 +229,7 @@ brands:
       duster: {display: Renault Duster}
       megane: {display: Renault Mégane}
       kaptur: {display: Renault Kaptur}
+      arkana: {display: Renault Arkana}
       logan_mcv: {display: Renault Logan MCV}
   Peugeot:
     models:
@@ -223,6 +259,8 @@ brands:
       kuga: {display: Ford Kuga}
       fiesta: {display: Ford Fiesta}
       transit: {display: Ford Transit}
+      fusion: {display: Ford Fusion}
+      explorer: {display: Ford Explorer}
 
   # ---------------------------------------------------------------- китайские, 18
   # 2.65 млн машин, около 6% парка, но растут быстрее всех: каталог без них
@@ -244,6 +282,7 @@ brands:
       atlas_pro: {display: Geely Atlas Pro}
       monjaro: {display: Geely Monjaro}
       emgrand: {display: Geely Emgrand}
+      tugella: {display: Geely Tugella}
   Belgee:
     models:
       x50: {display: Belgee X50}
@@ -292,9 +331,15 @@ brands:
   Volvo:
     models:
       xc60: {display: Volvo XC60}
+      xc90: {display: Volvo XC90}
+      s60: {display: Volvo S60}
   Land Rover:
     models:
       discovery: {display: Land Rover Discovery}
+      range_rover: {display: Land Rover Range Rover}
+      range_rover_sport: {display: Land Rover Range Rover Sport}
+      evoque: {display: Land Rover Range Rover Evoque}
+      freelander: {display: Land Rover Freelander}
   Jeep:
     models:
       grand_cherokee: {display: Jeep Grand Cherokee}
@@ -307,6 +352,9 @@ brands:
   Porsche:
     models:
       cayenne: {display: Porsche Cayenne}
+  MINI:
+    models:
+      hatch: {display: MINI Hatch}
 
 # Платформенные группы (§13.2, §5.1 дизайна): несколько model_id, различающихся только
 # шильдиком, — один класс обучения и один слот в catalog_index.bin. Кузов, оптика и
