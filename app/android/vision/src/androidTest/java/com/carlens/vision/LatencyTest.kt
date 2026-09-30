@@ -41,12 +41,18 @@ class LatencyTest {
 
     @Test
     fun латентность_по_стадиям_на_делегате_по_умолчанию() {
-        замерить(AssetSpec())
+        замерить(AssetSpec(classifierGpu = true))
     }
 
     @Test
     fun латентность_по_стадиям_на_принудительном_CPU() {
-        замерить(AssetSpec(allowGpu = false))
+        замерить(AssetSpec(allowGpu = false, classifierGpu = false))
+    }
+
+    /** Детектор на GPU, классификатор на CPU: так работала сборка до GPU-классификатора (0.5.5). */
+    @Test
+    fun латентность_по_стадиям_с_классификатором_на_CPU() {
+        замерить(AssetSpec(classifierGpu = false))
     }
 
     private fun замерить(спек: AssetSpec) {

@@ -19,15 +19,16 @@ internal class Classifier(
     model: ByteBuffer,
     spec: TensorSpec,
     expectedEmbeddingDim: Int,
+    allowGpu: Boolean,
 ) : AutoCloseable {
 
-    // GPU принудительно выключен, а не читается из AssetSpec.allowGpu: замер на S23 Ultra
-    // дал реальное ускорение (123 → 77 мс), но косинус паритета уровня A упал до 0.964
-    // против требуемых 0.9999 (тест эталона, кадр 0). GPU-делегат на квантованном INT8-
-    // графе где-то теряет точность — вероятно, часть операций считается в пониженной
-    // точности вместо квантованной арифметики. Веха проверяет именно совпадение с
-    // питоновским эталоном, поэтому скорость здесь не аргумент.
-    private val поднятый = Delegates.поднять(model, allowGpu = false, cpuThreads = ЧИСЛО_ПОТОКОВ)
+    // GPU разрешается флагом `AssetSpec.classifierGpu`, а не безусловно. В августе GPU-делегат на
+    // квантованном INT8-графе дал 123 → 77 мс, но косинус паритета уровня A упал до 0.964 против
+    // 0.9999, и GPU выключили. На fp32-графе (`fp16w`) делегат берёт все узлы и считает кадр за
+    // 23 мс, но активации на GPU по умолчанию fp16, поэтому паритет уровня A на GPU не требуется:
+    // вместо него `GpuAgreementTest` меряет решения (top-1, принять/отказать) против CPU на
+    // настоящих кропах (`bench/gpu-classifier-preregistration.md`).
+    private val поднятый = Delegates.поднять(model, allowGpu = allowGpu, cpuThreads = ЧИСЛО_ПОТОКОВ)
     private val интерпретатор = поднятый.interpreter
     val delegateMode: DelegateMode = поднятый.mode
     private val вход = интерпретатор.getInputTensor(0)

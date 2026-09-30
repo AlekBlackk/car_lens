@@ -35,9 +35,18 @@ data class AssetSpec(
      *
      * `false` — принудительный CPU. Нужен замеру латентности: делегат выбирается по
      * устройству, и без принудительного пути вторую половину таблицы `bench/latency.md`
-     * снять нечем. Классификатор считается на CPU всегда, флаг его не трогает.
+     * снять нечем. Классификатора флаг не касается: у него свой, `classifierGpu`.
      */
     val allowGpu: Boolean = true,
+    /**
+     * Разрешён ли GPU-делегат классификатора; при отказе устройства — откат на CPU.
+     *
+     * Отдельно от `allowGpu`: детектор на GPU считается давно и проверен паритетом, а
+     * классификатор на GPU считает активации в fp16, и его пригодность держится на замере
+     * решений, а не тензоров (`GpuAgreementTest`). По умолчанию выключен, пока гейт
+     * `bench/gpu-classifier-preregistration.md` не пройден.
+     */
+    val classifierGpu: Boolean = false,
 )
 
 /**
@@ -65,12 +74,9 @@ class CarVision private constructor(
     val delegateMode: DelegateMode get() = detector.delegateMode
 
     /**
-     * Делегат классификатора: всегда CPU, `AssetSpec.allowGpu` его не касается.
-     *
-     * GPU-делегат на квантованном графе классификатора уронил паритет уровня A до
-     * косинуса 0.964 против требуемых 0.9999 — см. `Classifier`. Свойство оставлено
-     * ради симметрии с `delegateMode` и потому что `LatencyTest` печатает оба: молча
-     * убрать его значило бы прятать в отчёте вехи то, что путей исполнения два.
+     * Делегат классификатора: GPU, если разрешён `AssetSpec.classifierGpu` и поддержан
+     * устройством, иначе CPU. Откат молчаливым быть не должен: он объясняет и время кадра, и
+     * разряд батареи, поэтому режим виден наружу и печатается `LatencyTest`.
      */
     val classifierDelegateMode: DelegateMode get() = classifier.delegateMode
 
@@ -230,6 +236,7 @@ class CarVision private constructor(
                 model = прямойБуфер(прочитать(assets, манифест, spec, "classifier")),
                 spec = манифест.classifierSpec(),
                 expectedEmbeddingDim = индекс.header.embeddingDim,
+                allowGpu = spec.classifierGpu,
             )
             val детектор = runCatching {
                 Detector(

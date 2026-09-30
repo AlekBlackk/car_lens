@@ -24,7 +24,9 @@ class ParityTest {
 
     @Before
     fun поднять() {
-        зрение = CarVision.load(ассеты())
+        // Косинус ≥ 0.9999 к питону держит только CPU: активации GPU-делегата fp16. Согласие GPU
+        // с CPU на решениях меряет `GpuAgreementTest`, а не этот тест.
+        зрение = CarVision.load(ассеты(), AssetSpec(classifierGpu = false))
         эталон = JSONObject(
             String(ассеты().open("golden.json").use { it.readBytes() }, Charsets.UTF_8)
         )
