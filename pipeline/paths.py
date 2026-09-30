@@ -35,7 +35,15 @@ def crops_dir() -> Path:
 
 
 def splits_dir() -> Path:
-    """Parquet-файлы сплитов по схеме §13.1."""
+    """Parquet-файлы сплитов по схеме §13.1.
+
+    `CARLENS_SPLITS_DIR` подменяет каталог целиком: прогон со своей нумерацией классов
+    (каталог 192, `bench/catalog-192-preregistration.md`) держит сплиты рядом со старыми,
+    а не поверх них; кропы и остальные данные остаются общими.
+    """
+    raw = os.environ.get("CARLENS_SPLITS_DIR")
+    if raw:
+        return Path(raw).expanduser()
     return data_root() / "splits"
 
 

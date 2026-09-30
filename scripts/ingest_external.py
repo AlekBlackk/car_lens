@@ -33,6 +33,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--mapping", type=Path, default=None, help="таблица соответствия dir_path,model_id"
     )
     парсер.add_argument("--weights", default="yolo11n.pt")
+    парсер.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="куда писать кадры; умолчание — splits/ext-<источник>.parquet (счётчики рядом, .json)",
+    )
     аргументы = парсер.parse_args(argv)
 
     # Проверки аргументов — до загрузки каталога и детектора: ошибка в команде не должна
@@ -69,9 +75,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             for модель, хеш in zip(пул["model_id"], пул["phash"], strict=True)
         ],
     )
-    write_split(итог.frame, splits_dir() / f"ext-{аргументы.source}.parquet")
+    результат = аргументы.out or splits_dir() / f"ext-{аргументы.source}.parquet"
+    write_split(итог.frame, результат)
     счётчики = {"seen": итог.seen, "kept": len(итог.frame), "rejected": итог.rejected}
-    (splits_dir() / f"ext-{аргументы.source}.json").write_text(
+    результат.with_suffix(".json").write_text(
         json.dumps(счётчики, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(f"{аргументы.source}: {счётчики}")

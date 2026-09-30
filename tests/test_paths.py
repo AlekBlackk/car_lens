@@ -35,6 +35,13 @@ def test_подкаталоги_лежат_под_корнем(monkeypatch: pyte
     assert paths.harvest_dir() == Path("/tmp/cl/harvest")
 
 
+def test_splits_dir_подменяется_переменной_среды(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CARLENS_DATA_ROOT", "/tmp/cl")
+    monkeypatch.setenv("CARLENS_SPLITS_DIR", "/tmp/other/splits")
+    assert paths.splits_dir() == Path("/tmp/other/splits")
+    assert paths.crops_dir() == Path("/tmp/cl/crops")
+
+
 def test_ensure_dirs_создаёт_всё_дерево(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("CARLENS_DATA_ROOT", str(tmp_path / "root"))
     paths.ensure_dirs()
