@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -29,14 +30,32 @@ def _м(top1: float = 0.69, n: int = 1523) -> SetMetrics:
     )
 
 
-def test_паритет_читается_из_tflite_fp32(tmp_path: Path) -> None:
+def _паритет(tmp_path: Path) -> Path:
     путь = tmp_path / "parity.json"
     fp32 = {"top1_model": 0.1, "top5_model": 0.2, "top1_brand": 0.3, "per_class_recall": {}}
-    путь.write_text(
-        json.dumps({"runtimes": {"holdout_ru": {"tflite_fp32": fp32, "pytorch": {}}}}),
-        encoding="utf-8",
-    )
-    assert read_parity(путь) == {"top1_model": 0.1, "top5_model": 0.2, "top1_brand": 0.3}
+    int8 = {"top1_model": 0.4, "top5_model": 0.5, "top1_brand": 0.6, "per_class_recall": {}}
+    рантаймы = {"tflite_fp32": fp32, "tflite_int8": int8, "pytorch": {}}
+    путь.write_text(json.dumps({"runtimes": {"holdout_ru": рантаймы}}), encoding="utf-8")
+    return путь
+
+
+def test_паритет_читается_из_рантайма_классификатора_ассетов(tmp_path: Path) -> None:
+    путь = _паритет(tmp_path)
+    assert read_parity(путь, "classifier_fp32.tflite") == {
+        "top1_model": 0.1,
+        "top5_model": 0.2,
+        "top1_brand": 0.3,
+    }
+    assert read_parity(путь, "classifier_int8.tflite") == {
+        "top1_model": 0.4,
+        "top5_model": 0.5,
+        "top1_brand": 0.6,
+    }
+
+
+def test_паритет_не_угадывает_рантайм_незнакомого_классификатора(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match=re.escape("classifier_fp16.tflite")):
+        read_parity(_паритет(tmp_path), "classifier_fp16.tflite")
 
 
 def test_сверка_пропускает_совпадение_и_называет_расхождение() -> None:

@@ -70,10 +70,25 @@ def write_predictions(
     ).to_csv(path, index=False)
 
 
-def read_parity(path: Path) -> dict[str, float]:
-    """Числа паритета того же fp32-классификатора, что стоит на телефоне."""
-    fp32 = json.loads(path.read_text(encoding="utf-8"))["runtimes"]["holdout_ru"]["tflite_fp32"]
-    return {ключ: float(fp32[ключ]) for ключ in ("top1_model", "top5_model", "top1_brand")}
+# Рантайм паритета, чьи числа обязан повторить замер ассетов с этим классификатором.
+PARITY_RUNTIME = {
+    "classifier_fp32.tflite": "tflite_fp32",
+    "classifier_int8.tflite": "tflite_int8",
+}
+
+
+def read_parity(path: Path, classifier_name: str) -> dict[str, float]:
+    """Числа паритета того же классификатора, что лежит в замеряемых ассетах.
+
+    Рантайм выбирается по имени файла классификатора из манифеста ассетов, а не флагом:
+    флаг можно не поменять вместе с ассетами, и тогда сверка упала бы на верном замере
+    либо сравнила бы INT8 с числами fp32.
+    """
+    рантайм = PARITY_RUNTIME.get(classifier_name)
+    if рантайм is None:
+        raise ValueError(f"нет рантайма паритета для классификатора {classifier_name}")
+    числа = json.loads(path.read_text(encoding="utf-8"))["runtimes"]["holdout_ru"][рантайм]
+    return {ключ: float(числа[ключ]) for ключ in ("top1_model", "top5_model", "top1_brand")}
 
 
 def check_reference(full: SetMetrics, expected: Mapping[str, tuple[float, float]]) -> None:
@@ -192,7 +207,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         for имя, маска in маски.items()
     }
 
-    паритет = read_parity(аргументы.parity)
+    паритет = read_parity(аргументы.parity, классификатор.name)
     ожидания: dict[str, tuple[float, float]] = {
         "top1_model": (паритет["top1_model"], 1e-9),
         "top5_model": (паритет["top5_model"], 1e-9),
