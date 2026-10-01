@@ -6,9 +6,9 @@ GPU-делегат считает активации в fp16, поэтому т�
 а этот модуль ставит их против индекса, порогов и негативов тем же правилом, что приёмка и
 телефон (`training.calibration.decide`).
 
-Две подкоманды. `pack` собирает кропы знакомых (релевантный набор `holdout_ru`) и уличных
-негативов в один несжатый zip, который кладётся на телефон через adb. `report` читает файлы
-эмбеддингов, снятые тестом, и пишет отчёт с гейтом.
+Две подкоманды. `pack` собирает кропы знакомых (релевантный набор `holdout_ru` и, если нужно,
+целые доп. сплиты) и уличных негативов в один несжатый zip, который кладётся на телефон через
+adb. `report` читает файлы эмбеддингов, снятые тестом, и пишет отчёт с гейтом.
 
 Пороги гейта записаны в `bench/gpu-classifier-preregistration.md` до замера и продублированы
 константами: менять их после замера нельзя.
@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from pipeline.index_format import read_index, verify_meta
 from pipeline.knn import top2_with_sims
@@ -207,9 +208,18 @@ def render_report(
     return "\n".join(строки)
 
 
-def _rows(holdout: Path, relevance: Path, street: Path) -> list[dict[str, Any]]:
-    """Порядок строк: знакомые, потом негативы — как в `order.csv` и в файлах эмбеддингов."""
-    знакомые = relevant_known(holdout, relevance)
+def _rows(
+    holdout: Path, relevance: Path, street: Path, extra_known: Sequence[Path] = ()
+) -> list[dict[str, Any]]:
+    """Порядок строк: знакомые, потом негативы — как в `order.csv` и в файлах эмбеддингов.
+
+    `extra_known` — сплиты, чьи кадры целиком знакомые (проверка новых классов: у них нет
+    разметки релевантности).
+    """
+    знакомые = pd.concat(
+        [relevant_known(holdout, relevance), *(read_split(путь) for путь in extra_known)],
+        ignore_index=True,
+    )
     улица = read_split(street)
     строки: list[dict[str, Any]] = [
         {"part": PART_KNOWN, "crop_path": str(путь), "key": str(ключ), "class_idx": int(класс)}
@@ -224,10 +234,17 @@ def _rows(holdout: Path, relevance: Path, street: Path) -> list[dict[str, Any]]:
     return строки
 
 
-def pack(holdout: Path, relevance: Path, street: Path, crops_root: Path, out_dir: Path) -> int:
+def pack(
+    holdout: Path,
+    relevance: Path,
+    street: Path,
+    crops_root: Path,
+    out_dir: Path,
+    extra_known: Sequence[Path] = (),
+) -> int:
     """Кропы одним несжатым zip и `order.csv`; имя записи — номер строки, порядок сортируемый."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    строки = _rows(holdout, relevance, street)
+    строки = _rows(holdout, relevance, street, extra_known)
     with zipfile.ZipFile(out_dir / "crops.zip", "w", compression=zipfile.ZIP_STORED) as архив:
         for номер, строка in enumerate(строки):
             путь = crops_root / строка["crop_path"]
@@ -284,6 +301,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     упаковать.add_argument("--street", type=Path, default=splits_dir() / "negatives-street.parquet")
     упаковать.add_argument("--crops-root", type=Path, default=harvest_dir() / "crops")
     упаковать.add_argument(
+        "--extra-known",
+        type=Path,
+        nargs="*",
+        default=[],
+        help="сплиты, целиком идущие в знакомые (например, eval-new.parquet)",
+    )
+    упаковать.add_argument(
         "--out", type=Path, required=True, help="каталог для crops.zip и order.csv"
     )
     отчёт = подкоманды.add_parser("report", help="посчитать гейт по файлам эмбеддингов")
@@ -299,6 +323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             аргументы.street,
             аргументы.crops_root,
             аргументы.out,
+            аргументы.extra_known,
         )
         print(f"упаковано {число} кропов в {аргументы.out}")
         return 0

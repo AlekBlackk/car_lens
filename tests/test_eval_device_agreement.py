@@ -5,10 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
+from pipeline.schema import COLUMNS, write_split
 from training.eval_device_agreement import (
     Embeddings,
+    _rows,
     measure_agreement,
     read_embeddings,
     verdict,
@@ -77,3 +80,49 @@ def test_чтение_эмбеддингов_ловит_чужую_длину(tm
     assert read_embeddings(путь, 3, 4).shape == (3, 4)
     with pytest.raises(ValueError, match="ожидалось 4×4"):
         read_embeddings(путь, 4, 4)
+
+
+def _сплит(путь: Path, строки: list[tuple[str, int]]) -> Path:
+    кадры = pd.DataFrame(
+        [
+            {
+                "photo_id": photo_id,
+                "listing_id": photo_id,
+                "source": "mad_cars",
+                "crop_path": f"{photo_id}.jpg",
+                "brand": "Audi",
+                "model_id": "audi__a3",
+                "class_idx": класс,
+                "body_style": None,
+                "year": None,
+                "bbox": [0.0, 0.0, 10.0, 10.0],
+                "bbox_area_frac": 0.5,
+                "det_conf": 0.9,
+                "phash": 0,
+                "raw_model_string": None,
+                "is_multi_car": False,
+            }
+            for photo_id, класс in строки
+        ],
+        columns=list(COLUMNS),
+    )
+    write_split(кадры, путь)
+    return путь
+
+
+def test_доп_знакомые_идут_между_релевантными_и_негативами(tmp_path: Path) -> None:
+    holdout = _сплит(tmp_path / "holdout.parquet", [("h1", 1), ("h2", 2)])
+    новые = _сплит(tmp_path / "eval-new.parquet", [("n1", 7)])
+    улица = _сплит(tmp_path / "street.parquet", [("s1", 0)])
+    релевантность = tmp_path / "relevance.csv"
+    релевантность.write_text(
+        "photo_id,verdict,top_down\nh1,relevant,false\nh2,unsure,false\n", encoding="utf-8"
+    )
+
+    строки = _rows(holdout, релевантность, улица, [новые])
+
+    assert [(с["part"], с["key"], с["class_idx"]) for с in строки] == [
+        ("known", "h1", 1),
+        ("known", "n1", 7),
+        ("street", "s1", -1),
+    ]
