@@ -121,6 +121,7 @@ def cross_fit(
     max_knots: int,
     noncar: Scores | None = None,
     noncar_a: np.ndarray | None = None,
+    max_fpr_noncar: float | None = None,
 ) -> list[FoldReport]:
     стороны: list[FoldReport] = []
     for имя, маска_з, маска_ч in (("A", known_a, neg_a), ("B", ~known_a, ~neg_a)):
@@ -136,6 +137,7 @@ def cross_fit(
             max_error=max_error,
             max_fpr=max_fpr,
             extra_negatives=None if учёба_н is None else {"не-машины": учёба_н},
+            extra_max_fpr=max_fpr_noncar,
         )
         if точка is None:
             стороны.append(FoldReport(имя, None, None, None))
@@ -297,6 +299,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     парсер.add_argument("--crops-root", type=Path, default=harvest_dir() / "crops")
     парсер.add_argument("--max-error", type=float, default=0.15)
     парсер.add_argument("--max-fpr", type=float, default=0.15)
+    парсер.add_argument(
+        "--max-fpr-noncar",
+        type=float,
+        default=None,
+        help="предел FPR не-машин (по умолчанию --max-fpr)",
+    )
     парсер.add_argument("--max-knots", type=int, default=32)
     парсер.add_argument("--seed", type=int, default=DEFAULT_SEED)
     парсер.add_argument("--batch-size", type=int, default=32)
@@ -351,6 +359,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_knots=аргументы.max_knots,
         noncar=оценки_не_машин,
         noncar_a=половина_н,
+        max_fpr_noncar=аргументы.max_fpr_noncar,
     )
     итог = select_pair(
         знакомые,
@@ -358,6 +367,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_error=аргументы.max_error,
         max_fpr=аргументы.max_fpr,
         extra_negatives={"не-машины": оценки_не_машин},
+        extra_max_fpr=аргументы.max_fpr_noncar,
     )
     вердикт = release_verdict(стороны, итог)
     узлы = _шкала(знакомые, итог, аргументы.max_knots) if итог is not None else None
@@ -370,6 +380,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "noncar_sha256": _sha256(аргументы.noncar),
         "seed": str(аргументы.seed),
         "max_error / max_fpr": f"{аргументы.max_error} / {аргументы.max_fpr}",
+        "max_fpr не-машин": str(
+            аргументы.max_fpr if аргументы.max_fpr_noncar is None else аргументы.max_fpr_noncar
+        ),
     }
     счётчики = {"знакомые (holdout_ru без многомашинных)": len(эталон)}
     for вид in sorted(set(виды)):

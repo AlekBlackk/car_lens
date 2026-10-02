@@ -122,26 +122,29 @@ def select_pair(
     max_error: float,
     max_fpr: float,
     extra_negatives: Mapping[str, Scores] | None = None,
+    extra_max_fpr: float | None = None,
     sim_grid: np.ndarray = SIM_GRID,
     margin_grid: np.ndarray = MARGIN_GRID,
 ) -> Operating | None:
     """Допустимая пара с наибольшим покрытием; при равенстве — первая по сетке.
 
-    `extra_negatives` — группы негативов сверх основной (не-машины): у каждой FPR тоже не выше
-    `max_fpr`. Отчётная `fpr` точки остаётся основной группы.
+    `extra_negatives` — группы негативов сверх основной (не-машины): у каждой FPR не выше
+    `extra_max_fpr` (по умолчанию `max_fpr`). Отчётная `fpr` точки остаётся основной группы.
 
     Сетка обходится по возрастанию `sim_min`, затем `margin_min`, а замена — только на
     строго большее покрытие: так тай-брейк «меньший порог» выходит из порядка обхода.
     Точка без единого показанного ответа недопустима — «молчать всегда» ошибок не делает.
     """
     лучшая: Operating | None = None
+    предел_лишних = max_fpr if extra_max_fpr is None else extra_max_fpr
     for sim_min in sim_grid:
         for margin_min in margin_grid:
             точка = operating_point(known, negatives, float(sim_min), float(margin_min))
             if точка.shown == 0 or точка.error > max_error or точка.fpr > max_fpr:
                 continue
             if any(
-                operating_point(known, группа, float(sim_min), float(margin_min)).fpr > max_fpr
+                operating_point(known, группа, float(sim_min), float(margin_min)).fpr
+                > предел_лишних
                 for группа in (extra_negatives or {}).values()
             ):
                 continue
