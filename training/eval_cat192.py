@@ -128,6 +128,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     парсер.add_argument("--eval-new", type=Path, default=splits_dir() / "eval-new.parquet")
     парсер.add_argument("--eval-old", type=Path, default=splits_dir() / "eval-old.parquet")
     парсер.add_argument(
+        "--eval-studio",
+        type=Path,
+        default=None,
+        help="студийная проверка новых классов (`bench/catalog-192-studio-preregistration.md`)",
+    )
+    парсер.add_argument(
         "--names", type=Path, default=Path("catalog/external/mad_cars_cat192_eval_new.csv")
     )
     парсер.add_argument("--negatives", type=Path, default=splits_dir() / "negatives.parquet")
@@ -162,7 +168,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     ошибки: dict[str, list[tuple[str, str, int]]] = {}
     по_названиям: pd.DataFrame | None = None
     ответы: list[pd.DataFrame] = []
-    for имя, путь in (("eval-new", аргументы.eval_new), ("eval-old", аргументы.eval_old)):
+    наборы = [("eval-new", аргументы.eval_new), ("eval-old", аргументы.eval_old)]
+    if аргументы.eval_studio is not None:
+        наборы.append(("eval-studio", аргументы.eval_studio))
+    for имя, путь in наборы:
         кадры = read_split(путь).reset_index(drop=True)
         истина = truth_slots(кадры, члены, class_ids)
         if истина is None:
@@ -211,7 +220,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             )
         )
-    вердикт = verdict(метрики["eval-new"], метрики["eval-old"]) if len(метрики) == 2 else None
+    вердикт = (
+        verdict(метрики["eval-new"], метрики["eval-old"])
+        if {"eval-new", "eval-old"} <= метрики.keys()
+        else None
+    )
     write_generated_section(
         аргументы.report,
         render_report(
@@ -223,6 +236,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "classifier_sha256": file_sha256(классификатор),
                 "eval_new_sha256": file_sha256(аргументы.eval_new),
                 "eval_old_sha256": file_sha256(аргументы.eval_old),
+                **(
+                    {"eval_studio_sha256": file_sha256(аргументы.eval_studio)}
+                    if аргументы.eval_studio is not None
+                    else {}
+                ),
                 "negatives_sha256": file_sha256(аргументы.negatives),
                 "thresholds": f"{пороги['sim_min']} / {пороги['margin_min']}",
             },
