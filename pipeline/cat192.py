@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -39,21 +41,23 @@ def remap_class_idx(frame: pd.DataFrame, catalog: Catalog) -> pd.DataFrame:
     return результат
 
 
-def split_source_frames(external: pd.DataFrame, new_mad: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Внешние кадры пула 0.5 по источникам, кадры MAD-Cars пересобраны по новым классам.
+def split_source_frames(
+    external: pd.DataFrame, new: pd.DataFrame, source: str = "mad_cars"
+) -> dict[str, pd.DataFrame]:
+    """Внешние кадры пула по источникам, кадры источника `source` пересобраны по новым классам.
 
-    Классы, у которых есть новые кадры MAD-Cars (новые и четыре преемника), теряют старые
-    кадры этого источника: их выборка тянется заново из объединения названий. Остальные
-    источники и остальные классы идут как были.
+    Классы, у которых есть новые кадры этого источника, теряют его старые кадры: выборка
+    тянется заново (для MAD-Cars — из объединения названий). Остальные источники и остальные
+    классы идут как были.
     """
-    пересобираемые = set(new_mad["class_idx"])
-    старые_mad = external[external["source"] == "mad_cars"]
-    оставленные = старые_mad[~старые_mad["class_idx"].isin(пересобираемые)]
+    пересобираемые = set(new["class_idx"])
+    старые = external[external["source"] == source]
+    оставленные = старые[~старые["class_idx"].isin(пересобираемые)]
     кадры = {
-        источник: external[external["source"] == источник]
-        for источник in sorted(set(external["source"]) - {"mad_cars"})
+        имя: external[external["source"] == имя]
+        for имя in sorted(set(external["source"]) - {source})
     }
-    кадры["mad_cars"] = pd.concat([оставленные, new_mad], ignore_index=True)
+    кадры[source] = pd.concat([оставленные, new], ignore_index=True)
     return кадры
 
 
@@ -69,12 +73,13 @@ class PoolResult:
 
 def build_external_pool(
     old_external: pd.DataFrame,
-    new_mad: pd.DataFrame,
+    new: pd.DataFrame,
     catalog: Catalog,
     *,
     max_per_class: int,
     own_caps: Mapping[str, int],
     seed: int,
+    source: str = "mad_cars",
 ) -> PoolResult:
     """Склейка внешних источников тем же `merge_external`, что у пула 0.5.
 
@@ -82,9 +87,9 @@ def build_external_pool(
     это проверяется, а не предполагается: изменившийся класс вне пересобираемых роняет сборку.
     """
     старое = remap_class_idx(old_external, catalog)
-    новое = remap_class_idx(new_mad, catalog)
+    новое = remap_class_idx(new, catalog)
     итог, отказы = merge_external(
-        split_source_frames(старое, новое),
+        split_source_frames(старое, новое, source),
         max_per_class=max_per_class,
         seed=seed,
         own_caps=own_caps,
@@ -130,3 +135,44 @@ def leaking_cars(
         if i < граница <= j:
             утекли.add(str(листинги[i]))
     return frozenset(утекли)
+
+
+def split_groups(
+    group_classes: Mapping[str, str], *, salt: str, min_groups: int = 4, share: int = 4
+) -> frozenset[str]:
+    """Отложенные группы: у класса с `min_groups` группами и больше — каждая `share`-я.
+
+    Порядок внутри класса — по `sha256(dir_path + salt)`, от порядка словаря результат не зависит.
+    Отложенная группа — другое поколение или кузов, а не другие кадры того же набора: проверка
+    по ней жёсткая и сознательно такая (`bench/catalog-192-studio-preregistration.md`).
+    """
+    по_классам: defaultdict[str, list[str]] = defaultdict(list)
+    for папка, класс in group_classes.items():
+        по_классам[класс].append(папка)
+    отложены: set[str] = set()
+    for папки in по_классам.values():
+        if len(папки) < min_groups:
+            continue
+        упорядоченные = sorted(
+            папки, key=lambda папка: hashlib.sha256((папка + salt).encode()).hexdigest()
+        )
+        отложены.update(упорядоченные[: len(папки) // share])
+    return frozenset(отложены)
+
+
+def without_close_frames(
+    frames: pd.DataFrame, reference_hashes: Sequence[int], *, hamming: int = DEFAULT_PHASH_HAMMING
+) -> pd.DataFrame:
+    """Кадры, у которых нет близкого по pHash в `reference_hashes` (без оглядки на класс)."""
+    граница = len(frames)
+    хеши = [*(int(хеш) for хеш in frames["phash"]), *reference_hashes]
+    близкие = {i for i, j in close_pairs(хеши, hamming) if i < граница <= j}
+    return frames.iloc[[i for i in range(граница) if i not in близкие]].reset_index(drop=True)
+
+
+def cap_per_class(frames: pd.DataFrame, cap: int, *, seed: int) -> pd.DataFrame:
+    """Не более `cap` кадров на класс, по наименьшему `bucket_of(photo_id, seed)`."""
+    ключи = frames["photo_id"].map(lambda photo_id: bucket_of(str(photo_id), seed))
+    упорядочено = frames.assign(_ключ=ключи).sort_values(["class_idx", "_ключ"], kind="stable")
+    оставить = упорядочено.groupby("class_idx", sort=False).cumcount() < cap
+    return упорядочено.loc[оставить, list(COLUMNS)].reset_index(drop=True)

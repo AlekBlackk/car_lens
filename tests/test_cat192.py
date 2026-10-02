@@ -11,12 +11,16 @@ import pytest
 from pipeline.cat192 import (
     Cat192Error,
     build_external_pool,
+    cap_per_class,
     leaking_cars,
     pick_one_frame_per_car,
     remap_class_idx,
+    split_groups,
+    without_close_frames,
 )
 from pipeline.catalog import Catalog, load_catalog
 from pipeline.schema import COLUMNS
+from scripts.build_cat192_splits import main as build_main
 from scripts.build_cat192_splits import own_car_reason
 
 YAML = """
@@ -176,3 +180,84 @@ def test_свой_негатив_по_игле_и_по_папке_mad() -> None:
         )
         is None
     )
+
+
+def test_отложенные_группы_четверть_и_только_у_классов_от_четырёх_групп() -> None:
+    группы = {f"A4_{n}": "audi__a4" for n in range(8)} | {f"A6_{n}": "audi__a6" for n in range(3)}
+    отложены = split_groups(группы, salt="s")
+    assert len(отложены) == 2
+    assert all(папка.startswith("A4_") for папка in отложены)
+    assert split_groups(dict(reversed(группы.items())), salt="s") == отложены
+
+
+def test_соль_меняет_отложенные_группы() -> None:
+    группы = {f"A4_{n}": "audi__a4" for n in range(40)}
+    assert split_groups(группы, salt="s1") != split_groups(группы, salt="s2")
+
+
+def test_кадры_близкие_к_эталону_выбрасываются() -> None:
+    кадры = кадр(
+        строка("e:1", "audi__a4", далёкий(0)),
+        строка("e:2", "audi__a4", далёкий(1)),
+    )
+    итог = without_close_frames(кадры, [далёкий(0) ^ 1, далёкий(5)])
+    assert list(итог["photo_id"]) == ["e:2"]
+
+
+def test_потолок_на_класс_детерминирован() -> None:
+    кадры = кадр(*(строка(f"e:{n}", "audi__a4", далёкий(n)) for n in range(5)))
+    первый = cap_per_class(кадры, 2, seed=3)
+    второй = cap_per_class(кадры.iloc[::-1], 2, seed=3)
+    assert len(первый) == 2
+    assert set(первый["photo_id"]) == set(второй["photo_id"])
+
+
+def test_новый_источник_пересобирает_только_классы_с_новыми_кадрами(каталог: Catalog) -> None:
+    старые = кадр(
+        строка("mad_cars:a3", "audi__a3", далёкий(0)),
+        строка("mad_cars:a4", "audi__a4", далёкий(1)),
+    )
+    новые = кадр(строка("autoevolution:a3", "audi__a3", далёкий(2)))
+    итог = build_external_pool(
+        старые,
+        новые,
+        каталог,
+        max_per_class=150,
+        own_caps={"mad_cars": 150},
+        seed=1,
+        source="autoevolution",
+    )
+    assert set(итог.external["photo_id"]) == {"mad_cars:a3", "mad_cars:a4", "autoevolution:a3"}
+    assert итог.changed_classes == {0}
+
+
+def test_groups_делит_только_группы_новых_классов(tmp_path: Path) -> None:
+    таблица = tmp_path / "ae.csv"
+    строки = ["dir_path,model_id,brand,model,years,images"]
+    строки += [f"A3_{n},audi__a3,Audi,a3,,10" for n in range(8)]
+    строки += [f"A4_{n},audi__a4,Audi,a4,,10" for n in range(8)]
+    таблица.write_text("\n".join(строки) + "\n", encoding="utf-8")
+    новые = tmp_path / "new.txt"
+    новые.write_text("# новые\naudi__a3\n", encoding="utf-8")
+    обучение, проверка = tmp_path / "train.csv", tmp_path / "eval.csv"
+
+    build_main(
+        [
+            "groups",
+            "--mapping",
+            str(таблица),
+            "--new-classes",
+            str(новые),
+            "--train-map",
+            str(обучение),
+            "--eval-map",
+            str(проверка),
+        ]
+    )
+
+    в_обучении = pd.read_csv(обучение)["dir_path"]
+    в_проверке = pd.read_csv(проверка)["dir_path"]
+    assert len(в_проверке) == 2
+    assert set(в_обучении).isdisjoint(в_проверке)
+    assert len(в_обучении) + len(в_проверке) == 8
+    assert all(папка.startswith("A3_") for папка in [*в_обучении, *в_проверке])

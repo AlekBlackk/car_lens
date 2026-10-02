@@ -7,6 +7,9 @@
 `compose` — после приёма: внешний пул 0.5 с пересобранными классами, `pool-plus` и две проверки
 (`eval-new`, `eval-old`) по одному кадру на машину, без утечки в обучение.
 
+`groups` и `studio` — модель 0.6.1 (`bench/catalog-192-studio-preregistration.md`): разбиение
+групп autoevolution новых классов на обучающие и отложенные и сборка сплитов с этими кадрами.
+
 Старые сплиты не правятся: всё пишется в `--out`.
 """
 
@@ -15,6 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 from collections.abc import Collection, Sequence
 from pathlib import Path
 
@@ -22,9 +26,12 @@ import pandas as pd
 
 from pipeline.cat192 import (
     build_external_pool,
+    cap_per_class,
     leaking_cars,
     pick_one_frame_per_car,
     remap_class_idx,
+    split_groups,
+    without_close_frames,
 )
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
 from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, AliasTable, load_alias_table
@@ -43,6 +50,12 @@ NEGATIVE_SETS = ("negatives", "negatives-street")
 POOL_SEED = 1337
 EVAL_SEED = 20260930
 MAD_OWN_CAP = 150
+DEFAULT_AE_MAPPING = Path("catalog/external/autoevolution.csv")
+DEFAULT_NEW_CLASSES = Path("catalog/external/cat192_new_classes.txt")
+STUDIO_SALT = "20261002"
+STUDIO_EVAL_SEED = 20261002
+STUDIO_EVAL_CAP = 40
+UNCHANGED_SPLITS = ("holdout_ru", "negatives", "negatives-street", "eval-new", "eval-old")
 
 
 def own_car_reason(
@@ -150,6 +163,85 @@ def _compose(аргументы: argparse.Namespace) -> int:
     return 0
 
 
+def _groups(аргументы: argparse.Namespace) -> int:
+    новые = {
+        строка.strip()
+        for строка in аргументы.new_classes.read_text(encoding="utf-8").splitlines()
+        if строка.strip() and not строка.startswith("#")
+    }
+    with аргументы.mapping.open(encoding="utf-8", newline="") as файл:
+        читатель = csv.DictReader(файл)
+        колонки = list(читатель.fieldnames or ())
+        строки = [строка for строка in читатель if строка["model_id"] in новые]
+    отложены = split_groups(
+        {строка["dir_path"]: строка["model_id"] for строка in строки}, salt=STUDIO_SALT
+    )
+    for путь, откладываем in ((аргументы.train_map, False), (аргументы.eval_map, True)):
+        with путь.open("w", encoding="utf-8", newline="") as файл:
+            писатель = csv.DictWriter(файл, fieldnames=колонки, lineterminator="\n")
+            писатель.writeheader()
+            писатель.writerows(
+                строка for строка in строки if (строка["dir_path"] in отложены) == откладываем
+            )
+    классы_студии = {строка["model_id"] for строка in строки if строка["dir_path"] in отложены}
+    print(
+        f"групп новых классов {len(строки)}: в обучение {len(строки) - len(отложены)}, "
+        f"отложено {len(отложены)} ({len(классы_студии)} классов имеют студийную проверку)"
+    )
+    return 0
+
+
+def _studio(аргументы: argparse.Namespace) -> int:
+    каталог = load_catalog(DEFAULT_CATALOG_PATH)
+    база = аргументы.base
+    опорные = [
+        int(хеш)
+        for имя in ("eval-new", "eval-old")
+        for хеш in read_split(база / f"{имя}.parquet")["phash"]
+    ]
+    принятые = remap_class_idx(read_split(аргументы.train_ext), каталог)
+    обучение = without_close_frames(принятые, опорные)
+    итог = build_external_pool(
+        read_split(база / "pool-ext.parquet"),
+        обучение,
+        каталог,
+        max_per_class=DEFAULT_MAX_PER_CLASS,
+        own_caps={"mad_cars": MAD_OWN_CAP},
+        seed=POOL_SEED,
+        source="autoevolution",
+    )
+    аргументы.out.mkdir(parents=True, exist_ok=True)
+    write_split(итог.external, аргументы.out / "pool-ext.parquet")
+    пул = pd.concat([read_split(база / "pool-clean.parquet"), итог.external], ignore_index=True)
+    write_split(пул, аргументы.out / "pool-plus.parquet")
+    write_split(read_split(база / "pool-clean.parquet"), аргументы.out / "pool-clean.parquet")
+
+    приняты_студия = remap_class_idx(read_split(аргументы.eval_ext), каталог)
+    без_утечки = without_close_frames(приняты_студия, [int(хеш) for хеш in пул["phash"]])
+    студия = cap_per_class(без_утечки, STUDIO_EVAL_CAP, seed=STUDIO_EVAL_SEED)
+    write_split(студия, аргументы.out / "eval-studio.parquet")
+    for имя in UNCHANGED_SPLITS:
+        shutil.copy2(база / f"{имя}.parquet", аргументы.out / f"{имя}.parquet")
+
+    сводка: dict[str, object] = {
+        "train_ingested": len(принятые),
+        "train_close_to_eval": len(принятые) - len(обучение),
+        "pool_external": len(итог.external),
+        "pool_plus": len(пул),
+        "merge_rejected": итог.rejected,
+        "changed_classes": len(итог.changed_classes),
+        "studio_ingested": len(приняты_студия),
+        "studio_leaked": len(приняты_студия) - len(без_утечки),
+        "studio_frames": len(студия),
+        "studio_classes": int(студия["class_idx"].nunique()),
+    }
+    (аргументы.out / "studio.json").write_text(
+        json.dumps(сводка, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(json.dumps(сводка, ensure_ascii=False))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     парсер = argparse.ArgumentParser(description="Сплиты каталога 192")
     команды = парсер.add_subparsers(dest="command", required=True)
@@ -167,6 +259,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     сборка.add_argument("--eval-new-ext", type=Path, required=True)
     сборка.add_argument("--eval-old-ext", type=Path, required=True)
     сборка.set_defaults(run=_compose)
+    группы = команды.add_parser(
+        "groups", help="разбить группы autoevolution на обучение и проверку"
+    )
+    группы.add_argument("--mapping", type=Path, default=DEFAULT_AE_MAPPING)
+    группы.add_argument("--new-classes", type=Path, default=DEFAULT_NEW_CLASSES)
+    группы.add_argument("--train-map", type=Path, required=True)
+    группы.add_argument("--eval-map", type=Path, required=True)
+    группы.set_defaults(run=_groups)
+    студия = команды.add_parser("studio", help="сплиты 0.6.1: пул с autoevolution и проверка")
+    студия.add_argument("--base", type=Path, required=True, help="сплиты 0.6.0 (`compose`)")
+    студия.add_argument("--train-ext", type=Path, required=True)
+    студия.add_argument("--eval-ext", type=Path, required=True)
+    студия.add_argument("--out", type=Path, required=True)
+    студия.set_defaults(run=_studio)
     аргументы = парсер.parse_args(argv)
     return int(аргументы.run(аргументы))
 
