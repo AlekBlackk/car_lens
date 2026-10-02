@@ -733,3 +733,206 @@ VOLKSWAGEN_Transporter_Kombi_T6_2015Present,volkswagen__transporter,VOLKSWAGEN,V
 VOLVO_XC60_20082013,volvo__xc60,VOLVO,VOLVO XC60,2008-2024,59
 VOLVO_XC60_20132017,volvo__xc60,VOLVO,VOLVO XC60,2008-2024,36
 VOLVO_XC60_2017Present,volvo__xc60,VOLVO,VOLVO XC60,2008-2024,59
+2008_Audi_A3_Sportback,audi__a3,Audi,a3,,60
+AUDI_A3_19962003,audi__a3,Audi,a3,1996-2003,28
+AUDI_A3_20032005,audi__a3,Audi,a3,2003-2005,54
+AUDI_A3_20052008,audi__a3,Audi,a3,2005-2008,34
+AUDI_A3_20082012,audi__a3,Audi,a3,2008-2012,33
+AUDI_A3_20162017,audi__a3,Audi,a3,2016-2017,20
+AUDI_A3_Hatchback_3_doors_20122016,audi__a3,Audi,a3,2012-2016,87
+AUDI_A3_Sedan_20132016,audi__a3,Audi,a3,2013-2016,44
+AUDI_A3_Sedan_20162020,audi__a3,Audi,a3,2016-2020,25
+AUDI_A3_Sedan_2020Present,audi__a3,Audi,a3,2020-Present,34
+AUDI_A3_Sportback_19992003,audi__a3,Audi,a3,1999-2003,17
+AUDI_A3_Sportback_20042008,audi__a3,Audi,a3,2004-2008,48
+AUDI_A3_Sportback_20162020,audi__a3,Audi,a3,2016-2020,76
+AUDI_A3_Sportback_2020Present,audi__a3,Audi,a3,2020-Present,42
+AUDI_A3_Sportback_5_doors_20122016,audi__a3,Audi,a3,2012-2016,28
+AUDI_A3_Sportback_etron_20132016,audi__a3,Audi,a3,2013-2016,36
+AUDI_A3_Sportback_etron_2016Present,audi__a3,Audi,a3,2016-Present,19
+AUDI_A3_Sportback_gtron_20132016,audi__a3,Audi,a3,2013-2016,19
+AUDI_A5_20072011,audi__a5,Audi,a5,2007-2011,90
+AUDI_A5_2016Present,audi__a5,Audi,a5,2016-Present,41
+AUDI_A5_Sportback_20092011,audi__a5,Audi,a5,2009-2011,53
+AUDI_A5_Sportback_2011Present,audi__a5,Audi,a5,2011-Present,32
+AUDI_A5_Sportback_20162019,audi__a5,Audi,a5,2016-2019,28
+AUDI_A5_Sportback_2019Present,audi__a5,Audi,a5,2019-Present,17
+AUDI_A5__20112016,audi__a5,Audi,a5,2011-2016,40
+AUDI_Q3_20112015,audi__q3,Audi,q3,2011-2015,59
+AUDI_Q3_2018Present,audi__q3,Audi,q3,2018-Present,87
+AUDI_Q3_Facelift_20152017,audi__q3,Audi,q3,2015-2017,36
+AUDI_Q3_Facelift_20162018,audi__q3,Audi,q3,2016-2018,43
+AUDI_Q3_Sportback_2019Present,audi__q3,Audi,q3,2019-Present,48
+AUDI_Q7_20062009,audi__q7,Audi,q7,2006-2009,23
+AUDI_Q7_20092015,audi__q7,Audi,q7,2009-2015,61
+AUDI_Q7_20152019,audi__q7,Audi,q7,2015-2019,36
+AUDI_Q7_2019Present,audi__q7,Audi,q7,2019-Present,50
+2004_BMW_1_Series_5_doors,bmw__1_series,BMW,1_series,,68
+2007_BMW_1_Series_3_doors_E81,bmw__1_series,BMW,1_series,,52
+BMW_1_Series_3_doors_F21_20122015,bmw__1_series,BMW,1_series,2012-2015,80
+BMW_1_Series_3_doors_LCI_F21_20152017,bmw__1_series,BMW,1_series,2015-2017,99
+BMW_1_Series_E87_20072011,bmw__1_series,BMW,1_series,2007-2011,46
+BMW_1_Series_F20_20112015,bmw__1_series,BMW,1_series,2011-2015,127
+BMW_1_Series_F20_LCI_20172019,bmw__1_series,BMW,1_series,2017-2019,26
+BMW_1_Series_LCI_F20_20152017,bmw__1_series,BMW,1_series,2015-2017,136
+BMW_7_Series_2022Present,bmw__7_series,BMW,7_series,2022-Present,152
+BMW_7_Series_E23_19771986,bmw__7_series,BMW,7_series,1977-1986,35
+BMW_7_Series_E32_19861994,bmw__7_series,BMW,7_series,1986-1994,52
+BMW_7_Series_E38_19941998,bmw__7_series,BMW,7_series,1994-1998,41
+BMW_7_Series_E38_19982001,bmw__7_series,BMW,7_series,1998-2001,55
+BMW_7_Series_E65E66_20012005,bmw__7_series,BMW,7_series,2001-2005,63
+BMW_7_Series_E65E66_20052007,bmw__7_series,BMW,7_series,2005-2007,59
+BMW_7_Series_F0102_20082012,bmw__7_series,BMW,7_series,2008-2012,86
+BMW_7_Series_F0102_Facelift_20122016,bmw__7_series,BMW,7_series,2012-2016,73
+BMW_7_Series_G11_LCI_20192022,bmw__7_series,BMW,7_series,2019-2022,88
+2010_BMW_X1,bmw__x1,BMW,x1,,60
+2013_BMW_X1,bmw__x1,BMW,x1,,19
+BMW_X1_20162019,bmw__x1,BMW,x1,2016-2019,69
+BMW_X1_20192022,bmw__x1,BMW,x1,2019-2022,40
+BMW_X1_2022Present,bmw__x1,BMW,x1,2022-Present,100
+BMW_X3_2021Present,bmw__x3,BMW,x3,2021-Present,77
+BMW_X3_E83_20042007,bmw__x3,BMW,x3,2004-2007,68
+BMW_X3_E83_20072010,bmw__x3,BMW,x3,2007-2010,32
+BMW_X3_F25_20102013,bmw__x3,BMW,x3,2010-2013,123
+BMW_X3_F25_20142017,bmw__x3,BMW,x3,2014-2017,25
+BMW_X3_G01_20172021,bmw__x3,BMW,x3,2017-2021,55
+BMW_X4_20142018,bmw__x4,BMW,x4,2014-2018,68
+BMW_X4_20182021,bmw__x4,BMW,x4,2018-2021,143
+BMW_X4_2021Present,bmw__x4,BMW,x4,2021-Present,28
+BMW_X6_E71_20082009,bmw__x6,BMW,x6,2008-2009,20
+BMW_X6_E71_20102014,bmw__x6,BMW,x6,2010-2014,62
+BMW_X6_F16_20142019,bmw__x6,BMW,x6,2014-2019,67
+2024_Ford_Explorer_EU,ford__explorer,Ford,explorer,,30
+FORD_Explorer_20032005,ford__explorer,Ford,explorer,2003-2005,37
+FORD_Explorer_20052009,ford__explorer,Ford,explorer,2005-2009,28
+FORD_Explorer_20102015,ford__explorer,Ford,explorer,2010-2015,72
+FORD_Explorer_20152019,ford__explorer,Ford,explorer,2015-2019,28
+FORD_Explorer_2019Present,ford__explorer,Ford,explorer,2019-Present,65
+HYUNDAI_i30_20072011,hyundai__i30,Hyundai,i30,2007-2011,82
+HYUNDAI_i30_2012Present,hyundai__i30,Hyundai,i30,2012-Present,87
+HYUNDAI_i30_20162018,hyundai__i30,Hyundai,i30,2016-2018,53
+HYUNDAI_i30_20182020,hyundai__i30,Hyundai,i30,2018-2020,18
+HYUNDAI_i30_Estate_20082012,hyundai__i30,Hyundai,i30,2008-2012,43
+HYUNDAI_i30_Estate_20182020,hyundai__i30,Hyundai,i30,2018-2020,40
+HYUNDAI_i30_Fastback_20172019,hyundai__i30,Hyundai,i30,2017-2019,46
+HYUNDAI_i30_Tourer_20172019,hyundai__i30,Hyundai,i30,2017-2019,23
+HYUNDAI_i30_Wagon_20122017,hyundai__i30,Hyundai,i30,2012-2017,44
+2011_Hyundai_Sonata_Hybrid,hyundai__sonata,Hyundai,sonata,,36
+2020_Hyundai_Sonata,hyundai__sonata,Hyundai,sonata,,68
+HYUNDAI_Sonata_19931996,hyundai__sonata,Hyundai,sonata,1993-1996,19
+HYUNDAI_Sonata_20012004,hyundai__sonata,Hyundai,sonata,2001-2004,21
+HYUNDAI_Sonata_20042008,hyundai__sonata,Hyundai,sonata,2004-2008,22
+HYUNDAI_Sonata_20082009,hyundai__sonata,Hyundai,sonata,2008-2009,48
+HYUNDAI_Sonata_20142017,hyundai__sonata,Hyundai,sonata,2014-2017,57
+HYUNDAI_Sonata_20172019,hyundai__sonata,Hyundai,sonata,2017-2019,51
+HYUNDAI_Sonata_Hybrid_20152017,hyundai__sonata,Hyundai,sonata,2015-2017,24
+HYUNDAI_Sonata__i45_20092014,hyundai__sonata,Hyundai,sonata,2009-2014,53
+KIA_Carnival_2021Present,kia__carnival,Kia,carnival,2021-Present,56
+2011_Kia_Picanto_5_doors,kia__picanto,Kia,picanto,,68
+KIA_Picanto_5_doors_20152017,kia__picanto,Kia,picanto,2015-2017,45
+KIA_Picanto_5_doors_20172020,kia__picanto,Kia,picanto,2017-2020,45
+KIA_Picanto_5_doors_2020Present,kia__picanto,Kia,picanto,2020-Present,28
+KIA_Picanto__3_doors_20112015,kia__picanto,Kia,picanto,2011-2015,32
+LAND_ROVER_Range_Rover_Evoque_5_Door_20112015,land_rover__evoque,Land Rover,evoque,2011-2015,65
+LAND_ROVER_Range_Rover_Evoque_5_Door_20152018,land_rover__evoque,Land Rover,evoque,2015-2018,17
+LAND_ROVER_Range_Rover_Evoque__2018Present,land_rover__evoque,Land Rover,evoque,2018-Present,40
+LAND_ROVER_Freelander_20032007,land_rover__freelander,Land Rover,freelander,2003-2007,20
+LAND_ROVER_Freelander__LR2_20062009,land_rover__freelander,Land Rover,freelander,2006-2009,24
+LAND_ROVER_Freelander__LR2_20092014,land_rover__freelander,Land Rover,freelander,2009-2014,64
+2013_Range_Rover_Hybrid,land_rover__range_rover,Land Rover,range_rover,,16
+LAND_ROVER_Range_Rover_20092012,land_rover__range_rover,Land Rover,range_rover,2009-2012,26
+LAND_ROVER_Range_Rover_20132017,land_rover__range_rover,Land Rover,range_rover,2013-2017,112
+LAND_ROVER_Range_Rover_20172021,land_rover__range_rover,Land Rover,range_rover,2017-2021,24
+LAND_ROVER_Range_Rover_SWB_2021Present,land_rover__range_rover,Land Rover,range_rover,2021-Present,26
+2023LAND_ROVER_Range_Rover_Sport,land_rover__range_rover_sport,Land Rover,range_rover_sport,,48
+LAND_ROVER_Range_Rover_Sport_20052009,land_rover__range_rover_sport,Land Rover,range_rover_sport,2005-2009,46
+LAND_ROVER_Range_Rover_Sport_20092013,land_rover__range_rover_sport,Land Rover,range_rover_sport,2009-2013,33
+LAND_ROVER_Range_Rover_Sport_20132017,land_rover__range_rover_sport,Land Rover,range_rover_sport,2013-2017,50
+LAND_ROVER_Range_Rover_Sport_20172022,land_rover__range_rover_sport,Land Rover,range_rover_sport,2017-2022,19
+LAND_ROVER_Range_Rover_Sport_HST_2019Present,land_rover__range_rover_sport,Land Rover,range_rover_sport,2019-Present,42
+2020_MercedesBenz_GLS,mercedes_benz__gl,Mercedes-Benz,gl,,76
+MERCEDES_BENZ_GLKlasse_X164_20062009,mercedes_benz__gl,Mercedes-Benz,gl,2006-2009,64
+MERCEDES_BENZ_GLKlasse_X164_20092012,mercedes_benz__gl,Mercedes-Benz,gl,2009-2012,50
+MERCEDES_BENZ_GLSClass_X166_20162019,mercedes_benz__gl,Mercedes-Benz,gl,2016-2019,76
+MERCEDES_BENZ_GLC_X253_20152019,mercedes_benz__glc,Mercedes-Benz,glc,2015-2019,96
+MERCEDES_BENZ_GLC_X253_20192022,mercedes_benz__glc,Mercedes-Benz,glc,2019-2022,76
+MERCEDES_BENZ_GLC_X254_2022Present,mercedes_benz__glc,Mercedes-Benz,glc,2022-Present,75
+MERCEDES_BENZ_GLKKlasse_X204_2008Present,mercedes_benz__glc,Mercedes-Benz,glc,2008-Present,122
+MERCEDES_BENZ_GLK_20122016,mercedes_benz__glc,Mercedes-Benz,glc,2012-2016,79
+MERCEDES_BENZ_SClass_W223__V223_2020Present,mercedes_benz__s_class,Mercedes-Benz,s_class,2020-Present,120
+MERCEDES_BENZ_SKlasse_W221_20052009,mercedes_benz__s_class,Mercedes-Benz,s_class,2005-2009,20
+MERCEDES_BENZ_SKlasse_W221_20092013,mercedes_benz__s_class,Mercedes-Benz,s_class,2009-2013,42
+MERCEDES_BENZ_Sclass_W222_20132017,mercedes_benz__s_class,Mercedes-Benz,s_class,2013-2017,67
+MINI_Cooper_S_5door_2021Present,mini__hatch,MINI,hatch,2021-Present,26
+MINI_Hatch_5_Doors_20142018,mini__hatch,MINI,hatch,2014-2018,51
+MINI_Hatch_R56_20062014,mini__hatch,MINI,hatch,2006-2014,21
+2013_Nissan_Note,nissan__note,Nissan,note,,109
+NISSAN_Note_20082012,nissan__note,Nissan,note,2008-2012,67
+NISSAN_Teana_2009Present,nissan__teana,Nissan,teana,2009-Present,38
+OPEL_Corsa_3_Doors_19931997,opel__corsa,Opel,corsa,1993-1997,27
+OPEL_Corsa_3_Doors_20062010,opel__corsa,Opel,corsa,2006-2010,31
+OPEL_Corsa_3_Doors_20102014,opel__corsa,Opel,corsa,2010-2014,38
+OPEL_Corsa_3_Doors_2014Present,opel__corsa,Opel,corsa,2014-Present,54
+OPEL_Corsa_5_Doors_20102014,opel__corsa,Opel,corsa,2010-2014,24
+OPEL_Corsa_5_Doors_20142019,opel__corsa,Opel,corsa,2014-2019,46
+OPEL_Corsa_5_Doors_2019Present,opel__corsa,Opel,corsa,2019-Present,27
+VAUXHALL_Corsa_3_doors_2014Present,opel__corsa,Opel,corsa,2014-Present,27
+VAUXHALL_Corsa_5_Doors_20062014,opel__corsa,Opel,corsa,2006-2014,17
+VAUXHALL_Corsa_5_Doors_2019Present,opel__corsa,Opel,corsa,2019-Present,62
+2017_Opel_Insignia_Grand_Sport,opel__insignia,Opel,insignia,,24
+OPEL_Insignia_Country_Tourer_2013Present,opel__insignia,Opel,insignia,2013-Present,28
+OPEL_Insignia_Sedan_20082013,opel__insignia,Opel,insignia,2008-2013,22
+OPEL_Insignia_Sedan_20132017,opel__insignia,Opel,insignia,2013-2017,16
+OPEL_Insignia_Sports_Tourer_20092013,opel__insignia,Opel,insignia,2009-2013,74
+VAUXHALL_Insignia_Country_Tourer_20132017,opel__insignia,Opel,insignia,2013-2017,34
+VAUXHALL_Insignia_Hatchback_20132017,opel__insignia,Opel,insignia,2013-2017,16
+VAUXHALL_Insignia_Sedan_20082013,opel__insignia,Opel,insignia,2008-2013,28
+VAUXHALL_Insignia_Sports_Tourer_20092013,opel__insignia,Opel,insignia,2009-2013,20
+VAUXHALL_Insignia_Sports_Tourer_20132017,opel__insignia,Opel,insignia,2013-2017,19
+1989_Opel_Vectra_Hatchback,opel__vectra,Opel,vectra,,24
+OPEL_Vectra_Caravan_19961999,opel__vectra,Opel,vectra,1996-1999,32
+OPEL_Vectra_Caravan_20022005,opel__vectra,Opel,vectra,2002-2005,21
+OPEL_Vectra_Caravan_20052008,opel__vectra,Opel,vectra,2005-2008,21
+OPEL_Vectra_GTS_20022005,opel__vectra,Opel,vectra,2002-2005,24
+OPEL_Vectra_Hatchback_19921995,opel__vectra,Opel,vectra,1992-1995,17
+OPEL_Vectra_Hatchback_19951999,opel__vectra,Opel,vectra,1995-1999,18
+OPEL_Vectra_Sedan_19881992,opel__vectra,Opel,vectra,1988-1992,35
+OPEL_Vectra_Sedan_19921995,opel__vectra,Opel,vectra,1992-1995,33
+OPEL_Vectra_Sedan_20022005,opel__vectra,Opel,vectra,2002-2005,25
+RENAULT_Arkana_2019Present,renault__arkana,Renault,arkana,2019-Present,28
+RENAULT_Arkana_EU_2021Present,renault__arkana,Renault,arkana,2021-Present,89
+2002_Skoda_Superb,skoda__superb,Skoda,superb,,33
+SKODA_Superb_20082013,skoda__superb,Skoda,superb,2008-2013,36
+SKODA_Superb_20132015,skoda__superb,Skoda,superb,2013-2015,57
+SKODA_Superb_20152019,skoda__superb,Skoda,superb,2015-2019,30
+SKODA_Superb_2019Present,skoda__superb,Skoda,superb,2019-Present,77
+SKODA_Superb_Combi_20092013,skoda__superb,Skoda,superb,2009-2013,36
+SKODA_Superb_Combi_20132015,skoda__superb,Skoda,superb,2013-2015,44
+SKODA_Superb_Combi__Scout_20152019,skoda__superb,Skoda,superb,2015-2019,49
+SKODA_Superb_Scout_2019Present,skoda__superb,Skoda,superb,2019-Present,47
+SKODA_Yeti_20092013,skoda__yeti,Skoda,yeti,2009-2013,66
+SKODA_Yeti_20132017,skoda__yeti,Skoda,yeti,2013-2017,110
+2023_Toyota_Prius,toyota__prius,Toyota,prius,,22
+TOYOTA_Prius_20042006,toyota__prius,Toyota,prius,2004-2006,36
+TOYOTA_Prius_20062008,toyota__prius,Toyota,prius,2006-2008,27
+TOYOTA_Prius_20092011,toyota__prius,Toyota,prius,2009-2011,68
+TOYOTA_Prius_20112016,toyota__prius,Toyota,prius,2011-2016,50
+TOYOTA_Prius_20152018,toyota__prius,Toyota,prius,2015-2018,77
+TOYOTA_Prius_20182022,toyota__prius,Toyota,prius,2018-2022,17
+TOYOTA_Prius_Prime_2016Present,toyota__prius,Toyota,prius,2016-Present,96
+VOLKSWAGEN_Jetta_20052011,volkswagen__jetta,Volkswagen,jetta,2005-2011,28
+VOLKSWAGEN_Jetta_20102014,volkswagen__jetta,Volkswagen,jetta,2010-2014,41
+VOLKSWAGEN_Jetta_20142018,volkswagen__jetta,Volkswagen,jetta,2014-2018,37
+VOLKSWAGEN_Jetta_20182021,volkswagen__jetta,Volkswagen,jetta,2018-2021,19
+VOLKSWAGEN_Jetta_2021Present,volkswagen__jetta,Volkswagen,jetta,2021-Present,20
+VOLVO_S60_20002004,volvo__s60,Volvo,s60,2000-2004,24
+VOLVO_S60_20042007,volvo__s60,Volvo,s60,2004-2007,19
+VOLVO_S60_20082010,volvo__s60,Volvo,s60,2008-2010,33
+VOLVO_S60_20102013,volvo__s60,Volvo,s60,2010-2013,67
+VOLVO_S60_20132018,volvo__s60,Volvo,s60,2013-2018,59
+VOLVO_S60_2018Present,volvo__s60,Volvo,s60,2018-Present,107
+VOLVO_S60_Cross_Country_20152018,volvo__s60,Volvo,s60,2015-2018,20
+VOLVO_XC90_20022006,volvo__xc90,Volvo,xc90,2002-2006,32
+VOLVO_XC90_20072014,volvo__xc90,Volvo,xc90,2007-2014,65
+VOLVO_XC90_20142019,volvo__xc90,Volvo,xc90,2014-2019,123
+VOLVO_XC90_2019Present,volvo__xc90,Volvo,xc90,2019-Present,62

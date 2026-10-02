@@ -257,7 +257,7 @@ classes:
   mitsubishi__pajero:
     needles: ["montero", "pajero", "shogun"]
   mitsubishi__pajero_sport:
-    needles: ["pajero sport", "montero sport", "shogun sport", "challenger"]
+    needles: ["pajero sport", "montero sport", "shogun sport", "mitsubishi challenger"]
   moskvich__2140:
     needles: ["1500 sl", "2140", "azlk 2140", "moskvich 1 5 sl", "moskvich 1500", "moskvitch 2140"]
   moskvich__2141:
