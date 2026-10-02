@@ -49,6 +49,9 @@ from training.calibration import (
 НАЧАЛО = "<!-- generated:start -->"
 КОНЕЦ = "<!-- generated:end -->"
 MAX_HELD_OUT_REJECTION = 0.5
+# Не-машины для подбора (`bench/catalog-192-thresholds-preregistration.md`): третье ограничение
+# после ошибки и FPR `off_catalog`. Без него FPR не-машин у выпуска получался «как получится».
+NONCAR_KINDS = ("truck_bus", "detector_fp")
 DEFAULT_SEED = 20260923
 
 
@@ -90,12 +93,21 @@ class FoldReport:
     chosen: Operating | None
     held_out: Operating | None
     ece: float | None
+    chosen_noncar_fpr: float | None = None
+    held_out_noncar_fpr: float | None = None
 
 
 def _шкала(known: Scores, point: Operating, max_knots: int) -> list[tuple[float, float]]:
     """Шкала учится только на ответах моделью: процент пользователь видит только у них."""
     модель = decide(known, point.sim_min, point.margin_min) == MODEL
     return calibration_knots(known.sim1[модель], known.class_hit[модель], point.sim_min, max_knots)
+
+
+def _fpr(known: Scores, negatives: Scores | None, point: Operating) -> float | None:
+    """FPR группы негативов в точке `point`; None, если группы нет."""
+    if negatives is None:
+        return None
+    return operating_point(known, negatives, point.sim_min, point.margin_min).fpr
 
 
 def cross_fit(
@@ -107,12 +119,24 @@ def cross_fit(
     max_error: float,
     max_fpr: float,
     max_knots: int,
+    noncar: Scores | None = None,
+    noncar_a: np.ndarray | None = None,
 ) -> list[FoldReport]:
     стороны: list[FoldReport] = []
     for имя, маска_з, маска_ч in (("A", known_a, neg_a), ("B", ~known_a, ~neg_a)):
         учёба_з, учёба_ч = known.subset(маска_з), negatives.subset(маска_ч)
         проверка_з, проверка_ч = known.subset(~маска_з), negatives.subset(~маска_ч)
-        точка = select_pair(учёба_з, учёба_ч, max_error=max_error, max_fpr=max_fpr)
+        учёба_н = проверка_н = None
+        if noncar is not None and noncar_a is not None:
+            маска_н = noncar_a if имя == "A" else ~noncar_a
+            учёба_н, проверка_н = noncar.subset(маска_н), noncar.subset(~маска_н)
+        точка = select_pair(
+            учёба_з,
+            учёба_ч,
+            max_error=max_error,
+            max_fpr=max_fpr,
+            extra_negatives=None if учёба_н is None else {"не-машины": учёба_н},
+        )
         if точка is None:
             стороны.append(FoldReport(имя, None, None, None))
             continue
@@ -121,7 +145,14 @@ def cross_fit(
         модель = decide(проверка_з, точка.sim_min, точка.margin_min) == MODEL
         уверенность = confidence_from_sim(проверка_з.sim1[модель], узлы)
         стороны.append(
-            FoldReport(имя, точка, отложенная, ece(уверенность, проверка_з.class_hit[модель]))
+            FoldReport(
+                имя,
+                точка,
+                отложенная,
+                ece(уверенность, проверка_з.class_hit[модель]),
+                _fpr(учёба_з, учёба_н, точка),
+                _fpr(проверка_з, проверка_н, точка),
+            )
         )
     return стороны
 
@@ -162,6 +193,10 @@ def _sha256(путь: Path) -> str:
     return хеш.hexdigest()
 
 
+def _доля_md(значение: float | None) -> str:
+    return "—" if значение is None else f"{значение:.3f}"
+
+
 def _точка_md(точка: Operating | None) -> str:
     if точка is None:
         return "— | — | — | — | —"
@@ -181,6 +216,7 @@ def render_report(
     auroc_value: float,
     fpr95: float,
     knots_n: int | None,
+    final_noncar_fpr: float | None = None,
 ) -> str:
     строки = ["## Происхождение", ""]
     строки += [f"- {ключ}: `{значение}`" for ключ, значение in provenance.items()]
@@ -194,20 +230,26 @@ def render_report(
         "FPR — доля принятых негативов. «Подбор» — на своей половине, «проверка» — та же",
         "пара на другой.",
         "",
-        "| сторона | где | sim_min | margin_min | покрытие | ошибка | FPR | ECE |",
-        "|---|---|---|---|---|---|---|---|",
+        "| сторона | где | sim_min | margin_min | покрытие | ошибка | FPR | FPR не-машины | ECE |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for с in folds:
         ece_md = "—" if с.ece is None else f"{с.ece:.3f}"
-        строки.append(f"| {с.tuned_on} | подбор | {_точка_md(с.chosen)} | — |")
-        строки.append(f"| {с.tuned_on} | проверка | {_точка_md(с.held_out)} | {ece_md} |")
+        строки.append(
+            f"| {с.tuned_on} | подбор | {_точка_md(с.chosen)} | "
+            f"{_доля_md(с.chosen_noncar_fpr)} | — |"
+        )
+        строки.append(
+            f"| {с.tuned_on} | проверка | {_точка_md(с.held_out)} | "
+            f"{_доля_md(с.held_out_noncar_fpr)} | {ece_md} |"
+        )
     строки += [
         "",
         "## Итог на всём наборе",
         "",
-        "| sim_min | margin_min | покрытие | ошибка | FPR |",
-        "|---|---|---|---|---|",
-        f"| {_точка_md(final)} |",
+        "| sim_min | margin_min | покрытие | ошибка | FPR | FPR не-машины |",
+        "|---|---|---|---|---|---|",
+        f"| {_точка_md(final)} | {_доля_md(final_noncar_fpr)} |",
         "",
         f"Узлов шкалы: {knots_n if knots_n is not None else '—'}. "
         f"AUROC (sim1): {auroc_value:.3f}. FPR@TPR95: {fpr95:.3f} "
@@ -246,6 +288,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     парсер.add_argument("--models", type=Path, default=Path("app/android/models"))
     парсер.add_argument("--holdout", type=Path, default=splits_dir() / "holdout_ru.parquet")
     парсер.add_argument("--negatives", type=Path, default=splits_dir() / "negatives.parquet")
+    парсер.add_argument(
+        "--noncar",
+        type=Path,
+        default=splits_dir() / "negatives-street.parquet",
+        help="сплит с не-машинами (`truck_bus`, `detector_fp`): третье ограничение подбора",
+    )
     парсер.add_argument("--crops-root", type=Path, default=harvest_dir() / "crops")
     парсер.add_argument("--max-error", type=float, default=0.15)
     парсер.add_argument("--max-fpr", type=float, default=0.15)
@@ -269,6 +317,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     эталон = эталон[~эталон["is_multi_car"].astype(bool)].reset_index(drop=True)
     check_holdout_slots(list(эталон["model_id"]), list(эталон["class_idx"]), мета)
     негативы = read_split(аргументы.negatives)
+    улица = read_split(аргументы.noncar)
+    виды_улицы = np.array([neg_kind_of(str(л)) for л in улица["listing_id"]])
+    не_машины = улица[np.isin(виды_улицы, NONCAR_KINDS)].reset_index(drop=True)
 
     корень = аргументы.crops_root
     э_эт = embed_crops(
@@ -277,13 +328,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     э_нег = embed_crops(
         классификатор, [корень / п for п in негативы["crop_path"]], манифест, аргументы.batch_size
     )
+    э_не_машины = embed_crops(
+        классификатор, [корень / п for п in не_машины["crop_path"]], манифест, аргументы.batch_size
+    )
     истина = эталон["class_idx"].to_numpy(dtype=np.int64)
     знакомые = scores_from(*top2_with_sims(э_эт, центроиды), истина, бренды)
     чужие = scores_from(*top2_with_sims(э_нег, центроиды), None, бренды)
+    оценки_не_машин = scores_from(*top2_with_sims(э_не_машины, центроиды), None, бренды)
 
     виды = np.array([neg_kind_of(str(л)) for л in негативы["listing_id"]])
     половина_з = split_halves(истина, аргументы.seed)
     половина_ч = split_halves(виды, аргументы.seed)
+    виды_не_машин = np.array([neg_kind_of(str(л)) for л in не_машины["listing_id"]])
+    половина_н = split_halves(виды_не_машин, аргументы.seed)
     стороны = cross_fit(
         знакомые,
         чужие,
@@ -292,8 +349,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_error=аргументы.max_error,
         max_fpr=аргументы.max_fpr,
         max_knots=аргументы.max_knots,
+        noncar=оценки_не_машин,
+        noncar_a=половина_н,
     )
-    итог = select_pair(знакомые, чужие, max_error=аргументы.max_error, max_fpr=аргументы.max_fpr)
+    итог = select_pair(
+        знакомые,
+        чужие,
+        max_error=аргументы.max_error,
+        max_fpr=аргументы.max_fpr,
+        extra_negatives={"не-машины": оценки_не_машин},
+    )
     вердикт = release_verdict(стороны, итог)
     узлы = _шкала(знакомые, итог, аргументы.max_knots) if итог is not None else None
 
@@ -302,12 +367,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "classifier_sha256": _sha256(классификатор),
         "holdout_sha256": _sha256(аргументы.holdout),
         "negatives_sha256": _sha256(аргументы.negatives),
+        "noncar_sha256": _sha256(аргументы.noncar),
         "seed": str(аргументы.seed),
         "max_error / max_fpr": f"{аргументы.max_error} / {аргументы.max_fpr}",
     }
     счётчики = {"знакомые (holdout_ru без многомашинных)": len(эталон)}
     for вид in sorted(set(виды)):
         счётчики[f"негативы {вид}"] = int((виды == вид).sum())
+    for вид in NONCAR_KINDS:
+        счётчики[f"не-машины {вид}"] = int((виды_не_машин == вид).sum())
     write_generated_section(
         аргументы.report,
         render_report(
@@ -319,6 +387,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             auroc_value=auroc(знакомые.sim1, чужие.sim1),
             fpr95=fpr_at_tpr(знакомые.sim1, чужие.sim1),
             knots_n=None if узлы is None else len(узлы),
+            final_noncar_fpr=None if итог is None else _fpr(знакомые, оценки_не_машин, итог),
         ),
     )
     print(f"вердикт: {вердикт}")

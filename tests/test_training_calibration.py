@@ -270,3 +270,28 @@ def test_документ_порогов_пишет_прототип_тольк�
     assert документ["reject_margin"] == 0.03
     assert list(документ)[:5] == ["version", "tuned", "sim_min", "margin_min", "reject_margin"]
     assert "reject_margin" not in thresholds_doc(без_ветки, val_n=10, neg_n=10)
+
+
+def test_лишняя_группа_негативов_сужает_допустимые_пары() -> None:
+    знакомые = _оценки(
+        sim1=[0.9, 0.8, 0.7, 0.5, 0.45],
+        sim2=[0.1] * 5,
+        same_brand=[False] * 5,
+        class_hit=[True, True, True, False, False],
+        brand_hit=[True, True, True, False, False],
+    )
+    негативы = _оценки([0.6, 0.3], [0.1, 0.1], [False, False], [False] * 2, [False] * 2)
+    лишние = {"не-машины": _оценки([0.6, 0.6], [0.1, 0.1], [False] * 2, [False] * 2, [False] * 2)}
+
+    точка = select_pair(
+        знакомые,
+        негативы,
+        max_error=0.0,
+        max_fpr=0.5,
+        extra_negatives=лишние,
+        sim_grid=np.array([0.4, 0.5, 0.55, 0.7]),
+        margin_grid=np.array([0.0, 0.05]),
+    )
+
+    assert точка is not None
+    assert (точка.sim_min, точка.margin_min) == (0.7, 0.0)

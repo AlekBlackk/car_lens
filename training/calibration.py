@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any
@@ -120,10 +121,14 @@ def select_pair(
     *,
     max_error: float,
     max_fpr: float,
+    extra_negatives: Mapping[str, Scores] | None = None,
     sim_grid: np.ndarray = SIM_GRID,
     margin_grid: np.ndarray = MARGIN_GRID,
 ) -> Operating | None:
     """Допустимая пара с наибольшим покрытием; при равенстве — первая по сетке.
+
+    `extra_negatives` — группы негативов сверх основной (не-машины): у каждой FPR тоже не выше
+    `max_fpr`. Отчётная `fpr` точки остаётся основной группы.
 
     Сетка обходится по возрастанию `sim_min`, затем `margin_min`, а замена — только на
     строго большее покрытие: так тай-брейк «меньший порог» выходит из порядка обхода.
@@ -134,6 +139,11 @@ def select_pair(
         for margin_min in margin_grid:
             точка = operating_point(known, negatives, float(sim_min), float(margin_min))
             if точка.shown == 0 or точка.error > max_error or точка.fpr > max_fpr:
+                continue
+            if any(
+                operating_point(known, группа, float(sim_min), float(margin_min)).fpr > max_fpr
+                for группа in (extra_negatives or {}).values()
+            ):
                 continue
             if лучшая is None or точка.coverage > лучшая.coverage:
                 лучшая = точка

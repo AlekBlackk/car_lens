@@ -35,6 +35,7 @@ from training.calibration import (
     split_halves,
 )
 from training.tune_thresholds import (
+    NONCAR_KINDS,
     check_holdout_slots,
     embed_crops,
     scores_from,
@@ -47,7 +48,7 @@ STREET = "чужие машины"
 NONCAR = "не-машины"
 GROUP_KINDS: dict[str, tuple[str, ...]] = {
     STREET: ("off_catalog_street",),
-    NONCAR: ("truck_bus", "detector_fp"),
+    NONCAR: NONCAR_KINDS,
 }
 REFERENCE_KIND = "off_catalog"
 DEFAULT_SEED = 20260927

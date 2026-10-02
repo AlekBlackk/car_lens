@@ -131,3 +131,25 @@ def test_генерируемый_раздел_создаёт_файл(tmp_path:
     assert "<!-- generated:start -->\nтело\n<!-- generated:end -->" in отчёт.read_text(
         encoding="utf-8"
     )
+
+
+def test_перекрёстная_проверка_с_не_машинами_меряет_их_fpr_на_отложенной_половине() -> None:
+    знакомые, чужие, не_машины = _знакомые(400, 1), _чужие(200, 2), _чужие(100, 3)
+    половина_з = np.arange(400) % 2 == 0
+    половина_ч = np.arange(200) % 2 == 0
+    половина_н = np.arange(100) % 2 == 0
+
+    стороны = cross_fit(
+        знакомые,
+        чужие,
+        половина_з,
+        половина_ч,
+        max_error=0.2,
+        max_fpr=0.2,
+        max_knots=32,
+        noncar=не_машины,
+        noncar_a=половина_н,
+    )
+
+    assert all(с.held_out_noncar_fpr is not None for с in стороны)
+    assert all(0.0 <= с.held_out_noncar_fpr <= 1.0 for с in стороны if с.held_out_noncar_fpr)
