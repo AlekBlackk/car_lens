@@ -193,3 +193,21 @@ def test_без_сетки_прототипа_поведение_прежнее(
     группы = {STREET: чужие(0.55, 0.75), NONCAR: чужие(0.5)}
     точка = select_open_set_pair(свои, группы, sim_grid=СЕТКА, margin_grid=НОЛЬ)
     assert точка is not None and точка.reject_margin == REJECT_OFF
+
+
+def test_отчёт_несёт_свежие_не_машины_в_точке_телефона() -> None:
+    точка = OpenSetPoint(0.85, 0.01, 0.72, 0.05, 1000, {STREET: 0.12, NONCAR: 0.14})
+    результат = ModelResult(
+        label="0.6.1",
+        classifier_sha256="cfa59ece",
+        folds=[],
+        final=точка,
+        phone=точка,
+        reference_fpr_at_phone=0.14,
+        separability={},
+        fresh_noncar=(600, 0.1317),
+    )
+
+    текст = render_open_set_report([результат], {}, {})
+
+    assert "Свежие не-машины (V_noncar, 600 кадров) в точке телефона: FPR 0.132." in текст

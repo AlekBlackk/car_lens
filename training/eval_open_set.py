@@ -215,6 +215,9 @@ class ModelResult:
     phone: OpenSetPoint
     reference_fpr_at_phone: float
     separability: dict[str, tuple[float, float]]
+    # (кадров, FPR) свежих не-машин в точке телефона: подбор их не видел
+    # (`bench/catalog-192-thresholds-preregistration.md`).
+    fresh_noncar: tuple[int, float] | None = None
 
 
 def _точка_md(точка: OpenSetPoint | None) -> str:
@@ -267,9 +270,14 @@ def render_open_set_report(
             f"Проверка кода — справочный off_catalog в точке телефона: FPR "
             f"{р.reference_fpr_at_phone:.3f}.",
             "",
-            "| группа | AUROC (sim1) | FPR@TPR95 |",
-            "|---|---|---|",
         ]
+        if р.fresh_noncar is not None:
+            n, fpr = р.fresh_noncar
+            строки += [
+                f"Свежие не-машины (V_noncar, {n} кадров) в точке телефона: FPR {fpr:.3f}.",
+                "",
+            ]
+        строки += ["| группа | AUROC (sim1) | FPR@TPR95 |", "|---|---|---|"]
         строки += [f"| {г} | {a:.3f} | {f:.3f} |" for г, (a, f) in р.separability.items()]
     строки.append("")
     return "\n".join(строки)
@@ -361,6 +369,7 @@ def measure_model(
     crops_root: Path,
     seed: int,
     batch_size: int,
+    fresh: pd.DataFrame | None = None,
 ) -> ModelResult:
     активы = load_model_assets(label, models, expected_sha)
     check_holdout_slots(list(known["model_id"]), list(known["class_idx"]), активы.meta)
@@ -380,6 +389,12 @@ def measure_model(
         for имя, s in {**уличные.groups, **по_видам, REFERENCE_KIND: справка}.items()
         if len(s.sim1)
     }
+    свежие = None
+    if fresh is not None:
+        оценки_свежих = model_scores(
+            активы, fresh, None, crops_root=crops_root, batch_size=batch_size
+        )
+        свежие = (len(fresh), operating_point(знакомые, оценки_свежих, sim_min, margin_min).fpr)
     return ModelResult(
         label=label,
         classifier_sha256=активы.classifier_sha256,
@@ -388,6 +403,7 @@ def measure_model(
         phone=open_set_point(знакомые, уличные.groups, sim_min, margin_min),
         reference_fpr_at_phone=operating_point(знакомые, справка, sim_min, margin_min).fpr,
         separability=разделимость,
+        fresh_noncar=свежие,
     )
 
 
@@ -413,6 +429,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     парсер.add_argument("--relevance", type=Path, default=Path("catalog/holdout_relevance.csv"))
     парсер.add_argument("--street", type=Path, default=splits_dir() / "negatives-street.parquet")
     парсер.add_argument("--reference", type=Path, default=splits_dir() / "negatives.parquet")
+    парсер.add_argument(
+        "--noncar-fresh",
+        type=Path,
+        default=None,
+        help="свежие не-машины (`scripts.build_noncar_fresh`): FPR в точке телефона",
+    )
     парсер.add_argument("--crops-root", type=Path, default=harvest_dir() / "crops")
     парсер.add_argument("--seed", type=int, default=DEFAULT_SEED)
     парсер.add_argument("--batch-size", type=int, default=32)
@@ -425,6 +447,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     справка = справка[
         [neg_kind_of(str(л)) == REFERENCE_KIND for л in справка["listing_id"]]
     ].reset_index(drop=True)
+    свежие_не_машины = (
+        None if аргументы.noncar_fresh is None else read_split(аргументы.noncar_fresh)
+    )
 
     результаты = [
         measure_model(
@@ -437,6 +462,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             crops_root=аргументы.crops_root,
             seed=аргументы.seed,
             batch_size=аргументы.batch_size,
+            fresh=свежие_не_машины,
         )
         for метка, каталог, sha in аргументы.model
     ]
@@ -449,6 +475,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "relevance_sha256": file_sha256(аргументы.relevance),
         "negatives_street_sha256": file_sha256(аргументы.street),
         "negatives_reference_sha256": file_sha256(аргументы.reference),
+        **(
+            {"noncar_fresh_sha256": file_sha256(аргументы.noncar_fresh)}
+            if аргументы.noncar_fresh is not None
+            else {}
+        ),
         "seed": str(аргументы.seed),
         "max_error / max_fpr": f"{MAX_ERROR} / {MAX_FPR}",
         "sim_grid / margin_grid": f"{SIM_GRID[0]}…{SIM_GRID[-1]} / {MARGIN_GRID[0]}…"
