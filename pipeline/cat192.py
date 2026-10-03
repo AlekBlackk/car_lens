@@ -16,7 +16,7 @@ import pandas as pd
 
 from pipeline.catalog import Catalog, class_index, member_index
 from pipeline.clean import DEFAULT_PHASH_HAMMING
-from pipeline.hashing import bucket_of, close_pairs
+from pipeline.hashing import bucket_of, close_pairs, hamming
 from pipeline.ingest.external import merge_external
 from pipeline.schema import COLUMNS
 
@@ -168,6 +168,25 @@ def without_close_frames(
     хеши = [*(int(хеш) for хеш in frames["phash"]), *reference_hashes]
     близкие = {i for i, j in close_pairs(хеши, hamming) if i < граница <= j}
     return frames.iloc[[i for i in range(граница) if i not in близкие]].reset_index(drop=True)
+
+
+def without_close_twins(frames: pd.DataFrame, *, max_distance: int, seed: int) -> pd.DataFrame:
+    """Из близких по pHash кадров одного класса остаётся кадр с меньшим `bucket_of(photo_id, seed)`.
+
+    Перебор попарный: `close_pairs` отвергает порог от восьми бит, а проверяемый набор мал.
+    """
+    порядок = sorted(
+        range(len(frames)), key=lambda i: bucket_of(str(frames["photo_id"].iloc[i]), seed)
+    )
+    хеши = [int(хеш) for хеш in frames["phash"]]
+    классы = list(frames["class_idx"])
+    оставлены: list[int] = []
+    for i in порядок:
+        if all(
+            классы[i] != классы[j] or hamming(хеши[i], хеши[j]) > max_distance for j in оставлены
+        ):
+            оставлены.append(i)
+    return frames.iloc[sorted(оставлены)].reset_index(drop=True)
 
 
 def cap_per_class(frames: pd.DataFrame, cap: int, *, seed: int) -> pd.DataFrame:

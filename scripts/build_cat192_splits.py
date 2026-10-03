@@ -32,6 +32,7 @@ from pipeline.cat192 import (
     remap_class_idx,
     split_groups,
     without_close_frames,
+    without_close_twins,
 )
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog
 from pipeline.harvest.aliases import DEFAULT_ALIASES_PATH, AliasTable, load_alias_table
@@ -55,6 +56,8 @@ DEFAULT_NEW_CLASSES = Path("catalog/external/cat192_new_classes.txt")
 STUDIO_SALT = "20261002"
 STUDIO_EVAL_SEED = 20261002
 STUDIO_EVAL_CAP = 40
+HELD_SEED = 20261003
+HELD_TWIN_DISTANCE = 10
 UNCHANGED_SPLITS = ("holdout_ru", "negatives", "negatives-street", "eval-new", "eval-old")
 
 
@@ -202,7 +205,7 @@ def _studio(аргументы: argparse.Namespace) -> int:
     )
     опорные = [
         int(хеш) for имя in опорные_сплиты for хеш in read_split(база / f"{имя}.parquet")["phash"]
-    ]
+    ] + [int(хеш) for путь in аргументы.also_avoid for хеш in read_split(путь)["phash"]]
     принятые = remap_class_idx(read_split(аргументы.train_ext), каталог)
     обучение = without_close_frames(принятые, опорные)
     итог = build_external_pool(
@@ -251,6 +254,21 @@ def _studio(аргументы: argparse.Namespace) -> int:
     return 0
 
 
+def _heldout(аргументы: argparse.Namespace) -> int:
+    """`T_held`: кадры проверки без совпадающих со смоуком и без близнецов одной машины."""
+    каталог = load_catalog(DEFAULT_CATALOG_PATH)
+    принятые = remap_class_idx(read_split(аргументы.eval_ext), каталог)
+    смоук = [int(хеш) for хеш in read_split(аргументы.fresh9)["phash"]]
+    без_смоука = without_close_frames(принятые, смоук)
+    итог = without_close_twins(без_смоука, max_distance=HELD_TWIN_DISTANCE, seed=HELD_SEED)
+    write_split(итог, аргументы.out)
+    print(
+        f"кадров проверки {len(принятые)}: общих со смоуком {len(принятые) - len(без_смоука)}, "
+        f"близнецов {len(без_смоука) - len(итог)}, в `T_held` {len(итог)}"
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     парсер = argparse.ArgumentParser(description="Сплиты каталога 192")
     команды = парсер.add_subparsers(dest="command", required=True)
@@ -288,8 +306,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="кадры студийной проверки; без него `eval-studio` базы остаётся как есть",
     )
+    студия.add_argument(
+        "--also-avoid",
+        type=Path,
+        nargs="*",
+        default=[],
+        help="ещё проверки, к чьим кадрам обучение не должно быть близким (`T_held`, `T_fresh9`)",
+    )
     студия.add_argument("--out", type=Path, required=True)
     студия.set_defaults(run=_studio)
+    свежая = команды.add_parser("heldout", help="сплит 0.6.3: проверка `T_held` после гигиены")
+    свежая.add_argument("--eval-ext", type=Path, required=True, help="принятые кадры проверки")
+    свежая.add_argument(
+        "--fresh9", type=Path, required=True, help="`T_fresh9`: его кадры не берутся"
+    )
+    свежая.add_argument("--out", type=Path, required=True, help="куда писать `T_held` (parquet)")
+    свежая.set_defaults(run=_heldout)
     аргументы = парсер.parse_args(argv)
     return int(аргументы.run(аргументы))
 

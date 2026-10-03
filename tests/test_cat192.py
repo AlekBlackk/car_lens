@@ -17,6 +17,7 @@ from pipeline.cat192 import (
     remap_class_idx,
     split_groups,
     without_close_frames,
+    without_close_twins,
 )
 from pipeline.catalog import Catalog, load_catalog
 from pipeline.schema import COLUMNS, read_split, write_split
@@ -299,6 +300,74 @@ def test_studio_без_eval_ext_оставляет_студийную_прове
     пул = read_split(итог / "pool-ext.parquet")
     assert set(пул["photo_id"]) == {"mad_cars:a3", "mad_cars:a4", "manual:fresh"}
     assert list(read_split(итог / "eval-studio.parquet")["photo_id"]) == ["autoevolution:studio"]
+
+    # Кадр, близкий к дополнительной проверке (`T_held`), в обучение не попадает.
+    чужая_проверка = tmp_path / "held.parquet"
+    write_split(с_классом(кадр(строка("manual:held", "audi__a3", хеш(9)))), чужая_проверка)
+    без_близких = tmp_path / "out2"
+    build_main(
+        [
+            "studio",
+            "--base",
+            str(основа),
+            "--train-ext",
+            str(принятые),
+            "--source",
+            "manual",
+            "--also-avoid",
+            str(чужая_проверка),
+            "--out",
+            str(без_близких),
+        ]
+    )
+    assert "manual:fresh" not in set(read_split(без_близких / "pool-ext.parquet")["photo_id"])
+
+
+def test_близнецы_одной_машины_остаются_одним_кадром_а_другой_класс_не_трогается() -> None:
+    кадры = с_классом(
+        кадр(
+            строка("manual:a", "audi__a3", 0xF),
+            строка("manual:b", "audi__a3", 0xFFF),  # 8 бит от первого
+            строка("manual:c", "audi__a3", 0xFFFF << 40),  # далеко от обоих
+            строка("manual:d", "audi__a4", 0xF),  # тот же хеш, но другой класс
+        )
+    )
+    итог = without_close_twins(кадры, max_distance=10, seed=1)
+    оставлено = set(итог["photo_id"])
+    assert {"manual:c", "manual:d"} <= оставлено
+    assert len(оставлено & {"manual:a", "manual:b"}) == 1
+    повтор = without_close_twins(кадры.iloc[::-1].reset_index(drop=True), max_distance=10, seed=1)
+    assert set(повтор["photo_id"]) == оставлено
+
+
+def test_heldout_убирает_кадры_смоука_и_близнецов(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("scripts.build_cat192_splits.DEFAULT_CATALOG_PATH", каталог_путь(tmp_path))
+    проверка, смоук, итог = (
+        tmp_path / "eval.parquet",
+        tmp_path / "f9.parquet",
+        tmp_path / "held.parquet",
+    )
+    write_split(
+        с_классом(
+            кадр(
+                строка("manual:smoke-twin", "audi__a3", 0xFFFF << 40),
+                строка("manual:one", "audi__a3", 0xF),
+                строка("manual:twin", "audi__a3", 0xFFF),
+                строка("manual:other", "audi__a4", 0xF << 20),
+            )
+        ),
+        проверка,
+    )
+    write_split(с_классом(кадр(строка("manual:smoke", "audi__a3", 0xFFFF << 40))), смоук)
+
+    build_main(["heldout", "--eval-ext", str(проверка), "--fresh9", str(смоук), "--out", str(итог)])
+
+    оставлено = set(read_split(итог)["photo_id"])
+    assert "manual:smoke-twin" not in оставлено
+    assert "manual:other" in оставлено
+    assert len(оставлено & {"manual:one", "manual:twin"}) == 1
 
 
 def test_groups_делит_только_группы_новых_классов(tmp_path: Path) -> None:
