@@ -194,10 +194,14 @@ def _groups(аргументы: argparse.Namespace) -> int:
 def _studio(аргументы: argparse.Namespace) -> int:
     каталог = load_catalog(DEFAULT_CATALOG_PATH)
     база = аргументы.base
+    # Без `--eval-ext` студийная проверка базы переходит как есть и тоже опорная: кадры обучения
+    # не должны быть близки ни к одной проверке.
+    своя_студия = аргументы.eval_ext is not None
+    опорные_сплиты = ("eval-new", "eval-old", "holdout_ru") + (
+        () if своя_студия else ("eval-studio",)
+    )
     опорные = [
-        int(хеш)
-        for имя in ("eval-new", "eval-old")
-        for хеш in read_split(база / f"{имя}.parquet")["phash"]
+        int(хеш) for имя in опорные_сплиты for хеш in read_split(база / f"{имя}.parquet")["phash"]
     ]
     принятые = remap_class_idx(read_split(аргументы.train_ext), каталог)
     обучение = without_close_frames(принятые, опорные)
@@ -208,20 +212,13 @@ def _studio(аргументы: argparse.Namespace) -> int:
         max_per_class=DEFAULT_MAX_PER_CLASS,
         own_caps={"mad_cars": MAD_OWN_CAP},
         seed=POOL_SEED,
-        source="autoevolution",
+        source=аргументы.source,
     )
     аргументы.out.mkdir(parents=True, exist_ok=True)
     write_split(итог.external, аргументы.out / "pool-ext.parquet")
     пул = pd.concat([read_split(база / "pool-clean.parquet"), итог.external], ignore_index=True)
     write_split(пул, аргументы.out / "pool-plus.parquet")
     write_split(read_split(база / "pool-clean.parquet"), аргументы.out / "pool-clean.parquet")
-
-    приняты_студия = remap_class_idx(read_split(аргументы.eval_ext), каталог)
-    без_утечки = without_close_frames(приняты_студия, [int(хеш) for хеш in пул["phash"]])
-    студия = cap_per_class(без_утечки, STUDIO_EVAL_CAP, seed=STUDIO_EVAL_SEED)
-    write_split(студия, аргументы.out / "eval-studio.parquet")
-    for имя in UNCHANGED_SPLITS:
-        shutil.copy2(база / f"{имя}.parquet", аргументы.out / f"{имя}.parquet")
 
     сводка: dict[str, object] = {
         "train_ingested": len(принятые),
@@ -230,11 +227,23 @@ def _studio(аргументы: argparse.Namespace) -> int:
         "pool_plus": len(пул),
         "merge_rejected": итог.rejected,
         "changed_classes": len(итог.changed_classes),
-        "studio_ingested": len(приняты_студия),
-        "studio_leaked": len(приняты_студия) - len(без_утечки),
-        "studio_frames": len(студия),
-        "studio_classes": int(студия["class_idx"].nunique()),
     }
+    if своя_студия:
+        приняты_студия = remap_class_idx(read_split(аргументы.eval_ext), каталог)
+        без_утечки = without_close_frames(приняты_студия, [int(хеш) for хеш in пул["phash"]])
+        студия = cap_per_class(без_утечки, STUDIO_EVAL_CAP, seed=STUDIO_EVAL_SEED)
+        write_split(студия, аргументы.out / "eval-studio.parquet")
+        сводка |= {
+            "studio_ingested": len(приняты_студия),
+            "studio_leaked": len(приняты_студия) - len(без_утечки),
+            "studio_frames": len(студия),
+            "studio_classes": int(студия["class_idx"].nunique()),
+        }
+    else:
+        shutil.copy2(база / "eval-studio.parquet", аргументы.out / "eval-studio.parquet")
+    for имя in UNCHANGED_SPLITS:
+        shutil.copy2(база / f"{имя}.parquet", аргументы.out / f"{имя}.parquet")
+
     (аргументы.out / "studio.json").write_text(
         json.dumps(сводка, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -267,10 +276,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     группы.add_argument("--train-map", type=Path, required=True)
     группы.add_argument("--eval-map", type=Path, required=True)
     группы.set_defaults(run=_groups)
-    студия = команды.add_parser("studio", help="сплиты 0.6.1: пул с autoevolution и проверка")
-    студия.add_argument("--base", type=Path, required=True, help="сплиты 0.6.0 (`compose`)")
+    студия = команды.add_parser("studio", help="сплиты 0.6.1/0.6.2: пул с новым источником")
+    студия.add_argument(
+        "--base", type=Path, required=True, help="сплиты-основа (`compose`/`studio`)"
+    )
     студия.add_argument("--train-ext", type=Path, required=True)
-    студия.add_argument("--eval-ext", type=Path, required=True)
+    студия.add_argument("--source", default="autoevolution", help="источник кадров обучения")
+    студия.add_argument(
+        "--eval-ext",
+        type=Path,
+        default=None,
+        help="кадры студийной проверки; без него `eval-studio` базы остаётся как есть",
+    )
     студия.add_argument("--out", type=Path, required=True)
     студия.set_defaults(run=_studio)
     аргументы = парсер.parse_args(argv)

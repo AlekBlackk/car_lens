@@ -19,7 +19,7 @@ from pipeline.cat192 import (
     without_close_frames,
 )
 from pipeline.catalog import Catalog, load_catalog
-from pipeline.schema import COLUMNS
+from pipeline.schema import COLUMNS, read_split, write_split
 from scripts.build_cat192_splits import main as build_main
 from scripts.build_cat192_splits import own_car_reason
 
@@ -39,11 +39,15 @@ brands:
 НОВЫЙ = {"audi__a3": 0, "audi__a4": 1, "audi__a6": 2}
 
 
-@pytest.fixture
-def каталог(tmp_path: Path) -> Catalog:
+def каталог_путь(tmp_path: Path) -> Path:
     путь = tmp_path / "canonical.yaml"
     путь.write_text(YAML, encoding="utf-8")
-    return load_catalog(путь)
+    return путь
+
+
+@pytest.fixture
+def каталог(tmp_path: Path) -> Catalog:
+    return load_catalog(каталог_путь(tmp_path))
 
 
 def строка(photo_id: str, model_id: str | None, phash: int, *, listing: str = "") -> dict[str, Any]:
@@ -73,6 +77,15 @@ def кадр(*строки: dict[str, Any]) -> pd.DataFrame:
 
 def далёкий(n: int) -> int:
     return 0xFF << (8 * n)
+
+
+def с_классом(frame: pd.DataFrame) -> pd.DataFrame:
+    """Кадры в формате сплита: `class_idx` по каталогу из трёх классов, у негативов — пусто."""
+    результат = frame.copy()
+    результат["class_idx"] = pd.array(
+        [None if модель is None else НОВЫЙ[модель] for модель in frame["model_id"]], dtype="Int32"
+    )
+    return результат
 
 
 def test_индекс_пересчитывается_по_model_id(каталог: Catalog) -> None:
@@ -229,6 +242,63 @@ def test_новый_источник_пересобирает_только_кл�
     )
     assert set(итог.external["photo_id"]) == {"mad_cars:a3", "mad_cars:a4", "autoevolution:a3"}
     assert итог.changed_classes == {0}
+
+
+def test_studio_без_eval_ext_оставляет_студийную_проверку_и_сторонится_её_кадров(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("scripts.build_cat192_splits.DEFAULT_CATALOG_PATH", каталог_путь(tmp_path))
+    основа = tmp_path / "base"
+    основа.mkdir()
+
+    def хеш(n: int) -> int:
+        # Блоки по 4 бита: расстояние между разными — 8 (> 6), а значения умещаются в int64.
+        return 0xF << (4 * n)
+
+    for имя, данные in {
+        "pool-ext": кадр(
+            строка("mad_cars:a3", "audi__a3", хеш(0)),
+            строка("mad_cars:a4", "audi__a4", хеш(1)),
+        ),
+        "pool-clean": кадр(строка("street:a6", "audi__a6", хеш(2))),
+        "eval-studio": кадр(строка("autoevolution:studio", "audi__a3", хеш(3))),
+        "eval-new": кадр(строка("mad_cars:new", "audi__a4", хеш(4))),
+        "eval-old": кадр(строка("mad_cars:old", "audi__a6", хеш(5))),
+        "holdout_ru": кадр(строка("street:holdout", "audi__a6", хеш(6))),
+        "negatives": кадр(строка("stanford:n1", None, хеш(7))),
+        "negatives-street": кадр(строка("street:n2", None, хеш(8))),
+    }.items():
+        write_split(с_классом(данные), основа / f"{имя}.parquet")
+    принятые = tmp_path / "manual.parquet"
+    write_split(
+        с_классом(
+            кадр(
+                строка("manual:fresh", "audi__a3", хеш(9)),
+                строка("manual:like-studio", "audi__a3", хеш(3)),
+            )
+        ),
+        принятые,
+    )
+
+    итог = tmp_path / "out"
+
+    build_main(
+        [
+            "studio",
+            "--base",
+            str(основа),
+            "--train-ext",
+            str(принятые),
+            "--source",
+            "manual",
+            "--out",
+            str(итог),
+        ]
+    )
+
+    пул = read_split(итог / "pool-ext.parquet")
+    assert set(пул["photo_id"]) == {"mad_cars:a3", "mad_cars:a4", "manual:fresh"}
+    assert list(read_split(итог / "eval-studio.parquet")["photo_id"]) == ["autoevolution:studio"]
 
 
 def test_groups_делит_только_группы_новых_классов(tmp_path: Path) -> None:
