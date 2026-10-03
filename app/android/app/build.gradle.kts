@@ -39,8 +39,8 @@ android {
         applicationId = "com.carlens.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.5.6"
+        versionCode = 16
+        versionName = "0.6.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // `reactNativeArchitectures` управляет только нативной сборкой RN-библиотек, а
