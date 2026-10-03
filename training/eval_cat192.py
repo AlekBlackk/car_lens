@@ -27,6 +27,7 @@ from pipeline.paths import harvest_dir, splits_dir
 from pipeline.pool_audit import file_sha256
 from pipeline.schema import read_split
 from training.acceptance import SetMetrics, member_brands, set_metrics
+from training.calibration import MODEL, decide
 from training.tune_thresholds import embed_crops, scores_from, write_generated_section
 
 GATE_NEW_TOP1 = 0.75
@@ -185,10 +186,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         пары = top2_with_sims(эмбеддинги, центроиды)
         топ5 = np.array(ranked_by_centroids(эмбеддинги, центроиды, 5), dtype=np.int64)
+        известные = scores_from(*пары, истина, бренды)
         метрики[имя] = set_metrics(
             top5=топ5,
             truth=истина,
-            known=scores_from(*пары, истина, бренды),
+            known=известные,
             negatives=чужие,
             mask=np.ones(len(кадры), dtype=bool),
             idx_to_class_id=dict(enumerate(class_ids)),
@@ -209,6 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             названия = [машина_название[str(л).rsplit(":", 1)[1]] for л in кадры["listing_id"]]
             по_названиям = per_group(попал, названия)
+        решения = decide(известные, float(пороги["sim_min"]), float(пороги["margin_min"]))
         ответы.append(
             pd.DataFrame(
                 {
@@ -217,6 +220,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "class_id": истинные,
                     "top1": [class_ids[i] for i in пары[0]],
                     "sim1": пары[1],
+                    # Что покажет телефон в точке порогов: модель названа верно.
+                    "shown_correct": (решения == MODEL) & известные.class_hit,
                 }
             )
         )
