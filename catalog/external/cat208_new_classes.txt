@@ -1,0 +1,17 @@
+# 16 новых классов каталога 208 (bench/catalog-208-preregistration.md): им доборка студийных кадров autoevolution.
+nissan__almera_classic
+lexus__es
+lexus__gs
+porsche__macan
+volvo__s80
+volvo__xc70
+opel__mokka
+hyundai__i40
+hyundai__palisade
+mercedes_benz__a_class
+mercedes_benz__cla
+renault__fluence
+bmw__6_series
+mitsubishi__galant
+mazda__cx_7
+nissan__pathfinder
