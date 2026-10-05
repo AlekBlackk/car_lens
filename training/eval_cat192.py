@@ -220,7 +220,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "class_id": истинные,
                     "top1": [class_ids[i] for i in пары[0]],
                     "sim1": пары[1],
-                    # Что покажет телефон в точке порогов: модель названа верно.
+                    "margin": известные.sim1 - известные.sim2,
+                    # Что покажет телефон в точке порогов: модель, одна марка или отказ.
+                    "decision": np.array(["reject", "brand", "model"])[решения],
+                    # Модель названа верно.
                     "shown_correct": (решения == MODEL) & известные.class_hit,
                 }
             )
