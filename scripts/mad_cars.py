@@ -90,15 +90,24 @@ def _cat192_sample(аргументы: argparse.Namespace) -> int:
         seed=аргументы.seed,
         exclude_cars=замер | прежние,
     )
-    проверка_старых = sample_eval_frames(
-        манифест,
-        старая_таблица,
-        cars_per_group=аргументы.eval_cars,
-        by_name=False,
-        seed=аргументы.seed,
-        exclude_cars=замер | прежние,
+    # `--only-new`: проверка старых классов уже собрана прежним запуском и не пересобирается.
+    проверка_старых = (
+        None
+        if аргументы.only_new
+        else sample_eval_frames(
+            манифест,
+            старая_таблица,
+            cars_per_group=аргументы.eval_cars,
+            by_name=False,
+            seed=аргументы.seed,
+            exclude_cars=замер | прежние,
+        )
     )
-    занятые = замер | set(проверка_новых["car_id"]) | set(проверка_старых["car_id"])
+    занятые = (
+        замер
+        | set(проверка_новых["car_id"])
+        | (set() if проверка_старых is None else set(проверка_старых["car_id"]))
+    )
     # Классы обучения — классы новых названий: новые и четыре преемника (их кадры пересобираются).
     классы = set(новая_таблица.values())
     обучение = sample_frames(
@@ -109,12 +118,11 @@ def _cat192_sample(аргументы: argparse.Namespace) -> int:
         exclude_cars=занятые,
     )
     аргументы.out_dir.mkdir(parents=True, exist_ok=True)
-    for имя, кадр in (
-        ("train", обучение),
-        ("eval_new", проверка_новых),
-        ("eval_old", проверка_старых),
-    ):
-        путь = аргументы.out_dir / f"mad_cars_cat192_{имя}.csv"
+    выборки = [("train", обучение), ("eval_new", проверка_новых)]
+    if проверка_старых is not None:
+        выборки.append(("eval_old", проверка_старых))
+    for имя, кадр in выборки:
+        путь = аргументы.out_dir / f"mad_cars_{аргументы.prefix}_{имя}.csv"
         кадр.to_csv(путь, index=False)
         print(
             f"{имя}: {кадр['model_id'].nunique()} классов, {кадр['car_id'].nunique()} машин, "
@@ -286,6 +294,10 @@ def build_parser() -> argparse.ArgumentParser:
     каталог192.add_argument("--train-cars", type=int, default=100)
     каталог192.add_argument("--seed", type=int, required=True)
     каталог192.add_argument("--out-dir", type=Path, default=Path("catalog/external"))
+    каталог192.add_argument("--prefix", default="cat192", help="имена файлов: mad_cars_<prefix>_*")
+    каталог192.add_argument(
+        "--only-new", action="store_true", help="только новые названия: без проверки старых классов"
+    )
     каталог192.set_defaults(run=_cat192_sample)
     негативы = команды.add_parser("negatives-sample", help="чужие машины для замера отказа")
     негативы.add_argument("--manifest", type=Path, default=DEFAULT_ROOT / "mad.csv")
