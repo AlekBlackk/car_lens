@@ -2,10 +2,11 @@
 #
 # model_id собирается как <слаг марки>__<слаг модели>, отдельным полем не хранится.
 # Единица приёмки — КЛАСС, а не модель (§13.2): пять платформенных групп внизу файла
-# дают пять классов на десять моделей. Итог — 192 класса на 197 моделях, 49 марок.
+# дают пять классов на десять моделей. Итог — 208 классов на 213 моделях, 49 марок.
 #
 # 150 классов — каталог 0.5; ещё 42 добавлены в 0.6 из MAD-Cars (модели с ≥ 100 машин вне
-# каталога, `bench/catalog-192-preregistration.md`). Преемники с новым именем живут классом
+# каталога, `bench/catalog-192-preregistration.md`); ещё 16 в 0.7 (названия с ≥ 85 машин,
+# `bench/catalog-208-preregistration.md`). Преемники с новым именем живут классом
 # предшественника: K5 — в Optima, ix35 — в Tucson, M-Class — в GLE, GLK — в GLC, GLS — в GL.
 #
 # Состав набран по долям парка АВТОСТАТ (§3 дизайна `2026-08-25-m0-catalog-ru-design.md`),
@@ -79,6 +80,8 @@ brands:
       rx: {display: Lexus RX}
       lx: {display: Lexus LX}
       nx: {display: Lexus NX}
+      es: {display: Lexus ES}
+      gs: {display: Lexus GS}
   Nissan:
     models:
       qashqai: {display: Nissan Qashqai}
@@ -91,6 +94,8 @@ brands:
       note: {display: Nissan Note}
       tiida: {display: Nissan Tiida}
       primera: {display: Nissan Primera}
+      almera_classic: {display: Nissan Almera Classic}
+      pathfinder: {display: Nissan Pathfinder}
   Mitsubishi:
     models:
       outlander: {display: Mitsubishi Outlander}
@@ -98,11 +103,13 @@ brands:
       pajero: {display: Mitsubishi Pajero}
       asx: {display: Mitsubishi ASX}
       pajero_sport: {display: Mitsubishi Pajero Sport}
+      galant: {display: Mitsubishi Galant}
   Mazda:
     models:
       "3": {display: Mazda 3}
       "6": {display: Mazda 6}
       cx5: {display: Mazda CX-5}
+      cx_7: {display: Mazda CX-7}
   Honda:
     models:
       cr_v: {display: Honda CR-V}
@@ -144,6 +151,8 @@ brands:
       elantra: {display: Hyundai Elantra}
       sonata: {display: Hyundai Sonata}
       i30: {display: Hyundai i30}
+      i40: {display: Hyundai i40}
+      palisade: {display: Hyundai Palisade}
   Solaris:
     models:
       hs: {display: Solaris HS}
@@ -184,6 +193,7 @@ brands:
       corsa: {display: Opel Corsa}
       insignia: {display: Opel Insignia}
       vectra: {display: Opel Vectra}
+      mokka: {display: Opel Mokka}
 
   # ------------------------------------------------------- немецкие премиум, 9
   # Доля парка невелика, но узнаваемости пользователь ждёт от этих марок в первую
@@ -197,6 +207,8 @@ brands:
       s_class: {display: Mercedes-Benz S-Class}
       gl: {display: Mercedes-Benz GL / GLS}
       glc: {display: Mercedes-Benz GLC / GLK}
+      a_class: {display: Mercedes-Benz A-Class}
+      cla: {display: Mercedes-Benz CLA}
   BMW:
     models:
       "3_series": {display: BMW 3 Series}
@@ -209,6 +221,7 @@ brands:
       x4: {display: BMW X4}
       x6: {display: BMW X6}
       x7: {display: BMW X7}
+      "6_series": {display: BMW 6 Series}
   Audi:
     models:
       a4: {display: Audi A4}
@@ -231,6 +244,7 @@ brands:
       kaptur: {display: Renault Kaptur}
       arkana: {display: Renault Arkana}
       logan_mcv: {display: Renault Logan MCV}
+      fluence: {display: Renault Fluence}
   Peugeot:
     models:
       "206": {display: Peugeot 206}
@@ -333,6 +347,8 @@ brands:
       xc60: {display: Volvo XC60}
       xc90: {display: Volvo XC90}
       s60: {display: Volvo S60}
+      s80: {display: Volvo S80}
+      xc70: {display: Volvo XC70}
   Land Rover:
     models:
       discovery: {display: Land Rover Discovery}
@@ -352,6 +368,7 @@ brands:
   Porsche:
     models:
       cayenne: {display: Porsche Cayenne}
+      macan: {display: Porsche Macan}
   MINI:
     models:
       hatch: {display: MINI Hatch}
