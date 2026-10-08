@@ -1,4 +1,4 @@
-"""Отказные прототипы 0.8.2: банк, прототипы, перекрёстная оценка по моделям, точка, гейт П1–П3.
+"""Отказные прототипы 0.8.2: банк, прототипы, перекрёстная оценка по моделям, точка, гейт П1′–П3.
 
 Банк — три домена (студийные и уличные чужие машины, не-машины COCO).
 
@@ -48,7 +48,6 @@ from training.calibration import (
 )
 from training.eval_open_set import (
     NO_REJECT,
-    OpenSetFold,
     OpenSetPoint,
     binding_constraint,
     cross_fit_open_set,
@@ -66,11 +65,13 @@ from training.tune_thresholds import (
 
 DEFAULT_SEED = 20261008
 FOLDS = 5
-POINT_MAX_FPR = 0.13  # предел точки на каждую группу: запас под шум подбора
-GATE_MAX_FPR = 0.15  # предел П2 на отложенных половинах
-GATE_GAIN = 0.02  # П1
-EXPLORED_COVERAGE = 0.807  # разведка предрегистрации, П3
-EXPLORED_PAIR = (0.68, 0.0, 0.04)
+POINT_MAX_FPR = 0.12  # предел точки на каждую группу: запас под шум раскладки (поправка 1)
+STUDY_SEEDS = tuple(range(20261100, 20261120))  # раскладки половин (поправка 1)
+GATE_MEAN_GAIN = 0.03  # П1′: среднее по замерам
+GATE_MEAN_FPR = 0.14  # П2′: среднее по замерам, на каждую группу
+GATE_MAX_FPR = 0.17  # П2′: максимум по замерам
+EXPLORED_COVERAGE = 0.798  # разведка при пределе 0.12, П3
+EXPLORED_PAIR = (0.71, 0.0, 0.04)
 GROUPS = ("AE", "MAD", "NC")
 CATALOG_NAME_FILES = ("mad_cars", "mad_cars_disputed", "mad_cars_cat236_names")
 
@@ -162,47 +163,83 @@ def cross_fit_r(
 
 
 @dataclass(frozen=True, slots=True)
+class StudyRow:
+    """Отложенный замер раскладки: покрытие без прототипов и с ними, FPR групп с прототипами."""
+
+    seed: int
+    side: str
+    base_coverage: float
+    new_coverage: float
+    new_fpr: dict[str, float]
+
+
+def split_study(
+    known: Scores,
+    groups: Mapping[str, Scores],
+    group_keys: Mapping[str, np.ndarray],
+    truth: np.ndarray,
+    seeds: Sequence[int],
+    *,
+    max_fpr: float = POINT_MAX_FPR,
+) -> list[StudyRow]:
+    """Перекрёстная проверка на нескольких раскладках половин: подбор на одной, замер на другой.
+
+    Половины делятся по моделям (негативы) и по классам (знакомые) своим seed на раскладку;
+    прототипы фолдов от раскладки не зависят. Без прототипов — те же оценки с `sim_reject=None`.
+    """
+    база_знакомые = replace(known, sim_reject=None)
+    база_группы = {г: replace(s, sim_reject=None) for г, s in groups.items()}
+    строки: list[StudyRow] = []
+    for seed in seeds:
+        половины = {г: split_by_group(group_keys[г], seed) for г in groups}
+        знакомые_a = split_halves(truth, seed)
+        база = cross_fit_open_set(
+            база_знакомые, база_группы, знакомые_a, половины, max_fpr=max_fpr, reject_grid=NO_REJECT
+        )
+        новая = cross_fit_open_set(
+            known, groups, знакомые_a, половины, max_fpr=max_fpr, reject_grid=REJECT_GRID
+        )
+        for б, н in zip(база, новая, strict=True):
+            if б.held_out is None or н.held_out is None:
+                raise ValueError(f"раскладка {seed}/{н.tuned_on}: точки нет, замер невозможен")
+            строки.append(
+                StudyRow(seed, н.tuned_on, б.held_out.coverage, н.held_out.coverage, н.held_out.fpr)
+            )
+    return строки
+
+
+@dataclass(frozen=True, slots=True)
 class GateCheck:
     name: str
     passed: bool
     detail: str
 
 
-def evaluate_gate(
-    base_folds: Sequence[OpenSetFold],
-    new_folds: Sequence[OpenSetFold],
-    final: OpenSetPoint | None,
-) -> list[GateCheck]:
-    """П1–П3 предрегистрации."""
-    проверки: list[GateCheck] = []
-    приросты: list[str] = []
-    верно_п1 = True
-    for база, новая in zip(base_folds, new_folds, strict=True):
-        if база.held_out is None or новая.held_out is None:
-            верно_п1 = False
-            приросты.append(f"{новая.tuned_on}: точки нет")
-            continue
-        прирост = новая.held_out.coverage - база.held_out.coverage
-        верно_п1 = верно_п1 and прирост >= GATE_GAIN - 1e-12
-        приросты.append(f"{новая.tuned_on}: {прирост:+.3f}")
-    проверки.append(
-        GateCheck("П1 прирост покрытия отложенных половин ≥ +0.02", верно_п1, ", ".join(приросты))
-    )
-    верно_п2 = True
-    превышения: list[str] = []
-    for новая in new_folds:
-        if новая.held_out is None:
-            верно_п2 = False
-            continue
-        for группа, fpr in новая.held_out.fpr.items():
-            if fpr > GATE_MAX_FPR:
-                верно_п2 = False
-                превышения.append(f"{новая.tuned_on}/{группа} {fpr:.3f}")
+def evaluate_gate(study: Sequence[StudyRow], final: OpenSetPoint | None) -> list[GateCheck]:
+    """П1′–П3 поправки 1 предрегистрации."""
+    приросты = np.array([r.new_coverage - r.base_coverage for r in study])
+    п1 = bool(приросты.mean() >= GATE_MEAN_GAIN - 1e-12 and приросты.min() > 0)
+    проверки = [
+        GateCheck(
+            f"П1′ прирост покрытия: среднее ≥ +{GATE_MEAN_GAIN}, минимум > 0",
+            п1,
+            f"среднее {приросты.mean():+.3f}, минимум {приросты.min():+.3f}, замеров {len(study)}",
+        )
+    ]
+    подробности: list[str] = []
+    п2 = True
+    for группа in sorted({г for r in study for г in r.new_fpr}):
+        значения = np.array([r.new_fpr[группа] for r in study])
+        верно = bool(значения.mean() <= GATE_MEAN_FPR + 1e-12 and значения.max() <= GATE_MAX_FPR)
+        п2 = п2 and верно
+        подробности.append(
+            f"{группа}: среднее {значения.mean():.3f}, максимум {значения.max():.3f}"
+        )
     проверки.append(
         GateCheck(
-            "П2 FPR групп на отложенных половинах ≤ 0.15",
-            верно_п2,
-            ", ".join(превышения) or "в пределе",
+            f"П2′ FPR отложенных: среднее ≤ {GATE_MEAN_FPR}, максимум ≤ {GATE_MAX_FPR}",
+            п2,
+            "; ".join(подробности),
         )
     )
     if final is None:
@@ -212,7 +249,7 @@ def evaluate_gate(
         верно_п3 = abs(final.coverage - EXPLORED_COVERAGE) <= 0.001 and пара == EXPLORED_PAIR
         проверки.append(
             GateCheck(
-                "П3 точка воспроизводит разведку (0.807; 0.68/0.000/0.04)",
+                f"П3 точка воспроизводит разведку ({EXPLORED_COVERAGE}; {EXPLORED_PAIR})",
                 верно_п3,
                 f"{final.coverage:.3f}; {пара}",
             )
@@ -235,8 +272,7 @@ def render_report(
     *,
     final_base: OpenSetPoint | None,
     final_new: OpenSetPoint | None,
-    base_folds: Sequence[OpenSetFold],
-    new_folds: Sequence[OpenSetFold],
+    study: Sequence[StudyRow],
     separability: Mapping[str, tuple[float, float]],
     checks: Sequence[GateCheck],
     counts: Mapping[str, int],
@@ -247,19 +283,29 @@ def render_report(
     строки += ["", "## Выборки", ""] + [f"- {k}: {v}" for k, v in counts.items()]
     строки += [
         "",
-        "## Точка и отложенные половины (sim_min / margin_min / reject_margin; FPR групп ≤ 0.13)",
+        f"## Точка итога (sim_min / margin_min / reject_margin; FPR групп ≤ {POINT_MAX_FPR})",
         "",
-        "| вариант | где | точка и результат |",
-        "|---|---|---|",
-        f"| без прототипов | итог | {_точка_md(final_base)} |",
-        f"| с прототипами | итог | {_точка_md(final_new)} |",
+        "| вариант | точка и результат |",
+        "|---|---|",
+        f"| без прототипов | {_точка_md(final_base)} |",
+        f"| с прототипами | {_точка_md(final_new)} |",
+        "",
+        f"## Отложенные половины: {len(study)} замеров ({len(study) // 2} раскладок × 2 стороны)",
+        "",
+        "| показатель | среднее | минимум | максимум |",
+        "|---|---|---|---|",
     ]
-    for вариант, фолды in (("без прототипов", base_folds), ("с прототипами", new_folds)):
-        for ф in фолды:
-            строки.append(f"| {вариант} | сторона {ф.tuned_on}, подбор | {_точка_md(ф.chosen)} |")
-            строки.append(
-                f"| {вариант} | сторона {ф.tuned_on}, отложенная | {_точка_md(ф.held_out)} |"
-            )
+    для_таблицы = {
+        "покрытие без прототипов": np.array([r.base_coverage for r in study]),
+        "покрытие с прототипами": np.array([r.new_coverage for r in study]),
+        "прирост покрытия": np.array([r.new_coverage - r.base_coverage for r in study]),
+    }
+    for группа in sorted({г for r in study for г in r.new_fpr}):
+        для_таблицы[f"FPR {группа} с прототипами"] = np.array([r.new_fpr[группа] for r in study])
+    строки += [
+        f"| {имя} | {v.mean():.3f} | {v.min():.3f} | {v.max():.3f} |"
+        for имя, v in для_таблицы.items()
+    ]
     строки += [
         "",
         "## Разделимость",
@@ -268,7 +314,7 @@ def render_report(
         "|---|---|---|",
     ]
     строки += [f"| {g} | {a:.3f} | {b:.3f} |" for g, (a, b) in separability.items()]
-    строки += ["", "## Гейт П1–П3", ""]
+    строки += ["", "## Гейт П1′–П3", ""]
     строки += [f"- {'✓' if п.passed else '✗'} {п.name}: {п.detail}" for п in checks]
     строки += ["", f"**Вердикт:** {'пройден' if all(п.passed for п in checks) else 'СТОП'}."]
     return "\n".join(строки)
@@ -276,7 +322,7 @@ def render_report(
 
 def main(argv: Sequence[str] | None = None) -> int:
     парсер = argparse.ArgumentParser(
-        description="Прототипы 0.8.2: сборка, перекрёстная оценка, точка, гейт П1–П3"
+        description="Прототипы 0.8.2: сборка, перекрёстная оценка, точка, гейт П1′–П3"
     )
     парсер.add_argument("--models", type=Path, required=True, help="ассеты 0.8.1 (fp32)")
     парсер.add_argument("--expected-sha", required=True, help="sha256 классификатора")
@@ -359,13 +405,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     группы: dict[str, Scores] = {}
     группы_база: dict[str, Scores] = {}
-    половины: dict[str, np.ndarray] = {}
+    ключи_групп: dict[str, np.ndarray] = {}
     for имя in GROUPS:
         r = cross_fit_r(банк, идеи[имя], по_фолдам)
         группы[имя] = replace(базовые[имя], sim_reject=r)
         группы_база[имя] = базовые[имя]
-        половины[имя] = split_by_group(np.array([банк.keys[i] for i in идеи[имя]]), аргументы.seed)
-    половина_знакомых = split_halves(истина, аргументы.seed)
+        ключи_групп[имя] = np.array([банк.keys[i] for i in идеи[имя]])
 
     итог_база = select_open_set_pair(
         база_знакомые, группы_база, max_fpr=POINT_MAX_FPR, reject_grid=NO_REJECT
@@ -373,28 +418,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     итог_новая = select_open_set_pair(
         знакомые, группы, max_fpr=POINT_MAX_FPR, reject_grid=REJECT_GRID
     )
-    стороны_база = cross_fit_open_set(
-        база_знакомые,
-        группы_база,
-        половина_знакомых,
-        половины,
-        max_fpr=POINT_MAX_FPR,
-        reject_grid=NO_REJECT,
-    )
-    стороны_новая = cross_fit_open_set(
-        знакомые,
-        группы,
-        половина_знакомых,
-        половины,
-        max_fpr=POINT_MAX_FPR,
-        reject_grid=REJECT_GRID,
-    )
+    замеры = split_study(знакомые, группы, ключи_групп, истина, STUDY_SEEDS)
     разрыв = знакомые.sim1 - знакомые.sim_reject
     разделимость = {
         г: (auroc(знакомые.sim1, s.sim1), auroc(разрыв, s.sim1 - s.sim_reject))
         for г, s in группы.items()
     }
-    проверки = evaluate_gate(стороны_база, стороны_новая, итог_новая)
+    проверки = evaluate_gate(замеры, итог_новая)
     счётчики = {
         "знакомые (релевантный набор)": len(эталон),
         "банк, всего": len(банк.embeddings),
@@ -415,14 +445,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "folds": str(FOLDS),
         "k_по_видам": json.dumps(dict(CENTROIDS_PER_KIND)),
         "point_max_fpr": str(POINT_MAX_FPR),
+        "study_seeds": f"{STUDY_SEEDS[0]}…{STUDY_SEEDS[-1]}",
     }
     write_generated_section(
         аргументы.report,
         render_report(
             final_base=итог_база,
             final_new=итог_новая,
-            base_folds=стороны_база,
-            new_folds=стороны_новая,
+            study=замеры,
             separability=разделимость,
             checks=проверки,
             counts=счётчики,
