@@ -20,8 +20,9 @@ import numpy as np
 from pipeline.centroids import centroids_for_class
 from pipeline.index_format import FORMAT_VERSION, read_index, verify_meta, write_index
 
-REJECT_KINDS = ("off_catalog_street", "truck_bus")
-CENTROIDS_PER_KIND = 32
+REJECT_KINDS = ("foreign_car", "non_car")
+# K по видам зафиксирован предрегистрацией 0.8.2: чужие машины — три домена, не-машины — COCO.
+CENTROIDS_PER_KIND: Mapping[str, int] = {"foreign_car": 256, "non_car": 64}
 CENTROIDS_PER_CLASS = 4
 REJECT_INDEX_NAME = "reject_index.bin"
 REJECT_META_NAME = "reject_meta.json"
@@ -35,26 +36,25 @@ def build_reject_centroids(
     embeddings_by_kind: Mapping[str, np.ndarray],
     *,
     kmeans: Callable[[np.ndarray, int], np.ndarray],
-    centroids_per_kind: int = CENTROIDS_PER_KIND,
+    centroids_per_kind: Mapping[str, int] = CENTROIDS_PER_KIND,
 ) -> tuple[np.ndarray, list[str]]:
     """Центроиды `(классы, 4, dim)` и вид каждого класса; виды — в порядке `REJECT_KINDS`.
 
-    Кадров меньше `centroids_per_kind` — падение, а не добивка повтором, как у классов
-    каталога: K зафиксирован до замера, и молча меньше кластеров значило бы мерить не то.
+    Кадров меньше K вида — падение, а не добивка повтором, как у классов каталога: K
+    зафиксирован до замера, и молча меньше кластеров значило бы мерить не то.
     """
-    if centroids_per_kind % CENTROIDS_PER_CLASS:
-        raise RejectIndexError(f"K={centroids_per_kind} не делится на {CENTROIDS_PER_CLASS}")
-    классов = centroids_per_kind // CENTROIDS_PER_CLASS
     части: list[np.ndarray] = []
     виды: list[str] = []
     for вид in REJECT_KINDS:
+        k = centroids_per_kind[вид]
+        if k % CENTROIDS_PER_CLASS:
+            raise RejectIndexError(f"вид {вид}: K={k} не делится на {CENTROIDS_PER_CLASS}")
+        классов = k // CENTROIDS_PER_CLASS
         эмбеддинги = embeddings_by_kind.get(вид)
         кадров = 0 if эмбеддинги is None else len(эмбеддинги)
-        if эмбеддинги is None or кадров < centroids_per_kind:
-            raise RejectIndexError(f"вид {вид}: кадров {кадров}, нужно ≥ {centroids_per_kind}")
-        центры = centroids_for_class(
-            эмбеддинги, centroids_per_class=centroids_per_kind, kmeans=kmeans
-        )
+        if эмбеддинги is None or кадров < k:
+            raise RejectIndexError(f"вид {вид}: кадров {кадров}, нужно ≥ {k}")
+        центры = centroids_for_class(эмбеддинги, centroids_per_class=k, kmeans=kmeans)
         части.append(центры.reshape(классов, CENTROIDS_PER_CLASS, центры.shape[1]))
         виды += [вид] * классов
     return np.concatenate(части).astype(np.float32), виды

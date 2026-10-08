@@ -155,7 +155,7 @@ def sha256_of_file(path: Path) -> str:
     return хеш.hexdigest()
 
 
-def kmeans_factory(seed: int) -> Callable[[np.ndarray, int], np.ndarray]:
+def kmeans_factory(seed: int, n_init: int = 10) -> Callable[[np.ndarray, int], np.ndarray]:
     """k-means с фиксированным сидом: две сборки на одних весах дают одни кластеры.
 
     Кластеры воспроизводимы, но **не побайтно**: sklearn считает Ллойда в несколько потоков,
@@ -167,11 +167,14 @@ def kmeans_factory(seed: int) -> Callable[[np.ndarray, int], np.ndarray]:
     Функция публичная потому, что тот же k-means нужен few-shot сборке индекса
     (`scripts/build_fewshot_index.py`): вторая копия сравнивала бы заодно две реализации
     кластеризации.
+
+    `n_init` по умолчанию 10, как у каталога; отказные прототипы 0.8.2 берут 1 — так их считала
+    разведка предрегистрации (`bench/reject-v2-preregistration.md`).
     """
     from sklearn.cluster import KMeans
 
     def kmeans(эмбеддинги: np.ndarray, k: int) -> np.ndarray:
-        модель = KMeans(n_clusters=k, init="k-means++", n_init=10, random_state=seed)
+        модель = KMeans(n_clusters=k, init="k-means++", n_init=n_init, random_state=seed)
         модель.fit(эмбеддинги)
         return np.asarray(модель.cluster_centers_, dtype=np.float32)
 
