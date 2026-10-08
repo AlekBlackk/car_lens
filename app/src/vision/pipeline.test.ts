@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'vitest'
 import { EMA_ALPHA } from './ema'
-import type { Box, EmbedMatchResult, Match } from './plugins'
+import type { Box, EmbedMatchResult } from './plugins'
 import {
   BRIDGE_CONTRACT_ERROR,
   ПУСТОЕ_СОСТОЯНИЕ,
   stepPipeline,
   MAX_HYPOTHESES,
   type МостКонвейера,
+  type ОтветEma,
   type СостояниеКонвейера,
 } from './pipeline'
 import { CLASSIFY_INTERVAL_MS, MAX_CROPS } from './throttle'
@@ -33,15 +34,19 @@ const мост = (правки: Partial<МостКонвейера> = {}): Мо�
       }
       return итог
     },
-    matchEma(вектор: Float32Array): Match[] {
+    matchEma(вектор: Float32Array): ОтветEma {
       // Длина проверяется, чтобы параметр не оказался неиспользованным: eslint считает
       // такой аргумент ошибкой, а тестовые файлы линтуются наравне с остальными.
-      return вектор.length > 0
-        ? [
-            { classIdx: 11, sim: 0.9 },
-            { classIdx: 12, sim: 0.1 },
-          ]
-        : []
+      return {
+        matches:
+          вектор.length > 0
+            ? [
+                { classIdx: 11, sim: 0.9 },
+                { classIdx: 12, sim: 0.1 },
+              ]
+            : [],
+        rejectSim: null,
+      }
     },
   }
   return { ...базовый, ...правки }
@@ -236,13 +241,16 @@ describe('stepPipeline', () => {
 
   test('трек несёт не больше MAX_HYPOTHESES гипотез и в порядке моста', () => {
     const м = мост({
-      matchEma: (): Match[] => [
-        { classIdx: 1, sim: 0.9 },
-        { classIdx: 2, sim: 0.8 },
-        { classIdx: 3, sim: 0.7 },
-        { classIdx: 4, sim: 0.6 },
-        { classIdx: 5, sim: 0.5 },
-      ],
+      matchEma: (): ОтветEma => ({
+        matches: [
+          { classIdx: 1, sim: 0.9 },
+          { classIdx: 2, sim: 0.8 },
+          { classIdx: 3, sim: 0.7 },
+          { classIdx: 4, sim: 0.6 },
+          { classIdx: 5, sim: 0.5 },
+        ],
+        rejectSim: null,
+      }),
     })
     const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0)], 1000), м)
     const топы = итог.состояние.tracks[0]!.tops
@@ -254,13 +262,16 @@ describe('stepPipeline', () => {
 
   test('решение считают две первые гипотезы: третья на него не влияет', () => {
     const м = мост({
-      matchEma: (): Match[] => [
-        { classIdx: 11, sim: 0.9 },
-        { classIdx: 12, sim: 0.1 },
-        // Ближе к топ-1, чем позволяет marginMin: попади она в топ-2, «модель» стала бы
-        // «неизвестно». Тест на то, что решатель берёт первые две гипотезы, а не любые две.
-        { classIdx: 13, sim: 0.89 },
-      ],
+      matchEma: (): ОтветEma => ({
+        matches: [
+          { classIdx: 11, sim: 0.9 },
+          { classIdx: 12, sim: 0.1 },
+          // Ближе к топ-1, чем позволяет marginMin: попади она в топ-2, «модель» стала бы
+          // «неизвестно». Тест на то, что решатель берёт первые две гипотезы, а не любые две.
+          { classIdx: 13, sim: 0.89 },
+        ],
+        rejectSim: null,
+      }),
     })
     const состояние = прогнать(4, м)
     const итог = stepPipeline(состояние, вход([бокс(0)], 800), м)
@@ -271,11 +282,35 @@ describe('stepPipeline', () => {
   })
 
   test('одна гипотеза от моста — один элемент в топах, решение без топ-2', () => {
-    const м = мост({ matchEma: (): Match[] => [{ classIdx: 7, sim: 0.95 }] })
+    const м = мост({
+      matchEma: (): ОтветEma => ({ matches: [{ classIdx: 7, sim: 0.95 }], rejectSim: null }),
+    })
     const состояние = прогнать(4, м)
     const итог = stepPipeline(состояние, вход([бокс(0)], 800), м)
     expect(итог.состояние.tracks[0]!.tops).toHaveLength(1)
     expect(итог.подписи[0]!.decision.kind).toBe('модель')
+  })
+
+  test('сходство с отказными прототипами от моста ложится в трек и переживает шаги', () => {
+    const м = мост({
+      matchEma: (): ОтветEma => ({
+        matches: [
+          { classIdx: 11, sim: 0.9 },
+          { classIdx: 12, sim: 0.1 },
+        ],
+        rejectSim: 0.31,
+      }),
+    })
+    const состояние = прогнать(4, м)
+    expect(состояние.tracks[0]!.rejectSim).toBe(0.31)
+    // Кадр без классификации (интервал не истёк) не обнуляет значение трека.
+    const итог = stepPipeline(состояние, вход([бокс(0)], 4 * 200 + 1), м)
+    expect(итог.состояние.tracks[0]!.rejectSim).toBe(0.31)
+  })
+
+  test('без прототипов мост отдаёт null, и трек несёт null', () => {
+    const итог = stepPipeline(ПУСТОЕ_СОСТОЯНИЕ, вход([бокс(0)], 1000), мост())
+    expect(итог.состояние.tracks[0]!.rejectSim).toBeNull()
   })
 })
 

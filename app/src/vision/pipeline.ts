@@ -31,6 +31,8 @@ export type Трек = {
   classifiedAt: number
   ema: number[] | null
   tops: Match[]
+  /** Сходство EMA-вектора с отказными прототипами; `null` — прототипов нет. */
+  rejectSim: number | null
 }
 
 /** Поля ASCII по той же причине, что у `Трек`: объект целиком лежит в `SharedValue`. */
@@ -56,9 +58,12 @@ export type СобытиеКлассификации = {
   decisionKey: string
 }
 
+/** Ответ моста по EMA-вектору: top-K каталога и (если есть прототипы) сходство с отказными. */
+export type ОтветEma = { matches: Match[]; rejectSim: number | null }
+
 export type МостКонвейера = {
   embed(боксы: Box[]): EmbedMatchResult[]
-  matchEma(вектор: Float32Array): Match[]
+  matchEma(вектор: Float32Array): ОтветEma
 }
 
 /**
@@ -144,6 +149,7 @@ export function stepPipeline(
       classifiedAt: прежний.classifiedAt,
       ema: прежний.ema,
       tops: прежний.tops,
+      rejectSim: прежний.rejectSim,
     })
   }
   for (let к = 0; к < итогТрекера.рождённые.length; к++) {
@@ -159,6 +165,7 @@ export function stepPipeline(
       classifiedAt: nowMs - CLASSIFY_INTERVAL_MS,
       ema: null,
       tops: [],
+      rejectSim: null,
     })
   }
 
@@ -191,7 +198,9 @@ export function stepPipeline(
       трек.ema = шаг.вектор
       трек.observations = трек.observations + 1
       трек.classifiedAt = nowMs
-      трек.tops = мост.matchEma(toFloat32(шаг.вектор!)).slice(0, MAX_HYPOTHESES)
+      const ответEma = мост.matchEma(toFloat32(шаг.вектор!))
+      трек.tops = ответEma.matches.slice(0, MAX_HYPOTHESES)
+      трек.rejectSim = ответEma.rejectSim
       const мгновенные = результаты[к]!.matches
       события.push({
         id,
@@ -214,6 +223,7 @@ export function stepPipeline(
         топ1,
         топ2,
         брендыСовпали: топ1 != null && топ2 != null ? sameBrand(топ1.classIdx, топ2.classIdx) : false,
+        сходствоОтказа: трек.rejectSim,
       },
       THRESHOLDS,
       CALIBRATION,

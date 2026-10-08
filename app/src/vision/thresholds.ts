@@ -25,6 +25,8 @@ export type Пороги = {
   minObservations: number
   minShortSidePx: number
   tuned: boolean
+  /** Порог отказного прототипа §3 спеки 0.8.2; `null` — прототипов в ассетах нет. */
+  rejectMargin: number | null
 }
 
 /**
@@ -66,12 +68,22 @@ export function parseThresholds(документ: unknown): Пороги {
   if (короткаяСторона < 0) {
     throw new AssetError(`min_short_side_px: ${короткаяСторона} меньше нуля`)
   }
+  // Поле необязательное: у сборок без отказных прототипов его нет, и решение тогда
+  // идёт по прежним веткам. Порог в [-1, 1]: это разность двух косинусов.
+  let rejectMargin: number | null = null
+  if (поля.reject_margin !== undefined) {
+    rejectMargin = конечное(поля.reject_margin, 'reject_margin')
+    if (rejectMargin < -1 || rejectMargin > 1) {
+      throw new AssetError(`reject_margin: ${rejectMargin} вне [-1, 1]`)
+    }
+  }
   return {
     simMin: вЕдиничномОтрезке(конечное(поля.sim_min, 'sim_min'), 'sim_min'),
     marginMin: вЕдиничномОтрезке(конечное(поля.margin_min, 'margin_min'), 'margin_min'),
     minObservations: наблюдений,
     minShortSidePx: короткаяСторона,
     tuned: поля.tuned === true,
+    rejectMargin,
   }
 }
 

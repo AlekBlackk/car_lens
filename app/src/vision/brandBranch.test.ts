@@ -11,7 +11,7 @@
 import { describe, expect, test, vi } from 'vitest'
 import type { Решение } from './decide'
 import { allClasses } from './labels'
-import { ПУСТОЕ_СОСТОЯНИЕ, stepPipeline, type МостКонвейера } from './pipeline'
+import { ПУСТОЕ_СОСТОЯНИЕ, stepPipeline, type МостКонвейера, type ОтветEma } from './pipeline'
 import type { Box, EmbedMatchResult, Match } from './plugins'
 
 vi.mock('../../android/models/catalog_meta.json', () => ({
@@ -69,7 +69,10 @@ const решениеПоТопам = (топы: Match[]): Решение => {
   const мост: МостКонвейера = {
     embed: (боксы: Box[]): EmbedMatchResult[] =>
       боксы.map(() => ({ embedding: Float32Array.from([1, 0, 0]), matches: топы })),
-    matchEma: (вектор: Float32Array): Match[] => (вектор.length > 0 ? топы : []),
+    matchEma: (вектор: Float32Array): ОтветEma => ({
+      matches: вектор.length > 0 ? топы : [],
+      rejectSim: null,
+    }),
   }
   let состояние = ПУСТОЕ_СОСТОЯНИЕ
   let решение: Решение = { kind: 'определяю' }

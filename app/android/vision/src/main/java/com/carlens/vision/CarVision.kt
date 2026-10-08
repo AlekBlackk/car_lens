@@ -58,6 +58,7 @@ data class AssetSpec(
  */
 class CarVision private constructor(
     private val index: CatalogIndex,
+    private val rejectIndex: CatalogIndex?,
     private val classifier: Classifier,
     private val detector: Detector,
 ) : AutoCloseable {
@@ -104,6 +105,19 @@ class CarVision private constructor(
             val эмбеддинг = classifier.embed(frame, бокс, pad)
             EmbedResult(эмбеддинг, index.knn(эмбеддинг, topK))
         }
+    }
+
+    /** Есть ли в ассетах отказные прототипы (`files.reject_index` манифеста). */
+    val hasRejectIndex: Boolean get() = rejectIndex != null
+
+    /**
+     * Лучшее сходство вектора с отказными прототипами; `null` — прототипов в ассетах нет, и
+     * решение идёт по прежним веткам. Нормализацию берёт на себя, как `matchEmbedding`.
+     */
+    fun rejectSim(embedding: FloatArray): Float? {
+        проверитьЖивость()
+        val прототипы = rejectIndex ?: return null
+        return прототипы.maxSim(Embeddings.l2NormalizedCopy(embedding, indexInfo.embeddingDim))
     }
 
     /** Совпадения для готового вектора: нормализацию берёт на себя. */
@@ -231,6 +245,24 @@ class CarVision private constructor(
             val индексныеБайты = прочитать(assets, манифест, spec, "index")
             val мета = прочитать(assets, манифест, spec, "meta")
             val индекс = CatalogIndex.parse(индексныеБайты, мета, Embeddings::sha256)
+            // Прототипы необязательны: у сборок без них в манифесте нет `reject_index`, и приложение
+            // ведёт себя как раньше. Есть одно — должно быть и второе, и размерность та же.
+            val индексОтказа = if ("reject_index" in манифест.files) {
+                CatalogIndex.parse(
+                    прочитать(assets, манифест, spec, "reject_index"),
+                    прочитать(assets, манифест, spec, "reject_meta"),
+                    Embeddings::sha256,
+                ).also {
+                    if (it.header.embeddingDim != индекс.header.embeddingDim) {
+                        throw AssetMismatchException(
+                            "размерность прототипов ${it.header.embeddingDim} против " +
+                                "${индекс.header.embeddingDim} у каталога"
+                        )
+                    }
+                }
+            } else {
+                null
+            }
 
             val классификатор = Classifier(
                 model = прямойБуфер(прочитать(assets, манифест, spec, "classifier")),
@@ -249,7 +281,7 @@ class CarVision private constructor(
                 классификатор.close()
                 throw отказ
             }
-            return CarVision(индекс, классификатор, детектор)
+            return CarVision(индекс, индексОтказа, классификатор, детектор)
         }
 
         private fun прочитать(

@@ -37,7 +37,19 @@ describe('parseThresholds', () => {
       minObservations: 3,
       minShortSidePx: 120,
       tuned: false,
+      rejectMargin: null,
     })
+  })
+
+  test('reject_margin разбирается и необязателен', () => {
+    expect(parseThresholds({ ...пороги, reject_margin: 0.04 }).rejectMargin).toBe(0.04)
+    expect(parseThresholds({ ...пороги, reject_margin: -0.05 }).rejectMargin).toBe(-0.05)
+  })
+
+  test('reject_margin вне [-1, 1] или не число роняет разбор', () => {
+    expect(() => parseThresholds({ ...пороги, reject_margin: 1.5 })).toThrow(/reject_margin/)
+    expect(() => parseThresholds({ ...пороги, reject_margin: NaN })).toThrow(AssetError)
+    expect(() => parseThresholds({ ...пороги, reject_margin: '0.04' })).toThrow(/reject_margin/)
   })
 
   test('NaN в поле роняет разбор с именем поля', () => {

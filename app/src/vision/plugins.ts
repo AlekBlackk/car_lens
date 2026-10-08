@@ -207,12 +207,18 @@ type RawMatchResult = {
   nativeNs: number
   count: number
   matches: ArrayBuffer
+  rejectSim?: number
 }
 
 const matchPlugin = VisionCameraProxy.initFrameProcessorPlugin('carvisionMatchEmbedding', {})
 
 /** `nativeMs` — время нативной стороны на весь вызов `matchEmbedding` (Task 10). */
-export type MatchCallResult = { matches: Match[]; nativeMs: number }
+export type MatchCallResult = {
+  matches: Match[]
+  nativeMs: number
+  /** Сходство с отказными прототипами; `null` — их в ассетах нет (поле не пришло). */
+  rejectSim: number | null
+}
 
 /**
  * top-K для вектора, который JS уже держит у себя.
@@ -251,5 +257,6 @@ export function matchEmbedding(frame: Frame, embedding: Float32Array, topK: numb
   for (let к = 0; к < сырое.count; к++) {
     результат.push({ classIdx: числа[к * 2]!, sim: числа[к * 2 + 1]! })
   }
-  return { matches: результат, nativeMs: сырое.nativeNs / 1e6 }
+  const отказ = typeof сырое.rejectSim === 'number' ? сырое.rejectSim : null
+  return { matches: результат, nativeMs: сырое.nativeNs / 1e6, rejectSim: отказ }
 }

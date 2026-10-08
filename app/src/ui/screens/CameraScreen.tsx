@@ -398,7 +398,7 @@ export default function CameraScreen(свойства: СвойстваКаме�
             // зовётся на кадре, хотя ищет по чужому вектору.
             const ответ = matchEmbedding(frame, вектор, CLASSIFY_TOP_K)
             markBridgeCost('matchEmbedding', tMatchДо, bridgeClock(), ответ.nativeMs)
-            return ответ.matches
+            return { matches: ответ.matches, rejectSim: ответ.rejectSim }
           },
         }
 

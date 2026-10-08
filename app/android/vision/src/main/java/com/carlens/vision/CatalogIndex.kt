@@ -125,6 +125,32 @@ class CatalogIndex(
     }
 
     /**
+     * Лучшее сходство с любым центроидом индекса — `r` отказных прототипов.
+     *
+     * Классы здесь не различаются: прототипу неважно, какой из отказных «классов» ближе,
+     * важно лишь, насколько. Та же операция в Python — `pipeline.knn.max_sim`. Вектор обязан
+     * быть нормализован: нормализует `Embeddings.l2NormalizedCopy`.
+     */
+    fun maxSim(embedding: FloatArray): Float {
+        if (embedding.size != header.embeddingDim) {
+            throw IndexFormatException(
+                "размерность ${embedding.size} против ${header.embeddingDim} в индексе"
+            )
+        }
+        var максимум = Float.NEGATIVE_INFINITY
+        val центроидов = header.numClasses * header.centroidsPerClass
+        for (центроид in 0 until центроидов) {
+            var произведение = 0f
+            val смещение = центроид * header.embeddingDim
+            for (измерение in 0 until header.embeddingDim) {
+                произведение += body[смещение + измерение] * embedding[измерение]
+            }
+            if (произведение > максимум) максимум = произведение
+        }
+        return максимум
+    }
+
+    /**
      * Класс без эталонных кадров записан в индексе нулями: договорённая метка §13.2, её
      * пишет `training/build_index.py` (`stack_centroids(allow_empty=True)`). После чистки
      * чужих моделей таких классов 16 из 150.
