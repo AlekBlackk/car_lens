@@ -116,17 +116,21 @@ def write_reject_index(
     return out_dir
 
 
-def read_reject_index(directory: Path, classifier_sha256: str) -> np.ndarray:
+def read_reject_index(directory: Path, classifier_sha256: str | None) -> np.ndarray:
     """Центроиды прототипов, если их собрал тот же классификатор, что меряется.
 
     Прототипы от другой модели живут в чужом пространстве эмбеддингов: сходства с ними
     правдоподобны и бессмысленны, поэтому несовпадение — падение, а не предупреждение.
+
+    `None` — сверку sha пропустить: так читают прототипы из каталога ассетов, где их уже
+    сверил `scripts.stage_assets` (fp16w-классификатор на телефоне отличается по sha от
+    fp32, которым собраны прототипы, а эмбеддинги у них совпадают).
     """
     заголовок, центроиды = read_index(directory / REJECT_INDEX_NAME)
     байты = (directory / REJECT_META_NAME).read_bytes()
     verify_meta(заголовок, байты)
     собран = json.loads(байты).get("classifier_sha256")
-    if собран != classifier_sha256:
+    if classifier_sha256 is not None and собран != classifier_sha256:
         raise RejectIndexError(
             f"прототипы собраны классификатором {собран}, а меряется {classifier_sha256}"
         )

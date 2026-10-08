@@ -66,6 +66,9 @@ from export.provenance import check_provenance
 # Имя манифеста — контракт с Gradle: таск сборки читает файл под этим именем и без
 # него роняет сборку (§10 дизайна), поэтому переименование здесь ломает `:demo`.
 ИМЯ_МАНИФЕСТА = "models_manifest.json"
+# Отказные прототипы (0.8.2): необязательная пара файлов, кладётся только вместе с `reject_margin`
+# в подобранных порогах. Имена те же, что пишет `pipeline.reject_index`.
+ИМЕНА_ПРОТОТИПОВ = {"reject_index": "reject_index.bin", "reject_meta": "reject_meta.json"}
 
 
 class ManifestError(ValueError):
@@ -129,9 +132,20 @@ def write_placeholders(out: Path) -> dict[str, Path]:
 МАКС_УЗЛОВ = 32
 
 
-def check_tuned_thresholds(документ: Mapping[str, Any]) -> None:
-    """Подобранные пороги §13.5: форма плейсхолдера, `tuned: true` и живой `tuned_on`."""
-    if set(документ) != set(ПЛЕЙСХОЛДЕР_ПОРОГОВ):
+def check_tuned_thresholds(документ: Mapping[str, Any], *, reject: bool = False) -> None:
+    """Подобранные пороги §13.5: форма плейсхолдера, `tuned: true` и живой `tuned_on`.
+
+    `reject_margin` — порог отказного прототипа — допустим тогда и только тогда, когда
+    раскладываются прототипы (`reject=True`): порог без прототипов приложение молча
+    игнорирует, а прототипы без порога не включаются, и обе половины означали бы сборку,
+    которая ведёт себя не так, как подобрана.
+    """
+    ожидаемые = set(ПЛЕЙСХОЛДЕР_ПОРОГОВ) | ({"reject_margin"} if reject else set())
+    if "reject_margin" in документ and not reject:
+        raise ManifestError("thresholds: reject_margin без прототипов (нужен --reject-index)")
+    if reject and "reject_margin" not in документ:
+        raise ManifestError("thresholds: прототипы без reject_margin в подобранных порогах")
+    if set(документ) != ожидаемые:
         raise ManifestError(f"thresholds: поля {sorted(документ)} не по форме §13.5")
     if документ["tuned"] is not True:
         raise ManifestError("thresholds: tuned не true — это плейсхолдер, а не подбор")
@@ -141,6 +155,8 @@ def check_tuned_thresholds(документ: Mapping[str, Any]) -> None:
     for поле in ("sim_min", "margin_min"):
         if not 0.0 <= float(документ[поле]) <= 1.0:
             raise ManifestError(f"thresholds: {поле}={документ[поле]} вне [0, 1]")
+    if reject and not -1.0 <= float(документ["reject_margin"]) <= 1.0:
+        raise ManifestError(f"thresholds: reject_margin={документ['reject_margin']} вне [-1, 1]")
 
 
 def check_tuned_calibration(документ: Mapping[str, Any]) -> None:
@@ -161,16 +177,42 @@ def check_tuned_calibration(документ: Mapping[str, Any]) -> None:
         raise ManifestError(f"calibration: clip {документ.get('clip')} не пара внутри [0, 1]")
 
 
-def _подобранные(thresholds: Path | None, calibration: Path | None) -> dict[str, Path]:
+def _подобранные(
+    thresholds: Path | None, calibration: Path | None, *, reject: bool = False
+) -> dict[str, Path]:
     """Оба файла или ни одного: подобранные пороги с плейсхолдерной шкалой (и наоборот)
     оставили бы отметку «не откалибровано», а выпуск — бессмысленным."""
+    if reject and thresholds is None:
+        raise ManifestError("прототипы без подобранных порогов: нужны --thresholds и --calibration")
     if thresholds is None and calibration is None:
         return {}
     if thresholds is None or calibration is None:
         raise ManifestError("--thresholds и --calibration передаются оба или ни одного")
-    check_tuned_thresholds(_обязательный_json(thresholds, "нет файла порогов"))
+    check_tuned_thresholds(_обязательный_json(thresholds, "нет файла порогов"), reject=reject)
     check_tuned_calibration(_обязательный_json(calibration, "нет файла шкалы"))
     return {"thresholds": thresholds, "calibration": calibration}
+
+
+def _прототипы(каталог: Path | None, классификаторы: Mapping[str, Path]) -> dict[str, Path]:
+    """Файлы отказных прототипов, если их собрал тот же классификатор, что раскладывается.
+
+    `классификаторы` — файлы, чей sha допустим в мете: раскладываемый и (если есть) fp32 из
+    экспорта. Эмбеддинги прототипов считает fp32, а на телефон fp16w-вариант уезжает под
+    другим sha; сверка с обоими не пропускает прототипы чужой модели и не отказывает fp16w.
+    """
+    if каталог is None:
+        return {}
+    пути = {ключ: каталог / имя for ключ, имя in ИМЕНА_ПРОТОТИПОВ.items()}
+    for путь in пути.values():
+        _обязательный_файл(путь, "прототипы не собраны — `python -m training.reject_v2`")
+    собран = json.loads(пути["reject_meta"].read_text(encoding="utf-8")).get("classifier_sha256")
+    допустимые = {sha256_of_file(файл) for файл in классификаторы.values() if файл.is_file()}
+    if собран not in допустимые:
+        raise ManifestError(
+            f"прототипы собраны классификатором {собран}, раскладывается другой "
+            f"({', '.join(sorted(допустимые))})"
+        )
+    return пути
 
 
 def _контракт(detector_report: Mapping[str, Any]) -> dict[str, Any]:
@@ -313,6 +355,7 @@ def stage(
     detector_precision: str = "fp32",
     thresholds: Path | None = None,
     calibration: Path | None = None,
+    reject_index: Path | None = None,
 ) -> Path:
     """Разложить файлы прогона в `out` и написать рядом манифест. Вернуть его путь.
 
@@ -325,6 +368,11 @@ def stage(
     передаются только парой, потому что подобранные пороги с плейсхолдерной шкалой (и
     наоборот) оставили бы сборку помеченной «не откалибровано». Годность сверяется до
     сноса `out`, как и контракт детектора.
+
+    `reject_index` — каталог отказных прототипов (`reject_index.bin`, `reject_meta.json`):
+    кладутся рядом и описываются в манифесте как `files.reject_index`/`files.reject_meta`.
+    Только вместе с подобранными порогами, в которых есть `reject_margin`, и только если их
+    собрал тот же классификатор: всё проверяется до сноса `out`.
 
     Ждёт раскладку прогона обучения: `run/export/` с файлом классификатора и
     `export_report.json`, каталог индекса с `catalog_index.bin` и `catalog_meta.json`,
@@ -400,7 +448,14 @@ def stage(
     _контракт(отчёт_детектора)
     # Годность подобранных файлов сверяется здесь, рядом с контрактом и до сноса `out`: иначе
     # негодные пороги снесли бы прошлый набор и оставили дерево сборки ни с чем.
-    подобранные = _подобранные(thresholds, calibration)
+    подобранные = _подобранные(thresholds, calibration, reject=reject_index is not None)
+    прототипы = _прототипы(
+        reject_index,
+        {"staged": классификатор, "fp32": run / "export" / ФАЙЛ_КЛАССИФИКАТОРА["fp32"]},
+    )
+    if прототипы:
+        имена = {**имена, **ИМЕНА_ПРОТОТИПОВ}
+        источники = {**источники, **прототипы}
 
     # Каталог сносится целиком, а не перезаписывается по именам: файл от прошлого прогона
     # с другим именем остался бы лежать в ассетах и уехал бы в APK.
@@ -458,6 +513,12 @@ def _parse_args() -> argparse.Namespace:
     )
     парсер.add_argument("--thresholds", type=Path, default=None, help="подобранные пороги")
     парсер.add_argument("--calibration", type=Path, default=None, help="подобранная шкала")
+    парсер.add_argument(
+        "--reject-index",
+        type=Path,
+        default=None,
+        help="каталог отказных прототипов; только вместе с порогами, где есть reject_margin",
+    )
     return парсер.parse_args()
 
 
@@ -472,6 +533,7 @@ def main() -> None:
         detector_precision=аргументы.detector_precision,
         thresholds=аргументы.thresholds,
         calibration=аргументы.calibration,
+        reject_index=аргументы.reject_index,
     )
     print(f"манифест: {путь}")
 

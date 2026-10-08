@@ -14,7 +14,7 @@ import argparse
 import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -22,12 +22,13 @@ import pandas as pd
 
 from pipeline.catalog import DEFAULT_CATALOG_PATH, load_catalog, member_index
 from pipeline.index_format import read_index, verify_meta
-from pipeline.knn import ranked_by_centroids, top2_with_sims
+from pipeline.knn import max_sim, ranked_by_centroids, top2_with_sims
 from pipeline.paths import harvest_dir, splits_dir
 from pipeline.pool_audit import file_sha256
+from pipeline.reject_index import read_reject_index
 from pipeline.schema import read_split
 from training.acceptance import SetMetrics, member_brands, set_metrics
-from training.calibration import MODEL, decide
+from training.calibration import MODEL, REJECT_OFF, decide
 from training.tune_thresholds import embed_crops, scores_from, write_generated_section
 
 GATE_NEW_TOP1 = 0.75
@@ -163,6 +164,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         аргументы.batch_size,
     )
     чужие = scores_from(*top2_with_sims(э_нег, центроиды), None, бренды)
+    # Отказные прототипы лежат в ассетах только у сборок, где их подобрали вместе с порогом:
+    # без них решения те же, что у `decide` без ветки прототипа.
+    прототипы = (
+        read_reject_index(аргументы.models, None) if "reject_index" in манифест["files"] else None
+    )
+    порог_прототипа = float(пороги["reject_margin"]) if прототипы is not None else REJECT_OFF
+    if прототипы is not None:
+        чужие = replace(чужие, sim_reject=max_sim(э_нег, прототипы))
 
     метрики: dict[str, SetMetrics] = {}
     худшие: dict[str, pd.DataFrame] = {}
@@ -187,6 +196,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         пары = top2_with_sims(эмбеддинги, центроиды)
         топ5 = np.array(ranked_by_centroids(эмбеддинги, центроиды, 5), dtype=np.int64)
         известные = scores_from(*пары, истина, бренды)
+        if прототипы is not None:
+            известные = replace(известные, sim_reject=max_sim(эмбеддинги, прототипы))
         метрики[имя] = set_metrics(
             top5=топ5,
             truth=истина,
@@ -198,6 +209,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             brands=member_brands([класс["members"] for класс in классы]),
             sim_min=float(пороги["sim_min"]),
             margin_min=float(пороги["margin_min"]),
+            reject_margin=порог_прототипа,
         )
         попал = пары[0] == истина
         истинные = [class_ids[i] for i in истина]
@@ -211,7 +223,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             названия = [машина_название[str(л).rsplit(":", 1)[1]] for л in кадры["listing_id"]]
             по_названиям = per_group(попал, названия)
-        решения = decide(известные, float(пороги["sim_min"]), float(пороги["margin_min"]))
+        решения = decide(
+            известные, float(пороги["sim_min"]), float(пороги["margin_min"]), порог_прототипа
+        )
         ответы.append(
             pd.DataFrame(
                 {
@@ -250,7 +264,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     else {}
                 ),
                 "negatives_sha256": file_sha256(аргументы.negatives),
-                "thresholds": f"{пороги['sim_min']} / {пороги['margin_min']}",
+                "thresholds": f"{пороги['sim_min']} / {пороги['margin_min']}"
+                + (f" / {пороги['reject_margin']}" if прототипы is not None else ""),
             },
             gate=вердикт,
         ),

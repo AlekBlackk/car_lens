@@ -512,3 +512,114 @@ def test_stage_отвергает_негодную_шкалу(
             thresholds=_json(tmp_path / "t.json", ПОРОГИ_ПОДОБРАНЫ),
             calibration=_json(tmp_path / "c.json", {**ШКАЛА_ПОДОБРАНА, **правка}),
         )
+
+
+# --- отказные прототипы (0.8.2) ---------------------------------------------------------
+
+ПОРОГИ_С_ПРОТОТИПОМ: dict[str, Any] = {**ПОРОГИ_ПОДОБРАНЫ, "reject_margin": 0.04}
+
+
+def _прототипы(tmp_path: Path, классификатор: bytes = b"int8") -> Path:
+    каталог = tmp_path / "reject"
+    каталог.mkdir()
+    (каталог / "reject_index.bin").write_bytes(b"CLIX-reject")
+    (каталог / "reject_meta.json").write_text(
+        json.dumps({"classifier_sha256": hashlib.sha256(классификатор).hexdigest()}),
+        encoding="utf-8",
+    )
+    return каталог
+
+
+def _stage_с_прототипами(tmp_path: Path, **правки: Any) -> Path:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    параметры: dict[str, Any] = {
+        "thresholds": _json(tmp_path / "t.json", ПОРОГИ_С_ПРОТОТИПОМ),
+        "calibration": _json(tmp_path / "c.json", ШКАЛА_ПОДОБРАНА),
+    }
+    параметры.update(правки)
+    if "reject_index" not in параметры:
+        параметры["reject_index"] = _прототипы(tmp_path)
+    return stage(прогон, детектор, tmp_path / "models", **параметры)
+
+
+def test_stage_кладёт_прототипы_и_описывает_их_в_манифесте(tmp_path: Path) -> None:
+    манифест = _stage_с_прототипами(tmp_path)
+
+    выход = tmp_path / "models"
+    assert (выход / "reject_index.bin").read_bytes() == b"CLIX-reject"
+    файлы = json.loads(манифест.read_text(encoding="utf-8"))["files"]
+    assert файлы["reject_index"]["name"] == "reject_index.bin"
+    assert (
+        файлы["reject_meta"]["sha256"]
+        == hashlib.sha256((выход / "reject_meta.json").read_bytes()).hexdigest()
+    )
+    assert json.loads((выход / "thresholds.json").read_text("utf-8"))["reject_margin"] == 0.04
+
+
+def test_stage_без_прототипов_не_пишет_их_в_манифест(tmp_path: Path) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    манифест = stage(прогон, детектор, tmp_path / "models")
+    файлы = json.loads(манифест.read_text(encoding="utf-8"))["files"]
+    assert "reject_index" not in файлы
+    assert "reject_meta" not in файлы
+
+
+def test_stage_принимает_прототипы_fp32_для_fp16w_классификатора(tmp_path: Path) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    (прогон / "export" / "classifier_fp16w.tflite").write_bytes(b"fp16w")
+    (прогон / "export" / "classifier_fp32.tflite").write_bytes(b"fp32")
+    манифест = stage(
+        прогон,
+        детектор,
+        tmp_path / "models",
+        precision="fp16w",
+        thresholds=_json(tmp_path / "t.json", ПОРОГИ_С_ПРОТОТИПОМ),
+        calibration=_json(tmp_path / "c.json", ШКАЛА_ПОДОБРАНА),
+        reject_index=_прототипы(tmp_path, классификатор=b"fp32"),
+    )
+    assert "reject_index" in json.loads(манифест.read_text(encoding="utf-8"))["files"]
+
+
+def test_stage_отвергает_прототипы_чужого_классификатора(tmp_path: Path) -> None:
+    выход = tmp_path / "models"
+    with pytest.raises(ManifestError, match="собраны классификатором"):
+        _stage_с_прототипами(tmp_path, reject_index=_прототипы(tmp_path, классификатор=b"other"))
+    assert not выход.exists()
+
+
+def test_stage_порог_прототипа_без_прототипов_роняет(tmp_path: Path) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    with pytest.raises(ManifestError, match="reject-index"):
+        stage(
+            прогон,
+            детектор,
+            tmp_path / "models",
+            thresholds=_json(tmp_path / "t.json", ПОРОГИ_С_ПРОТОТИПОМ),
+            calibration=_json(tmp_path / "c.json", ШКАЛА_ПОДОБРАНА),
+        )
+
+
+def test_stage_прототипы_без_порога_роняют(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="reject_margin"):
+        _stage_с_прототипами(tmp_path, thresholds=_json(tmp_path / "t2.json", ПОРОГИ_ПОДОБРАНЫ))
+
+
+def test_stage_прототипы_без_подобранных_порогов_роняют(tmp_path: Path) -> None:
+    прогон, детектор = _разложить_прогон(tmp_path, мета=МЕТА)
+    with pytest.raises(ManifestError, match="без подобранных порогов"):
+        stage(прогон, детектор, tmp_path / "models", reject_index=_прототипы(tmp_path))
+
+
+def test_stage_отвергает_порог_прототипа_вне_отрезка(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="вне"):
+        _stage_с_прототипами(
+            tmp_path,
+            thresholds=_json(tmp_path / "t2.json", {**ПОРОГИ_ПОДОБРАНЫ, "reject_margin": 1.5}),
+        )
+
+
+def test_stage_роняет_на_каталоге_прототипов_без_файла(tmp_path: Path) -> None:
+    каталог = _прототипы(tmp_path)
+    (каталог / "reject_meta.json").unlink()
+    with pytest.raises(SystemExit, match=r"reject_meta\.json"):
+        _stage_с_прототипами(tmp_path, reject_index=каталог)

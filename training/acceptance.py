@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from training.calibration import Scores, auroc, fpr_at_tpr, operating_point
+from training.calibration import REJECT_OFF, Scores, auroc, fpr_at_tpr, operating_point
 from training.metrics import aggregate
 
 
@@ -63,6 +63,7 @@ def set_metrics(
     brands: Sequence[frozenset[str]],
     sim_min: float,
     margin_min: float,
+    reject_margin: float = REJECT_OFF,
 ) -> SetMetrics:
     """Метрики набора `mask`; негативы общие для всех наборов."""
     if not mask.any():
@@ -76,7 +77,7 @@ def set_metrics(
         idx_to_brand=idx_to_brand,
     )
     свои = known.subset(mask)
-    точка = operating_point(свои, negatives, sim_min, margin_min)
+    точка = operating_point(свои, negatives, sim_min, margin_min, reject_margin)
     return SetMetrics(
         n=int(mask.sum()),
         classes=len(set(истина.tolist())),
