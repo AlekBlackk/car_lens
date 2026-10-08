@@ -19,9 +19,17 @@ import java.nio.FloatBuffer
  * возникло тут: одну и ту же операцию просто негде было написать дважды по-разному.
  */
 
-/** Новый `SharedArray` на `floatCount` чисел и плоский `FloatBuffer` поверх него, готовый к `put`. */
-internal fun floatSharedArray(proxy: VisionCameraProxy, floatCount: Int): Pair<SharedArray, FloatBuffer> {
-    val массив = SharedArray(proxy, floatCount * 4)
+/** Пул `SharedArray` плагина по размеру в байтах: массив на кадр переполнял таблицу ссылок JNI (см. `BufferPool`). */
+internal fun sharedArrayPool(proxy: VisionCameraProxy): BufferPool<SharedArray> =
+    BufferPool { байт -> SharedArray(proxy, байт) }
+
+/**
+ * `SharedArray` на `floatCount` чисел из пула плагина и плоский `FloatBuffer` поверх него, готовый к `put`.
+ * Массив тот же, что выдавался на прошлом вызове такого размера: его содержимое действительно
+ * до следующего вызова плагина, а все `floatCount` чисел вызывающий обязан записать заново.
+ */
+internal fun floatSharedArray(пул: BufferPool<SharedArray>, floatCount: Int): Pair<SharedArray, FloatBuffer> {
+    val массив = пул.взять(floatCount * 4)
     return массив to массив.asFloatBuffer()
 }
 

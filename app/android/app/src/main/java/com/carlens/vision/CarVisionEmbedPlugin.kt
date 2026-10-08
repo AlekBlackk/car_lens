@@ -43,6 +43,7 @@ class CarVisionEmbedPlugin(
 ) : FrameProcessorPlugin() {
 
     private val слоты = arrayOfNulls<SharedArray>(МАКСИМУМ_КРОПОВ)
+    private val массивы = sharedArrayPool(proxy)
 
     override fun callback(frame: Frame, params: Map<String, Any>?): Any {
         val начало = SystemClock.elapsedRealtimeNanos()
@@ -79,7 +80,7 @@ class CarVisionEmbedPlugin(
             val результаты = зрение.embedAndMatch(frame.image, уголГравитации, боксыКропа, pad, topK)
             val фактическийTopK = результаты.firstOrNull()?.matches?.size ?: 0
             val (совпадения, числаСовпадений) =
-                floatSharedArray(proxy, результаты.size * фактическийTopK * 2)
+                floatSharedArray(массивы, результаты.size * фактическийTopK * 2)
             val поля = HashMap<String, Any>()
             результаты.forEachIndexed { номер, результат ->
                 val слот = слоты[номер] ?: SharedArray(proxy, результат.embedding.size * 4)

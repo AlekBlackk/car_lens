@@ -31,6 +31,8 @@ class CarVisionMatchPlugin(
     private val context: Context,
 ) : FrameProcessorPlugin() {
 
+    private val массивы = sharedArrayPool(proxy)
+
     @Suppress("UNUSED_PARAMETER")
     override fun callback(frame: Frame, params: Map<String, Any>?): Any {
         val начало = SystemClock.elapsedRealtimeNanos()
@@ -49,7 +51,7 @@ class CarVisionMatchPlugin(
             // `CatalogIndex.knn` отдаёт `min(topK, numClasses)` совпадений, а не ровно
             // `topK`. Наружу поэтому уезжает фактическое число: проверка длины по `topK`
             // на маленьком каталоге падала бы на совершенно верном ответе.
-            val (буфер, плоские) = floatSharedArray(proxy, совпадения.size * 2)
+            val (буфер, плоские) = floatSharedArray(массивы, совпадения.size * 2)
             совпадения.forEach { совпадение ->
                 плоские.put(совпадение.classIdx.toFloat())
                 плоские.put(совпадение.sim)

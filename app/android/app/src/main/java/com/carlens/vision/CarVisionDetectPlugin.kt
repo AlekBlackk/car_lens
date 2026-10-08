@@ -79,6 +79,8 @@ class CarVisionDetectPlugin(
     private val context: Context,
 ) : FrameProcessorPlugin() {
 
+    private val массивы = sharedArrayPool(proxy)
+
     override fun callback(frame: Frame, params: Map<String, Any>?): Any {
         val начало = SystemClock.elapsedRealtimeNanos()
         require(!frame.isMirrored) { "фронтальная камера не поддерживается" }
@@ -94,7 +96,7 @@ class CarVisionDetectPlugin(
             val боксыЭкрана = боксыГравитации.map { Rotation.rotateBox(it, кадрГравитации, доЭкрана) }
             val отобранные = боксыЭкрана.sortedByDescending { it.conf }.take(maxDet)
 
-            val (буфер, числа) = floatSharedArray(proxy, отобранные.size * 5)
+            val (буфер, числа) = floatSharedArray(массивы, отобранные.size * 5)
             отобранные.forEach { бокс ->
                 числа.put(бокс.x); числа.put(бокс.y)
                 числа.put(бокс.w); числа.put(бокс.h)
