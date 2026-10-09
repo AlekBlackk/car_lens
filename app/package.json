@@ -4,6 +4,7 @@
   "scripts": {
     "start": "react-native start",
     "android": "react-native run-android",
+    "postinstall": "patch-package",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src App.tsx"
@@ -28,6 +29,7 @@
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "eslint": "^8.57.1",
+    "patch-package": "^8.0.1",
     "typescript": "5.7.2",
     "vitest": "^2.1.8"
   }

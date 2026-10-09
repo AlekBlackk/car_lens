@@ -24,6 +24,7 @@ import { записьИзРешения, type ЗаписьИстории } from 
 import type { Настройки } from '../../store/settings'
 import { type Решение } from '../../vision/decide'
 import { catalogDigest, classLabel } from '../../vision/labels'
+import { nextPipelineInterval } from '../../vision/cadence'
 import { НакопительЦеныМоста, bridgeClock, type СтадияМоста } from '../../vision/latency'
 import {
   stepPipeline,
@@ -59,6 +60,8 @@ const TIME_SCALE_MS = 1e-6
 
 /**
  * Минимальный промежуток между двумя прогонами конвейера, миллисекунды кадровых часов.
+ * Это нижняя граница: когда шаг дорожает (горячий корпус), интервал растёт сверх неё, см.
+ * `nextPipelineInterval` в `cadence.ts`.
  *
  * Без него конвейер молотит кадры спина к спине: `detect` занимает 38 мс, классификация —
  * ещё 47 мс на кроп (`bench/latency.md`), и поток анализа вместе с GPU оказывается занят
@@ -235,6 +238,9 @@ export default function CameraScreen(свойства: СвойстваКаме�
   // Время последнего прогона конвейера в кадровых часах. `SharedValue`, а не глобаль
   // воркет-рантайма: см. `PIPELINE_INTERVAL_MS`.
   const lastPipelineMs = useSharedValue(0)
+  // Нужный интервал до следующего прогона: базовый, пока шаги дешёвые, и длиннее, когда
+  // шаг подорожал. Пересчитывается по цене каждого шага (`cadence.ts`).
+  const pipelineIntervalMs = useSharedValue(PIPELINE_INTERVAL_MS)
   // Угол, в котором показывает превью. При выключенном автоповороте он остаётся
   // портретным, пока телефон крутят, а при включённом — следует за экраном. Боксы
   // рисуются поверх превью, поэтому наружу они обязаны выходить именно в этой системе.
@@ -358,8 +364,9 @@ export default function CameraScreen(свойства: СвойстваКаме�
         // кадров начались заново (пересоздание сессии камеры), и кадр пропускать нельзя:
         // иначе конвейер замер бы до тех пор, пока новые часы не догонят старые.
         const сИсхода = nowMs - lastPipelineMs.value
-        if (сИсхода >= 0 && сИсхода < PIPELINE_INTERVAL_MS) return
+        if (сИсхода >= 0 && сИсхода < pipelineIntervalMs.value) return
         lastPipelineMs.value = nowMs
+        const началоШага = bridgeClock()
 
         // Замер цены моста (Task 10 M-1.6): `t_до`/`t_после` вокруг каждого из трёх
         // вызовов границы native↔JS через `bridgeClock()` — `performance.now()` из
@@ -424,6 +431,14 @@ export default function CameraScreen(свойства: СвойстваКаме�
         // живёт на JS-стороне. На кадрах без классификации массив пуст — по §6.2 таких
         // кадров большинство, и пустой массив дешевле второго вызова `createRunOnJS`.
         publishOverlay(шаг.подписи, шаг.события, результат.frameWidth, результат.frameHeight)
+        // Цена шага — стенные часы, интервал сверяется с кадровыми: оба идут в реальном
+        // времени, поэтому сравнимы. Кадр после дорогого шага свежий, а не из очереди, только
+        // благодаря патчу `KEEP_ONLY_LATEST` (`patches/`): с `BLOCK_PRODUCER` устаревшие
+        // кадры очереди проходили бы гейт сразу после шага.
+        pipelineIntervalMs.value = nextPipelineInterval(
+          bridgeClock() - началоШага,
+          PIPELINE_INTERVAL_MS,
+        )
       } catch (отказ) {
         // Ранний выход на этом кадре: дорисовывать рамки по неполным данным опаснее,
         // чем пропустить кадр целиком. Сюда же приходит `BridgeContractError` из
@@ -433,7 +448,7 @@ export default function CameraScreen(свойства: СвойстваКаме�
         return
       }
     },
-    [publishOverlay, markBridgeCost, pipelineStateJson, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract, lastPipelineMs],
+    [publishOverlay, markBridgeCost, pipelineStateJson, reportErrorFromWorklet, deviceDegrees, previewDegrees, slotContractChecked, reportSlotContract, lastPipelineMs, pipelineIntervalMs],
   )
 
   // Пользовательская вертикаль при горизонтальном хвате идёт вдоль ширины экрана, при

@@ -17,6 +17,7 @@ const ФАЙЛЫ_С_ВОРКЛЕТАМИ = [
   'src/vision/plugins.ts',
   'src/vision/throttle.ts',
   'src/vision/latency.ts',
+  'src/vision/cadence.ts',
   'src/vision/thresholds.ts',
   'src/vision/labels.ts',
   'src/vision/ema.ts',

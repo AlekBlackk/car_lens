@@ -1,0 +1,15 @@
+diff --git a/node_modules/react-native-vision-camera/android/src/main/java/com/mrousavy/camera/core/CameraSession+Configuration.kt b/node_modules/react-native-vision-camera/android/src/main/java/com/mrousavy/camera/core/CameraSession+Configuration.kt
+index 1e9c0de..883b007 100644
+--- a/node_modules/react-native-vision-camera/android/src/main/java/com/mrousavy/camera/core/CameraSession+Configuration.kt
++++ b/node_modules/react-native-vision-camera/android/src/main/java/com/mrousavy/camera/core/CameraSession+Configuration.kt
+@@ -191,7 +191,9 @@ internal fun CameraSession.configureOutputs(configuration: CameraConfiguration)
+     val pixelFormat = frameProcessorConfig.config.pixelFormat
+     Log.i(CameraSession.TAG, "Creating $pixelFormat Frame Processor output...")
+     val analyzer = ImageAnalysis.Builder().also { analysis ->
+-      analysis.setBackpressureStrategy(ImageAnalysis.STRATEGY_BLOCK_PRODUCER)
++      // carlens: KEEP_ONLY_LATEST вместо BLOCK_PRODUCER. Медленный Frame Processor иначе
++      // заполняет очередь ImageReader и останавливает всю камеру, превью включительно.
++      analysis.setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+       analysis.setOutputImageFormat(pixelFormat.toImageAnalysisFormat())
+       if (fpsRange != null) {
+         assertFormatRequirement("fps", format, InvalidFpsError(fpsRange.upper)) {
