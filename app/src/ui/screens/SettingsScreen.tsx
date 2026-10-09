@@ -1,5 +1,6 @@
 /**
- * Экран «Настройки» §6.6: порог подписи, два переключателя, версии приложения и каталога.
+ * Экран «Настройки» §6.6: порог подписи, два переключателя, версии приложения и каталога,
+ * вход в список моделей каталога.
  *
  * Компонент ничего не пишет на диск. Наружу уходит целиком новый объект настроек, а запись,
  * как и чистка очереди отзывов при выключении сбора, живёт в корне приложения — там же, где
@@ -14,6 +15,7 @@ import { catalogInfo } from '../../vision/labels'
 export type СвойстваНастроек = {
   настройки: Настройки
   наИзменение: (настройки: Настройки) => void
+  наКаталог: () => void
   наЗакрытие: () => void
 }
 
@@ -29,7 +31,7 @@ const тотЖеШаг = (первый: number, второй: number): boolean =
   Math.round(первый * 100) === Math.round(второй * 100)
 
 export default function SettingsScreen(свойства: СвойстваНастроек): React.JSX.Element {
-  const { настройки, наИзменение, наЗакрытие } = свойства
+  const { настройки, наИзменение, наКаталог, наЗакрытие } = свойства
   const инфо = catalogInfo()
 
   return (
@@ -87,6 +89,9 @@ export default function SettingsScreen(свойства: СвойстваНас�
         format_version {инфо.formatVersion} · {инфо.классов} класса · веса{' '}
         {инфо.weightsSha.slice(0, 12)} · собран {инфо.generatedAt}
       </Text>
+      <Pressable onPress={наКаталог}>
+        <Text style={styles.ссылка}>Каталог машин ({инфо.классов}) →</Text>
+      </Pressable>
 
       <Pressable onPress={наЗакрытие}>
         <Text style={styles.кнопка}>Назад</Text>
@@ -122,5 +127,6 @@ const styles = StyleSheet.create({
   },
   текст: { color: '#fff', fontSize: 17, flexShrink: 1, paddingRight: 12 },
   пояснение: { color: '#9a9a9a', fontSize: 15, marginTop: 8, marginBottom: 8, lineHeight: 21 },
+  ссылка: { color: '#4da3ff', fontSize: 17, paddingVertical: 8 },
   кнопка: { color: '#4da3ff', fontSize: 18, marginTop: 24 },
 })

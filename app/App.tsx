@@ -1,6 +1,6 @@
 /**
  * Корень приложения: открывает хранилище, держит состояние, переживающее экраны, и водит
- * по четырём экранам §6.6.
+ * по четырём экранам §6.6 и справочнику «Каталог», открываемому из Настроек.
  *
  * Порядок здесь — часть поведения, а не стиль. Хранилище открывается до камеры: первый же
  * распознанный трек пишется в историю, и если истории ещё нет, запись теряется молча.
@@ -25,6 +25,7 @@ import {
 import type { Хранилище } from './src/store/storage'
 import { НАЧАЛЬНАЯ_НАВИГАЦИЯ, pop, push, верхний } from './src/ui/navigation'
 import CameraScreen from './src/ui/screens/CameraScreen'
+import CatalogScreen from './src/ui/screens/CatalogScreen'
 import DetailsScreen from './src/ui/screens/DetailsScreen'
 import HistoryScreen from './src/ui/screens/HistoryScreen'
 import SettingsScreen from './src/ui/screens/SettingsScreen'
@@ -173,8 +174,14 @@ export default function App(): React.JSX.Element {
           <SettingsScreen
             настройки={настройки}
             наИзменение={сменитьНастройки}
+            наКаталог={() => установитьНавигацию(push(навигация, { вид: 'каталог' }))}
             наЗакрытие={назад}
           />
+        </View>
+      )}
+      {экран.вид === 'каталог' && (
+        <View style={[StyleSheet.absoluteFill, styles.слойЭкрана]}>
+          <CatalogScreen наЗакрытие={назад} />
         </View>
       )}
     </View>

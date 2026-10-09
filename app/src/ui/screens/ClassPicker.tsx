@@ -13,6 +13,7 @@
 import React, { useMemo, useState } from 'react'
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { allClasses } from '../../vision/labels'
+import { подходитПодЗапрос } from '../catalogList'
 
 export type СвойстваВыбораКласса = {
   наВыбор: (classIdx: number) => void
@@ -23,21 +24,13 @@ export default function ClassPicker(свойства: СвойстваВыбор
   const { наВыбор, наОтмену } = свойства
   const [запрос, установитьЗапрос] = useState('')
 
-  const отобранные = useMemo(() => {
-    const строка = запрос.trim().toLowerCase()
-    const все = allClasses()
-    const пары = все.map((класс, индекс) => ({ класс, индекс }))
-    if (строка.length === 0) return пары
-    // Поиск идёт и по марке: пользователь, не знающий модель, ищет «toyota», а не «camry».
-    // У разнобрендовой группы марки нет вовсе (§13.2), и найти её по марке участника можно
-    // только через `members`: `member_id` вида «belgee__x50» несёт и марку, и модель.
-    return пары.filter(
-      ({ класс }) =>
-        класс.display.toLowerCase().includes(строка) ||
-        (класс.brand?.toLowerCase().includes(строка) ?? false) ||
-        класс.members.some((участник) => участник.toLowerCase().includes(строка)),
-    )
-  }, [запрос])
+  const отобранные = useMemo(
+    () =>
+      allClasses()
+        .map((класс, индекс) => ({ класс, индекс }))
+        .filter(({ класс }) => подходитПодЗапрос(класс, запрос)),
+    [запрос],
+  )
 
   return (
     <View style={styles.экран}>
