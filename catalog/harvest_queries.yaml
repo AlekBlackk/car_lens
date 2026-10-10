@@ -41,6 +41,9 @@ classes:
   audi__q7:
     categories: [Audi Q7]
     terms: ["Audi Q7"]
+  audi__q8:
+    categories: [Audi Q8]
+    terms: ["Audi Q8"]
   bmw__1_series:
     categories: [BMW 1 Series, BMW 1er]
     terms: ["BMW 1 Series", "BMW 1er"]
@@ -78,12 +81,18 @@ classes:
   bmw__x7:
     categories: [BMW X7]
     terms: ["BMW X7"]
+  cadillac__escalade:
+    categories: [Cadillac Escalade]
+    terms: ["Cadillac Escalade"]
   changan__cs35_plus:
     categories: ["Chang'an CS35 Plus"]
     terms: ["Changan CS35 Plus"]
   changan__cs55_plus:
     categories: ["Chang'an CS55 Plus"]
     terms: ["Changan CS55 Plus"]
+  changan__uni_k:
+    categories: [Changan UNI-K]
+    terms: ["Changan UNI-K"]
   chery__amulet:
     categories: [Chery Amulet, Chery A15, Chery Cowin]
     terms: ["Chery Amulet", "Chery A15", "Chery Cowin"]
@@ -118,6 +127,9 @@ classes:
   citroen__c4:
     categories: [Citroën C4, Citroen C4]
     terms: ["Citroen C4", "Citroën C4"]
+  citroen__c5:
+    categories: [Citroën C5]
+    terms: ["Citroen C5"]
   daewoo__lanos:
     categories: [Daewoo Lanos]
     terms: ["Daewoo Lanos"]
@@ -130,12 +142,18 @@ classes:
   datsun__on_do:
     categories: [Datsun on-Do]
     terms: ["Datsun on-DO"]
+  dodge__challenger:
+    categories: [Dodge Challenger]
+    terms: ["Dodge Challenger"]
   exeed__txl:
     categories: [Exeed TXL, EXEED TXL]
     terms: ["EXEED TXL", "Exeed TXL"]
   fiat__albea:
     categories: [Fiat Albea]
     terms: ["Fiat Albea"]
+  ford__c_max:
+    categories: [Ford C-Max]
+    terms: ["Ford C-Max", "Ford Grand C-Max"]
   ford__explorer:
     categories: [Ford Explorer]
     terms: ["Ford Explorer"]
@@ -221,6 +239,9 @@ classes:
   honda__fit:
     categories: [Honda Fit, Honda Jazz]
     terms: ["Honda Fit", "Honda Jazz"]
+  honda__freed:
+    categories: [Honda Freed]
+    terms: ["Honda Freed"]
   hyundai__accent:
     categories: [Hyundai Accent]
     terms: ["Hyundai Accent"]
@@ -255,9 +276,15 @@ classes:
   infiniti__fx:
     categories: [Infiniti FX]
     terms: ["Infiniti FX"]
+  infiniti__qx50:
+    categories: [Infiniti QX50]
+    terms: ["Infiniti QX50"]
   iveco__daily:
     categories: [Iveco Daily]
     terms: ["Iveco Daily"]
+  jaguar__xf:
+    categories: [Jaguar XF]
+    terms: ["Jaguar XF"]
   jeep__grand_cherokee:
     categories: [Jeep Grand Cherokee]
     terms: ["Jeep Grand Cherokee"]
@@ -273,6 +300,9 @@ classes:
   kia__cerato:
     categories: [Kia Cerato, Kia Forte]
     terms: ["Kia Cerato", "Kia Forte"]
+  kia__mohave:
+    categories: [Kia Mohave]
+    terms: ["Kia Mohave", "Kia Borrego"]
   kia__optima:
     categories: [Kia Optima, Kia K5]
     terms: ["Kia Optima", "Kia K5"]
@@ -282,6 +312,9 @@ classes:
   kia__rio:
     categories: [Kia Rio]
     terms: ["Kia Rio"]
+  kia__seltos:
+    categories: [Kia Seltos]
+    terms: ["Kia Seltos"]
   kia__sorento:
     categories: [Kia Sorento]
     terms: ["Kia Sorento"]
@@ -294,6 +327,9 @@ classes:
   kia__sportage:
     categories: [Kia Sportage]
     terms: ["Kia Sportage"]
+  kia__stinger:
+    categories: [Kia Stinger]
+    terms: ["Kia Stinger"]
   lada__1111:
     categories: [VAZ-1111, Lada Oka]
     terms: ["VAZ-1111", "VAZ Oka"]
@@ -363,12 +399,18 @@ classes:
   land_rover__range_rover_sport:
     categories: [Land Rover Range Rover Sport]
     terms: ["Land Rover Range Rover Sport"]
+  land_rover__range_rover_velar:
+    categories: [Range Rover Velar]
+    terms: ["Range Rover Velar"]
   lexus__es:
     categories: [Lexus ES]
     terms: ["Lexus ES"]
   lexus__gs:
     categories: [Lexus GS]
     terms: ["Lexus GS"]
+  lexus__gx:
+    categories: [Lexus GX]
+    terms: ["Lexus GX"]
   lexus__is:
     categories: [Lexus IS]
     terms: ["Lexus IS"]
@@ -400,9 +442,15 @@ classes:
   mazda__cx_7:
     categories: [Mazda CX-7]
     terms: ["Mazda CX-7"]
+  mazda__cx_9:
+    categories: [Mazda CX-9]
+    terms: ["Mazda CX-9"]
   mercedes_benz__a_class:
     categories: [Mercedes-Benz A-Class]
     terms: ["Mercedes-Benz A-Class"]
+  mercedes_benz__b_class:
+    categories: [Mercedes-Benz B-Class]
+    terms: ["Mercedes-Benz B-Class"]
   mercedes_benz__c_class:
     categories: [Mercedes-Benz C-Class]
     terms: ["Mercedes-Benz C-Class"]
@@ -446,6 +494,9 @@ classes:
   mitsubishi__asx:
     categories: [Mitsubishi ASX, Mitsubishi RVR]
     terms: ["Mitsubishi ASX", "Mitsubishi RVR"]
+  mitsubishi__carisma:
+    categories: [Mitsubishi Carisma]
+    terms: ["Mitsubishi Carisma"]
   mitsubishi__galant:
     categories: [Mitsubishi Galant]
     terms: ["Mitsubishi Galant"]
@@ -491,6 +542,9 @@ classes:
   nissan__pathfinder:
     categories: [Nissan Pathfinder]
     terms: ["Nissan Pathfinder"]
+  nissan__patrol:
+    categories: [Nissan Patrol]
+    terms: ["Nissan Patrol"]
   nissan__primera:
     categories: [Nissan Primera]
     terms: ["Nissan Primera"]
@@ -539,6 +593,9 @@ classes:
   peugeot__3008:
     categories: [Peugeot 3008]
     terms: ["Peugeot 3008"]
+  peugeot__307:
+    categories: [Peugeot 307]
+    terms: ["Peugeot 307"]
   peugeot__308:
     categories: [Peugeot 308]
     terms: ["Peugeot 308"]
@@ -636,6 +693,9 @@ classes:
   suzuki__sx4:
     categories: [Suzuki SX4]
     terms: ["Suzuki SX4"]
+  suzuki__vitara:
+    categories: [Suzuki Vitara]
+    terms: ["Suzuki Vitara"]
   tesla__model_3:
     categories: [Tesla Model 3]
     terms: ["Tesla Model 3"]
@@ -648,6 +708,9 @@ classes:
   toyota__avensis:
     categories: [Toyota Avensis]
     terms: ["Toyota Avensis"]
+  toyota__c_hr:
+    categories: [Toyota C-HR]
+    terms: ["Toyota C-HR"]
   toyota__camry:
     categories: [Toyota Camry]
     terms: ["Toyota Camry"]
@@ -657,6 +720,9 @@ classes:
   toyota__highlander:
     categories: [Toyota Highlander, Toyota Kluger]
     terms: ["Toyota Highlander", "Toyota Kluger"]
+  toyota__hilux:
+    categories: [Toyota Hilux]
+    terms: ["Toyota Hilux"]
   toyota__land_cruiser:
     categories: [Toyota Land Cruiser]
     terms: ["Toyota Land Cruiser"]
@@ -684,6 +750,9 @@ classes:
   uaz__pickup:
     categories: [UAZ Pickup, UAZ-23632]
     terms: ["UAZ Pickup", "UAZ-23632"]
+  volkswagen__caddy:
+    categories: [Volkswagen Caddy]
+    terms: ["Volkswagen Caddy"]
   volkswagen__golf:
     categories: [Volkswagen Golf, VW Golf]
     terms: ["Volkswagen Golf", "VW Golf"]
@@ -723,3 +792,6 @@ classes:
   volvo__xc90:
     categories: [Volvo XC90]
     terms: ["Volvo XC90"]
+  zeekr__001:
+    categories: [Zeekr 001]
+    terms: ["Zeekr 001"]

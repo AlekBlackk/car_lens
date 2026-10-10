@@ -2,12 +2,13 @@
 #
 # model_id собирается как <слаг марки>__<слаг модели>, отдельным полем не хранится.
 # Единица приёмки — КЛАСС, а не модель (§13.2): пять платформенных групп внизу файла
-# дают пять классов на десять моделей. Итог — 236 классов на 241 модели, 51 марка.
+# дают пять классов на десять моделей. Итог — 260 классов на 265 моделей, 55 марок.
 #
 # 150 классов — каталог 0.5; ещё 42 добавлены в 0.6 из MAD-Cars (модели с ≥ 100 машин вне
 # каталога, `bench/catalog-192-preregistration.md`); ещё 16 в 0.7 (названия с ≥ 85 машин,
 # `bench/catalog-208-preregistration.md`); ещё 28 в 0.8 (названия с ≥ 60 машин,
-# `bench/catalog-236-preregistration.md`). Преемники с новым именем живут классом
+# `bench/catalog-236-preregistration.md`); ещё 24 в 0.9 (названия с ≥ 50 машин,
+# `bench/catalog-260-preregistration.md`). Преемники с новым именем живут классом
 # предшественника: K5 — в Optima, ix35 — в Tucson, M-Class — в GLE, GLK — в GLC, GLS — в GL.
 #
 # Состав набран по долям парка АВТОСТАТ (§3 дизайна `2026-08-25-m0-catalog-ru-design.md`),
@@ -78,6 +79,8 @@ brands:
       mark_2: {display: Toyota Mark II}
       prius: {display: Toyota Prius}
       auris: {display: Toyota Auris}
+      hilux: {display: Toyota Hilux}
+      c_hr: {display: Toyota C-HR}
   Lexus:
     models:
       rx: {display: Lexus RX}
@@ -86,6 +89,7 @@ brands:
       es: {display: Lexus ES}
       gs: {display: Lexus GS}
       is: {display: Lexus IS}
+      gx: {display: Lexus GX}
   Nissan:
     models:
       qashqai: {display: Nissan Qashqai}
@@ -101,6 +105,7 @@ brands:
       almera_classic: {display: Nissan Almera Classic}
       pathfinder: {display: Nissan Pathfinder}
       leaf: {display: Nissan Leaf}
+      patrol: {display: Nissan Patrol}
   Mitsubishi:
     models:
       outlander: {display: Mitsubishi Outlander}
@@ -110,18 +115,21 @@ brands:
       pajero_sport: {display: Mitsubishi Pajero Sport}
       galant: {display: Mitsubishi Galant}
       l200: {display: Mitsubishi L200}
+      carisma: {display: Mitsubishi Carisma}
   Mazda:
     models:
       "3": {display: Mazda 3}
       "6": {display: Mazda 6}
       cx5: {display: Mazda CX-5}
       cx_7: {display: Mazda CX-7}
+      cx_9: {display: Mazda CX-9}
   Honda:
     models:
       cr_v: {display: Honda CR-V}
       civic: {display: Honda Civic}
       accord: {display: Honda Accord}
       fit: {display: Honda Fit}
+      freed: {display: Honda Freed}
   Subaru:
     models:
       forester: {display: Subaru Forester}
@@ -132,6 +140,7 @@ brands:
     models:
       grand_vitara: {display: Suzuki Grand Vitara}
       sx4: {display: Suzuki SX4}
+      vitara: {display: Suzuki Vitara}
 
   # ------------------------------------------------------------------- корейские, 21
   # 18.7% парка иномарок. Kia и Hyundai держат массовый сегмент 2010-х, Daewoo —
@@ -148,6 +157,9 @@ brands:
       spectra: {display: Kia Spectra}
       carnival: {display: Kia Carnival}
       picanto: {display: Kia Picanto}
+      seltos: {display: Kia Seltos}
+      mohave: {display: Kia Mohave}
+      stinger: {display: Kia Stinger}
   Hyundai:
     models:
       solaris: {display: Hyundai Solaris}
@@ -186,6 +198,7 @@ brands:
       touareg: {display: Volkswagen Touareg}
       transporter: {display: Volkswagen Transporter}
       jetta: {display: Volkswagen Jetta}
+      caddy: {display: Volkswagen Caddy}
   Skoda:
     models:
       octavia: {display: Škoda Octavia}
@@ -222,6 +235,7 @@ brands:
       g_class: {display: Mercedes-Benz G-Class}
       gla: {display: Mercedes-Benz GLA}
       cls: {display: Mercedes-Benz CLS}
+      b_class: {display: Mercedes-Benz B-Class}
   BMW:
     models:
       "3_series": {display: BMW 3 Series}
@@ -249,6 +263,7 @@ brands:
       "100": {display: Audi 100}
       a7: {display: Audi A7}
       a8: {display: Audi A8}
+      q8: {display: Audi Q8}
 
   # ------------------------------------------------------------ французские, 11
   # Renault 6.7% парка иномарок, вровень с Nissan. Logan и Duster — одни из самых
@@ -271,10 +286,12 @@ brands:
       "308": {display: Peugeot 308}
       "408": {display: Peugeot 408}
       "3008": {display: Peugeot 3008}
+      "307": {display: Peugeot 307}
   Citroen:
     models:
       c4: {display: Citroën C4}
       berlingo: {display: Citroën Berlingo}
+      c5: {display: Citroën C5}
 
   # ------------------------------------------------------------ американские, 10
   # Chevrolet 5.0% и Ford 3.9% парка иномарок — Lacetti, Niva и Focus держат
@@ -297,6 +314,7 @@ brands:
       fusion: {display: Ford Fusion}
       explorer: {display: Ford Explorer}
       mustang: {display: Ford Mustang}
+      c_max: {display: Ford C-Max}
 
   # ---------------------------------------------------------------- китайские, 18
   # 2.65 млн машин, около 6% парка, но растут быстрее всех: каталог без них
@@ -328,6 +346,7 @@ brands:
     models:
       cs35_plus: {display: Changan CS35 Plus}
       cs55_plus: {display: Changan CS55 Plus}
+      uni_k: {display: Changan UNI-K}
   Exeed:
     models:
       txl: {display: EXEED TXL}
@@ -380,12 +399,14 @@ brands:
       range_rover_sport: {display: Land Rover Range Rover Sport}
       evoque: {display: Land Rover Range Rover Evoque}
       freelander: {display: Land Rover Freelander}
+      range_rover_velar: {display: Land Rover Range Rover Velar}
   Jeep:
     models:
       grand_cherokee: {display: Jeep Grand Cherokee}
   Infiniti:
     models:
       fx: {display: Infiniti FX}
+      qx50: {display: Infiniti QX50}
   Fiat:
     models:
       albea: {display: Fiat Albea}
@@ -406,6 +427,19 @@ brands:
   Kaiyi:
     models:
       e5: {display: Kaiyi E5}
+  # Новые марки 0.9: в российском парке не массовые, но попадаются на улице.
+  Dodge:
+    models:
+      challenger: {display: Dodge Challenger}
+  Cadillac:
+    models:
+      escalade: {display: Cadillac Escalade}
+  Jaguar:
+    models:
+      xf: {display: Jaguar XF}
+  Zeekr:
+    models:
+      "001": {display: Zeekr 001}
 
 # Платформенные группы (§13.2, §5.1 дизайна): несколько model_id, различающихся только
 # шильдиком, — один класс обучения и один слот в catalog_index.bin. Кузов, оптика и

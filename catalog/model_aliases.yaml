@@ -30,6 +30,8 @@ classes:
     needles: ["q5"]
   audi__q7:
     needles: ["q7"]
+  audi__q8:
+    needles: ["q8"]
   bmw__1_series:
     needles: ["1 series", "1er", "e81", "e82", "e87", "e88", "f20", "f21"]
   bmw__3_series:
@@ -54,10 +56,14 @@ classes:
     needles: ["x6", "x6m", "e71", "f16", "g06"]
   bmw__x7:
     needles: ["x7", "g07"]
+  cadillac__escalade:
+    needles: ["escalade"]
   changan__cs35_plus:
     needles: ["cs35 plus", "cs35plus"]
   changan__cs55_plus:
     needles: ["cs55 plus", "cs55plus"]
+  changan__uni_k:
+    needles: ["uni k", "unik"]
   chery__amulet:
     needles: ["a15", "amulet", "cowin"]
   chery__tiggo_4:
@@ -80,6 +86,8 @@ classes:
     needles: ["berlingo"]
   citroen__c4:
     needles: ["c4"]
+  citroen__c5:
+    needles: ["citroen c5"]
   daewoo__lanos:
     needles: ["lanos"]
   daewoo__matiz:
@@ -88,10 +96,14 @@ classes:
     needles: ["nexia"]
   datsun__on_do:
     needles: ["on do", "ondo"]
+  dodge__challenger:
+    needles: ["challenger"]
   exeed__txl:
     needles: ["txl"]
   fiat__albea:
     needles: ["albea", "siena"]
+  ford__c_max:
+    needles: ["c max", "cmax"]
   ford__explorer:
     needles: ["explorer"]
   ford__fiesta:
@@ -148,6 +160,8 @@ classes:
     needles: ["cr v", "crv"]
   honda__fit:
     needles: ["honda fit", "honda jazz"]
+  honda__freed:
+    needles: ["freed"]
   hyundai__accent:
     needles: ["accent", "verna"]
   hyundai__creta:
@@ -170,8 +184,12 @@ classes:
     needles: ["ix35", "tucson"]
   infiniti__fx:
     needles: ["fx"]
+  infiniti__qx50:
+    needles: ["qx50"]
   iveco__daily:
     needles: ["daily", "ivecodaily"]
+  jaguar__xf:
+    needles: ["jaguar xf"]
   jeep__grand_cherokee:
     needles: ["grand cherokee"]
   kaiyi__e5:
@@ -182,12 +200,16 @@ classes:
     needles: ["cee d", "ceed", "pro cee d", "proceed", "xceed"]
   kia__cerato:
     needles: ["cerato", "forte", "k3"]
+  kia__mohave:
+    needles: ["mohave", "borrego"]
   kia__optima:
     needles: ["k5", "magentis", "optima"]
   kia__picanto:
     needles: ["picanto"]
   kia__rio:
     needles: ["k2", "rio", "rio x", "rio x line"]
+  kia__seltos:
+    needles: ["seltos"]
   kia__sorento:
     needles: ["sorento"]
   kia__soul:
@@ -196,6 +218,8 @@ classes:
     needles: ["sephia", "spectra"]
   kia__sportage:
     needles: ["sportage"]
+  kia__stinger:
+    needles: ["stinger"]
   lada__1111:
     needles: ["1111", "vaz 1111", "oka", "ока"]
   lada__2101:
@@ -242,10 +266,14 @@ classes:
     needles: ["range rover"]
   land_rover__range_rover_sport:
     needles: ["range rover sport"]
+  land_rover__range_rover_velar:
+    needles: ["velar", "range rover velar"]
   lexus__es:
     needles: ["es", "es300h"]
   lexus__gs:
     needles: ["gs", "gs300h", "gs450h"]
+  lexus__gx:
+    needles: ["gx"]
   lexus__is:
     needles: ["lexus is", "altezza"]
   lexus__lx:
@@ -266,8 +294,12 @@ classes:
     needles: ["cx 5", "cx5"]
   mazda__cx_7:
     needles: ["cx 7", "cx7"]
+  mazda__cx_9:
+    needles: ["cx 9", "cx9"]
   mercedes_benz__a_class:
     needles: ["a class", "a klasse", "w168", "w169", "w176", "w177", "v177"]
+  mercedes_benz__b_class:
+    needles: ["b class", "b klasse", "w245", "w246", "w247"]
   mercedes_benz__c_class:
     needles: ["c class", "c klasse", "w202", "w203", "w204", "w205", "w206"]
   mercedes_benz__cla:
@@ -296,6 +328,8 @@ classes:
     needles: ["mini hatch", "mini cooper", "mini one", "r50", "r53", "r56", "f55", "f56"]
   mitsubishi__asx:
     needles: ["asx", "outlander sport", "rvr"]
+  mitsubishi__carisma:
+    needles: ["carisma"]
   mitsubishi__galant:
     needles: ["galant"]
   mitsubishi__l200:
@@ -326,6 +360,8 @@ classes:
     needles: ["note"]
   nissan__pathfinder:
     needles: ["pathfinder"]
+  nissan__patrol:
+    needles: ["patrol"]
   nissan__primera:
     needles: ["primera"]
   nissan__qashqai:
@@ -358,6 +394,8 @@ classes:
     needles: ["206"]
   peugeot__3008:
     needles: ["3008"]
+  peugeot__307:
+    needles: ["307"]
   peugeot__308:
     needles: ["308"]
   peugeot__408:
@@ -422,6 +460,8 @@ classes:
     needles: ["escudo", "grand vitara"]
   suzuki__sx4:
     needles: ["sx4"]
+  suzuki__vitara:
+    needles: ["suzuki vitara"]
   tesla__model_3:
     needles: ["tesla model 3", "model 3"]
   tesla__model_y:
@@ -430,12 +470,16 @@ classes:
     needles: ["auris"]
   toyota__avensis:
     needles: ["avensis", "corona premio"]
+  toyota__c_hr:
+    needles: ["c hr", "chr"]
   toyota__camry:
     needles: ["aurion", "camry"]
   toyota__corolla:
     needles: ["corolla", "corolla fielder", "fielder"]
   toyota__highlander:
     needles: ["highlander", "kluger"]
+  toyota__hilux:
+    needles: ["hilux"]
   toyota__land_cruiser:
     needles: ["land cruiser", "landcruiser"]
   toyota__land_cruiser_prado:
@@ -454,6 +498,8 @@ classes:
     needles: ["3163", "patriot"]
   uaz__pickup:
     needles: ["23632", "patriot pickup", "uaz 2363", "uaz pickup"]
+  volkswagen__caddy:
+    needles: ["caddy"]
   volkswagen__golf:
     needles: ["golf", "vw golf"]
   volkswagen__jetta:
@@ -480,3 +526,5 @@ classes:
     needles: ["xc70"]
   volvo__xc90:
     needles: ["xc90"]
+  zeekr__001:
+    needles: ["zeekr 001"]

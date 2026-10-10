@@ -1,0 +1,25 @@
+# 24 новых класса каталога 260 (bench/catalog-260-preregistration.md): им доборка студийных кадров autoevolution.
+kia__seltos
+land_rover__range_rover_velar
+kia__mohave
+citroen__c5
+dodge__challenger
+mazda__cx_9
+suzuki__vitara
+honda__freed
+ford__c_max
+cadillac__escalade
+mercedes_benz__b_class
+changan__uni_k
+nissan__patrol
+toyota__hilux
+kia__stinger
+mitsubishi__carisma
+jaguar__xf
+infiniti__qx50
+zeekr__001
+volkswagen__caddy
+toyota__c_hr
+audi__q8
+peugeot__307
+lexus__gx
