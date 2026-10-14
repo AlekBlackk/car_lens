@@ -64,3 +64,13 @@ Thumbs.db
 .superpowers
 docs/
 .claude/
+scratchpad/
+
+# Не публикуются, лежат только локально: рабочие отчёты замеров, манифест сбора
+# (имена авторов фото), вердикты разметки, списки ссылок MAD-Cars (CC BY-NC-SA),
+# эталон устройства (кадры из Stanford Cars, research-only).
+bench/
+provenance/
+verdicts*.csv
+catalog/external/mad_cars*.csv
+tests/fixtures/device/

@@ -229,11 +229,15 @@ def test_audited_mismatch_ловит_оставленную_утечку_и_по
 
 ВЫБОРКА = Path("bench") / "plate-leak-sample.csv"
 
+# bench/ не публикуется (см. .gitignore): тесты читают реальную выборку, если она лежит локально.
+нужна_выборка = pytest.mark.skipif(not ВЫБОРКА.exists(), reason="нет bench/plate-leak-sample.csv")
+
 
 def _выборка() -> pd.DataFrame:
     return pd.read_csv(ВЫБОРКА, dtype={"sha256": str})
 
 
+@нужна_выборка
 def test_эталон_пилота_из_настоящей_выборки() -> None:
     выборка = _выборка()
     эталон = pilot_truth(выборка)
@@ -244,6 +248,7 @@ def test_эталон_пилота_из_настоящей_выборки() -> N
     assert номер_43 in эталон.plate_ids
 
 
+@нужна_выборка
 def test_список_лиц_не_совпавший_с_выборкой_отвергается() -> None:
     выборка = _выборка()
     обрезанная = выборка[выборка["номер"] != KNOWN_FACE_LEAK_NUMBERS[0]]

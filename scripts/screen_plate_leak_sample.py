@@ -22,6 +22,8 @@ from typing import Any
 import pandas as pd
 from PIL import Image
 
+from pipeline.paths import data_root
+
 DEFAULT_MODEL = "hf.co/mradermacher/Ornith-1.5-9B-uncensored-GGUF:Q8_0"
 DEFAULT_LONG_SIDE = 1600
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -223,7 +225,7 @@ def main() -> int:
     parser.add_argument(
         "--crops-root",
         type=Path,
-        default=Path(r"\\wsl.localhost\Ubuntu-24.04\home\sadmore\carlens-data\harvest\crops"),
+        default=data_root() / "harvest" / "crops",
     )
     parser.add_argument("--out-jsonl", type=Path, default=Path("bench/screening_results.jsonl"))
     parser.add_argument("--report", type=Path, default=Path("bench/screening_report.json"))

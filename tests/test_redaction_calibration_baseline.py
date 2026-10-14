@@ -410,6 +410,8 @@ def test_budget_exhausts_after_eight_failures_without_remainder() -> None:
     assert campaign_budget_state((*batches[:7], replace(batches[7], state="sealed"))) == "available"
 
 
+# bench/ не публикуется (см. .gitignore): тест читает преррегистрацию, если она лежит локально.
+@pytest.mark.skipif(not PREREGISTRATION_MARKDOWN.exists(), reason="нет bench/ с преррегистрацией")
 def test_human_preregistration_preserves_explicit_pareto_selection_rule() -> None:
     text = PREREGISTRATION_MARKDOWN.read_text(encoding="utf-8")
     normalized = " ".join(text.split())

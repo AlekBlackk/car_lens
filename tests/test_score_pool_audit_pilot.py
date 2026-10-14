@@ -12,6 +12,9 @@ from scripts.score_pool_audit_pilot import main
 
 ВЫБОРКА = Path("bench") / "plate-leak-sample.csv"
 
+# bench/ не публикуется (см. .gitignore): тесты читают реальную выборку, если она лежит локально.
+pytestmark = pytest.mark.skipif(not ВЫБОРКА.exists(), reason="нет bench/plate-leak-sample.csv")
+
 
 def _выгрузка(путь: Path, *, пропустить: str | None = None, pending: bool = False) -> Path:
     выборка = pd.read_csv(ВЫБОРКА, dtype={"sha256": str})

@@ -172,13 +172,18 @@ def test_строгие_вердикты_дают_формат_манифест�
     assert sorted(строгие["sha256"]) == ["sha1", "sha2"]
 
 
+_ВЫБОРКА = Path(__file__).resolve().parent.parent / "bench" / "plate-leak-sample.csv"
+
+
+# bench/ не публикуется (см. .gitignore): тест читает реальную выборку, если она лежит локально.
+@pytest.mark.skipif(not _ВЫБОРКА.exists(), reason="нет bench/plate-leak-sample.csv")
 def test_настоящий_замер_2026_09_05_совпадает_с_golden_отчётом() -> None:
     """Смоук по реальным данным: `bench/plate-leak-sample.csv` уже несёт вердикты.
 
     Числа сверены с `bound_report.json` того же прогона (посчитан scipy) — не только
     юнит на выдуманных шести строках, а воспроизведение опубликованного результата.
     """
-    путь = Path(__file__).resolve().parent.parent / "bench" / "plate-leak-sample.csv"
+    путь = _ВЫБОРКА
     выборка = pd.read_csv(путь)
     отчёт = compute_bound(выборка, PopulationSizes(pool_frames=2863, accepted_frames=4386))
 

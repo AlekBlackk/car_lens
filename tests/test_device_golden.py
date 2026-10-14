@@ -20,8 +20,9 @@ import pytest
 
 @pytest.fixture(scope="module")
 def эталон() -> dict[str, Any]:
+    # Кадры эталона взяты из Stanford Cars (research-only), поэтому в git он не лежит.
     if not ЭТАЛОН.exists():
-        pytest.fail("нет tests/fixtures/device/golden.json: собери scripts.gen_device_golden")
+        pytest.skip("нет tests/fixtures/device/golden.json: собери scripts.gen_device_golden")
     документ: dict[str, Any] = json.loads(ЭТАЛОН.read_text(encoding="utf-8"))
     return документ
 
